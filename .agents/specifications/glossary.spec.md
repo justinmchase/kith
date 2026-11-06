@@ -78,6 +78,10 @@ capitals.
 - **Mailbox**: the ordered queue of messages an actor has not yet taken.
 - **Dispatcher**: the runtime that routes messages, schedules ready actors, and
   is the parallelization mechanism. It is not a declaration in the program.
+- **Uffda runtime**: the `uffda-runtime` crate: languages, patterns,
+  expressions, values. It does not schedule Kith actors.
+- **Kith runtime**: the interpreter in the `kith` binary that owns instances
+  and turns, and calls the Uffda runtime to match and evaluate.
 - **Ready**: an actor that has at least one message in its mailbox, or a
   transition actor whose work can proceed.
 

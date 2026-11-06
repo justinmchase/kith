@@ -82,10 +82,11 @@ model for the same primitives.
 ## Compilation
 
 - Kith source files MUST use the extension `.kith`.
-- Kith's grammar MUST be a Uffda language, declaring the `.kith` extension, so
-  Uffda's tools can find and parse Kith source.
-- Compiling a program MUST parse each source file with that grammar and write
-  its syntax tree according to Uffda's artifact layout.
+- Kith's grammar MUST be a Uffda language, declaring the `.kith` extension.
+- The `kith` CLI MUST parse, check, compile, and run programs as
+  [CLI](./cli.spec.md) specifies. Grammar compilation uses the Uffda CLI;
+  program execution uses the Kith runtime on top of `uffda-runtime` (see
+  [runtime](./runtime.spec.md)).
 - The runtime MUST run compiled syntax trees, not source.
 - Compiled trees are build outputs: never edited, never committed, and always
   reproducible from the source.
@@ -106,12 +107,9 @@ everything outside a machine's control. The language MUST stay checkable.
 
 ## Open questions
 
-- **Project file.** Whether Kith uses `kith.jsonc` / `kith.lock` with Uffda's
-  project shape, or Uffda's `uffda.jsonc` with a language entry. This depends
-  on Uffda's support for project files of other languages.
-- **Uffda version.** Kith will target a released Uffda. Coleslaw currently pins
-  0.9.2; Uffda is on 0.10.x. Kith SHOULD take a current Uffda and let Coleslaw
-  follow.
+- **Uffda version.** Kith will target a released Uffda from crates.io (`uffda-runtime`
+  0.10.x or later). Coleslaw currently pins 0.9.2 JSR APIs; it SHOULD follow
+  Kith's Uffda rather than the other way around.
 - **Shared machines chapter.** Components and workflows both have state
   machines. Whether their rules should be one chapter, once the two primitives
   have settled.

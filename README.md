@@ -24,5 +24,15 @@ Kith      component, workflow, actor dispatch
 Coleslaw  business applications (aggregates, managers, …)
 ```
 
-Source files will use `.kith`. The grammar will be a Uffda language. The
-executable name will be `kith`.
+Source files will use `.kith`. The grammar will be a Uffda language, compiled
+with the released `uffda` CLI and embedded via `uffda-build`. The `kith`
+binary will link `uffda-runtime` from crates.io for parse, match, and
+expression eval; components, workflows, and actor dispatch stay in Kith.
+Uffda does not need new runtime types for those primitives.
+
+```sh
+kith parse app.kith
+kith check app.kith
+kith compile app.kith
+kith run app.kith
+```

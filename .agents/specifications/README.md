@@ -24,6 +24,9 @@ primitives rather than redefining them.
 - [Workflows](./workflows.spec.md): first-class long-running work, child
   workflows, dynamic fan-out and join, streaming inputs, and clustered
   execution.
+- [Runtime](./runtime.spec.md): the split between Uffda's matcher and Kith's
+  actor interpreter, and how the `kith` binary consumes crates.io.
+- [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
 
 ## Planned chapters
 
