@@ -11,8 +11,9 @@ transitions. The dispatcher runs components and in-flight transitions as
 actors. Workflows are first-class: child workflows, dynamic fan-out and join,
 streaming inputs, and clustered execution.
 
-This repository is specifications first. There is no executable runtime yet.
 The contract lives in [`.agents/specifications/`](./.agents/specifications/README.md).
+This repository also ships a `kith` CLI that parses `.kith` source, checks it,
+and runs component programs on `uffda-runtime`.
 
 ## Stack
 
@@ -34,5 +35,5 @@ Uffda does not need new runtime types for those primitives.
 kith parse app.kith
 kith check app.kith
 kith compile app.kith
-kith run app.kith
+kith run app.kith --message '{"kind":"Ping","n":7}'
 ```

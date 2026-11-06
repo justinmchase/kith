@@ -69,6 +69,15 @@ capitals.
 
 ## Mechanism
 
+### Serial schedule (first slice)
+
+- The first executable dispatcher MUST run one ready actor at a time from a
+  FIFO ready queue.
+- Parallel execution of independent actors remains allowed by this chapter; it
+  MUST NOT be required of the first slice. The queue is the extension point.
+- Transition actors MUST NOT be required of the first slice. Turns are
+  synchronous: match, evaluate, apply field changes, enqueue sends.
+
 ### Component actors
 
 - Creating an instance creates its component actor and an empty mailbox, and

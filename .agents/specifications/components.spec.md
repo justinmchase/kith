@@ -46,18 +46,23 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes and the same sends.
-- A transition MAY send zero or more messages, change fields, change the
-  machine's state, spawn children, or spawn transition work. It MUST NOT wait
-  by blocking the dispatcher; waiting is joining or receiving a later message.
+- A transition MAY send zero or more messages, change fields, and change the
+  machine's state. It MUST NOT wait by blocking the dispatcher. The first
+  executable slice MUST NOT spawn or destroy children; declared children exist
+  for the parent's lifetime. Dynamic spawn is a [workflow](./workflows.spec.md)
+  concern.
 
 ### Routing
 
 - A send MUST name a direction: bubble, or down to a named child, or down to
-  every child.
+  every child. Routing is explicit only: there is no capture phase, and an
+  unhandled message MUST NOT bubble unless the send was `bubble`.
 - Bubble offers the message to the parent, then to that parent's parent, until
-  a transition consumes it or the root does not.
+  a transition consumes it or the root does not. An unmatched bubble at the
+  root MUST be dropped with no error.
 - Down offers the message to the named child, or to each child. It MUST NOT
-  skip a generation.
+  skip a generation. An unmatched down MUST fail that send with a diagnostic;
+  it MUST NOT be forwarded to the child's children.
 - A component MUST NOT send a message by calling another instance as a
   function.
 
@@ -66,24 +71,32 @@ capitals.
 ### Declaration
 
 A component declaration names the kind, optional fields, optional children, and
-the machine. The following sketch establishes the shape; token spelling is not
-frozen (see [overview](./overview.spec.md#open-questions)).
+the machine. This form is the declaration syntax of the first slice.
 
 ```text
-component Counter {
-  field count: (int) = 0;
-  child Display display;
-
+component Child {
   start Idle {
-    on (Increment n) {
-      count -> (add count n);
-      down display (Show count);
-    }
-    on (Query) {
-      bubble (Count count);
+    on { kind: "Ping", n: n: any } {
+      bubble { kind: "Pong", n: n };
     }
   }
 }
+
+component Parent {
+  field heard: (number) = 0;
+  child Child child;
+
+  start Idle {
+    on { kind: "Ping", n: n: any } {
+      down child { kind: "Ping", n: n };
+    }
+    on { kind: "Pong", n: n: any } {
+      heard -> n;
+    }
+  }
+}
+
+root Parent;
 ```
 
 - `component Name { ... }` declares a kind. Instances of that kind are created
@@ -95,7 +108,10 @@ component Counter {
 - `start State { ... }` is the start state. Ordinary states use
   `state Name { ... }`.
 - `on pattern { ... }` is a transition in that state. The pattern is a Uffda
-  pattern. Bindings from the match are in scope for the body.
+  pattern, including captures such as `n: n: any`. Bindings from the match are
+  in scope for the body.
+- `root Name;` names the kind of the program root. A program MUST declare
+  exactly one root, and that name MUST be a component in the same module.
 
 ### Sending
 
@@ -115,17 +131,47 @@ receiver sends a message back.
 - A matching transition consumes the message: bubble MUST NOT continue, and
   down MUST NOT be offered to further children of the same send, except that a
   down to every child is one send per child, each matched independently.
-- An unmatched message that was bubbling MUST continue to the next ancestor.
-- An unmatched message that was sent down to this instance MUST NOT be
-  forwarded to this instance's children unless a transition sends it down.
+- An unmatched message that was bubbling MUST continue to the next ancestor,
+  and MUST be dropped with no error if the root does not consume it.
+- An unmatched message that was sent down to this instance MUST fail that send
+  with a diagnostic. It MUST NOT be forwarded to this instance's children.
 
 ### Identity and lifetime
 
 - Each instance MUST have an identity unique among instances of its kind in the
   running program.
-- Creating a child is a transition's effect. Destroying a child is a
-  transition's effect. The dispatcher MUST NOT create or destroy instances
-  except as those effects.
+- Declared children MUST be created when the parent instance is created, one
+  instance per slot, in declaration order. They live as long as the parent.
+- The first slice MUST NOT spawn extra children of a declared kind. Fan-out is
+  [workflows](./workflows.spec.md).
+
+## Syntax tree
+
+The grammar MUST project source to this tagged data shape. The interpreter MUST
+accept the same shape constructed without parsing. Uffda pattern and expression
+subtrees keep Uffda's own AST kinds (`over`, `variable`, `invocation`,
+`number`, …).
+
+- `{ kind: "program", components: [Component], root: string }`
+- `{ kind: "component", name: string, fields: [Field], children: [Child], states: [State] }`
+- `{ kind: "field", name: string, pattern: Pattern, init: Expression }`
+- `{ kind: "child", component: string, name: string }`
+- `{ kind: "state", name: string, start: boolean, handlers: [Handler] }`
+- `{ kind: "handler", pattern: Pattern, body: [Statement] }`
+- `{ kind: "assign", field: string, expression: Expression }`
+- `{ kind: "bubble", message: Expression }`
+- `{ kind: "down", child: string, message: Expression }`
+- `{ kind: "downAll", message: Expression }`
+
+Exactly one state in a component MUST have `start: true`. Field `pattern` and
+`init` MAY be omitted when the field is untyped or uninitialized; a missing
+`init` is `undefined` until a transition assigns it.
+
+## Example
+
+Injecting `{ kind: "Ping", n: 7 }` at the `Parent` root MUST `down` the child,
+the child MUST `bubble` `{ kind: "Pong", n: 7 }`, and `Parent.heard` MUST
+become `7`.
 
 ## Why this design
 
@@ -142,17 +188,11 @@ receiver sends a message back.
 
 ## Open questions
 
-- **Unmatched down messages.** Whether they are an error, a diagnostic, or
-  silently dropped.
-- **Whether bubble is opt-in per message** or the default for unhandled
-  messages that originated down the tree (DOM-style).
-- **Capture.** Whether there is a downward capture phase before the target
-  handles the message, or only explicit down and bubble.
-- **Dynamic children.** Whether children are only those declared, or a
-  transition MAY spawn extra children of a declared kind (fan-out lives
-  primarily on [workflows](./workflows.spec.md)).
 - **Entity-like parts.** Whether a component MAY have unnamed owned parts that
   are not independently dispatched actors.
 - **How higher languages specialize a component** (restriction of messages,
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
+- **Goto state.** Whether a transition MAY name the next state, or the machine
+  stays in the start state until a later slice. The first slice keeps the
+  current state unless a statement sets it; no `goto` syntax yet.
