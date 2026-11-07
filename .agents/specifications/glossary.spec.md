@@ -15,8 +15,8 @@ capitals.
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
   example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `reduce`,
-  `from`, `then`, `pick`, `else`, `run`, `succeed`, `fail`, `complete`,
-  `print`).
+  `from`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
+  `complete`, `print`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -77,6 +77,8 @@ capitals.
   a pattern, computing with expressions, changing machine state, and sending
   messages or spawning work. A transition is the only behavior.
 - **Machine state**: the state the machine is in, plus the values of its fields.
+- **Goto**: a component statement (`goto Name`) that enters another declared
+  state of this instance. It is not a workflow `then`.
 
 ## Dispatch
 

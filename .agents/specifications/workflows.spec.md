@@ -131,8 +131,9 @@ it spawns a bare instance (no ports allowed).
 ### Waiting for an outside message
 
 A task or map item that does not `complete` leaves the run at that step. That
-is the callback pattern: request pickup, freeze with `World::snapshot`, later
-`World::restore` and `World::send` a confirmation into the waiting component.
+is the callback pattern: Carrier takes `Item` in `Waiting`, `goto Shipping`,
+freeze with `World::snapshot`, later `World::restore` and `World::send` a
+`Delivered` confirmation into the waiting component.
 The workflow graph has no `on`; the message is matched by the work item. The
 join set advances when that item `complete`s.
 

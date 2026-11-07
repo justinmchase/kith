@@ -130,6 +130,9 @@ export scene Main {
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `on any`
   remains valid; `else` is the spelling for a fallthrough clause.
+- `goto Name;` enters another declared state of this component. The next
+  message is matched in `Name`. An unknown name MUST fail check. Workflows
+  change step with `then` / `pick`, not `goto`.
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 
@@ -196,6 +199,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendDown", component: string | null, message: Expression }`
 - `{ kind: "complete", message: Expression }`
 - `{ kind: "print", expression: Expression }`
+- `{ kind: "goto", state: string }`
 
 Exactly one state in a component MUST have `start: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
@@ -230,6 +234,4 @@ workflow is in [workflows](./workflows.spec.md#example).
 - **How higher languages specialize a component** (restriction of messages,
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
-- **Goto state.** Components still have no `goto`. Workflows enter another
-  step with `then Name` or a `pick` clause; see [workflows](./workflows.spec.md).
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.

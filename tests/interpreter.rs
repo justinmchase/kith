@@ -277,6 +277,48 @@ fn check_requires_exactly_one_start_state() {
 }
 
 #[test]
+// req:components-009
+fn check_rejects_goto_of_an_unknown_state() {
+    let mut program = ping_program();
+    program.components[0].states[0].handlers[0]
+        .body
+        .push(Statement::Goto {
+            state: "Nope".into(),
+        });
+    let err = World::check(&program).expect_err("unknown state");
+    assert!(err.message.contains("unknown state Nope"));
+}
+
+#[test]
+// req:components-009
+fn delivered_while_waiting_is_unmatched() {
+    let program = kith::parse::parse_source(
+        r#"
+export Carrier;
+export Main;
+component Carrier {
+  start Waiting {
+    on { kind: "Item", item: any, index: number } {
+      goto Shipping;
+    }
+  }
+  state Shipping {
+    on { kind: "Delivered" } {
+      complete { kind: "Shipped" };
+    }
+  }
+}
+export scene Main { Carrier(); }
+"#,
+    )
+    .expect("parse carrier");
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "Delivered"})).unwrap();
+    let err = world.run_until_idle().expect_err("still waiting");
+    assert!(err.message.contains("unmatched"));
+}
+
+#[test]
 // req:workflows-001
 fn check_accepts_a_component_scene_root() {
     let program = scene_program(
@@ -864,7 +906,7 @@ fn confirm_deliveries(world: &mut World) {
 }
 
 #[test]
-// req:workflows-005 req:components-007
+// req:workflows-005 req:components-007 req:components-009
 fn order_workflow_waits_for_delivery_then_summarizes() {
     let mut world = World::start(order_program()).expect("start order");
     world.inject(paid_order()).unwrap();
@@ -876,6 +918,11 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     );
     assert_eq!(world.prints().len(), 2);
     assert_eq!(world.prints()[0]["kind"], json!("PickupRequested"));
+    for ship in world.children_of_kind(world.root_id(), "ShipItem") {
+        for carrier in world.children_of_kind(ship, "Carrier") {
+            assert_eq!(world.state(carrier), Some("Shipping"));
+        }
+    }
 
     confirm_deliveries(&mut world);
     world.run_until_idle().unwrap();
@@ -899,6 +946,11 @@ fn order_snapshot_restore_resumes_delivery() {
     let snap = world.snapshot().expect("snapshot");
     let mut restored = World::restore(program, &snap).expect("restore");
     assert_eq!(restored.prints().len(), 2);
+    for ship in restored.children_of_kind(restored.root_id(), "ShipItem") {
+        for carrier in restored.children_of_kind(ship, "Carrier") {
+            assert_eq!(restored.state(carrier), Some("Shipping"));
+        }
+    }
     confirm_deliveries(&mut restored);
     restored.run_until_idle().unwrap();
     assert_eq!(

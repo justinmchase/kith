@@ -15,6 +15,7 @@ verify it cite it with `req:{id}`.
 - [Ping example](./components/006-ping-example.requirement.md)
 - [Print](./components/007-print.requirement.md)
 - [Else handler](./components/008-else.requirement.md)
+- [Goto state](./components/009-goto.requirement.md)
 
 ## Scenes
 

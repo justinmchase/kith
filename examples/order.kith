@@ -37,7 +37,11 @@ component Carrier {
       item -> item;
       index -> index;
       print { kind: "PickupRequested", item: item, index: index };
+      goto Shipping;
     }
+  }
+
+  state Shipping {
     on { kind: "Delivered" } {
       complete { kind: "Shipped", item: item, index: index };
     }

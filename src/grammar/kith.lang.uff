@@ -39,7 +39,7 @@ rule Field =
 ;
 
 rule Port =
-  not "field" not "start" not "state" not "step" not "join" not "print" not "else"
+  not "field" not "start" not "state" not "step" not "join" not "print" not "else" not "goto"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -80,6 +80,11 @@ rule Print =
   -> { kind: "print", expression: e }
 ;
 
+rule Goto =
+  "goto" n:Identifier ";"
+  -> { kind: "goto", state: n }
+;
+
 rule ComponentStatement =
   | Assign
   | SendTo
@@ -87,6 +92,7 @@ rule ComponentStatement =
   | SendDown
   | Complete
   | Print
+  | Goto
 ;
 
 # A top-level Pattern is Then: it would take the handler `{` as another object.

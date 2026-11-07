@@ -85,6 +85,7 @@ impl World {
                 )));
             }
             check_ports(program, &component.ports)?;
+            check_gotos(component)?;
         }
         for workflow in &program.workflows {
             check_workflow(program, workflow)?;
@@ -872,6 +873,19 @@ impl World {
                     eprint!("{}", encode(&value)?);
                     self.prints.push(value);
                 }
+                Statement::Goto { state } => {
+                    let kind = self.instances[&id].kind.clone();
+                    let known = self
+                        .program
+                        .component(&kind)
+                        .is_some_and(|component| {
+                            component.states.iter().any(|declared| declared.name == *state)
+                        });
+                    if !known {
+                        return Err(Error::new(format!("unknown state {state}")));
+                    }
+                    self.instances.get_mut(&id).expect("actor").state = state.clone();
+                }
                 Statement::Complete { message } => {
                     let value = evaluate(message, &bindings)?;
                     {
@@ -1076,6 +1090,29 @@ fn unmatched(
         Route::Inject => Err(Error::new("unmatched injected message")),
         Route::Join => Err(Error::new(format!("no join handler on {kind}"))),
     }
+}
+
+fn check_gotos(component: &crate::ast::Component) -> Result<(), Error> {
+    let names: HashSet<_> = component
+        .states
+        .iter()
+        .map(|state| state.name.as_str())
+        .collect();
+    for state in &component.states {
+        for handler in &state.handlers {
+            for statement in &handler.body {
+                if let Statement::Goto { state: target } = statement {
+                    if !names.contains(target.as_str()) {
+                        return Err(Error::new(format!(
+                            "unknown state {target} in {}",
+                            component.name
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Error> {

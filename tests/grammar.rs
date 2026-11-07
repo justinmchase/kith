@@ -156,7 +156,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-005 req:components-008
+// req:grammar-001 req:workflows-005 req:components-008 req:components-009
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -179,5 +179,11 @@ fn order_source_parses_tasks_picks_and_map() {
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");
     assert_eq!(last.pattern["kind"], "any");
+    let carrier = program.component("Carrier").expect("Carrier");
+    assert!(carrier.states.iter().any(|state| state.name == "Shipping"));
+    assert!(matches!(
+        carrier.states[0].handlers[0].body.last(),
+        Some(kith::ast::Statement::Goto { state }) if state == "Shipping"
+    ));
     World::check(&program).expect("order checks");
 }
