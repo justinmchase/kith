@@ -76,7 +76,7 @@ the machine. This form is the declaration syntax of the first slice.
 ```text
 component Child {
   start Idle {
-    on { kind: "Ping", n: n: any } {
+    on { kind: "Ping", n: number } {
       bubble { kind: "Pong", n: n };
     }
   }
@@ -87,10 +87,10 @@ component Parent {
   child Child child;
 
   start Idle {
-    on { kind: "Ping", n: n: any } {
+    on { kind: "Ping", n: number } {
       down child { kind: "Ping", n: n };
     }
-    on { kind: "Pong", n: n: any } {
+    on { kind: "Pong", n: number } {
       heard -> n;
     }
   }
@@ -108,7 +108,7 @@ root Parent;
 - `start State { ... }` is the start state. Ordinary states use
   `state Name { ... }`.
 - `on pattern { ... }` is a transition in that state. The pattern is a Uffda
-  pattern, including captures such as `n: n: any`. Bindings from the match are
+  pattern, including object-key captures such as `{ n: number }`. Bindings from the match are
   in scope for the body.
 - `root Name;` names the kind of the program root. A program MUST declare
   exactly one root, and that name MUST be a component in the same module.

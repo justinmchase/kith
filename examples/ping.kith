@@ -1,6 +1,6 @@
 component Child {
   start Idle {
-    on { kind: "Ping", n: n: any } {
+    on { kind: "Ping", n: number } {
       bubble { kind: "Pong", n: n };
     }
   }
@@ -11,10 +11,10 @@ component Parent {
   child Child child;
 
   start Idle {
-    on { kind: "Ping", n: n: any } {
+    on { kind: "Ping", n: number } {
       down child { kind: "Ping", n: n };
     }
-    on { kind: "Pong", n: n: any } {
+    on { kind: "Pong", n: number } {
       heard -> n;
     }
   }
