@@ -46,13 +46,9 @@ component Carrier {
 
 component Summarize {
   start Idle {
-    on (shipments: any) {
-      print { kind: "Tally", total: (length shipments) };
-      complete {
-        kind: "Summary",
-        total: (length shipments),
-        shipments: shipments
-      };
+    on ({ kind: "Reduce", acc: any, item: any }) {
+      print { kind: "Tally", total: (add acc.total 1), status: item.kind };
+      complete { kind: "Summary", total: (add acc.total 1) };
     }
   }
 }
@@ -72,8 +68,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> ShipItem then Tally;
-  Tally: Summarize then succeed;
+  Fulfill: fanout items -> ShipItem reduce Summarize from { kind: "Summary", total: 0 } then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }

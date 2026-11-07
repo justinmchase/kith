@@ -4,7 +4,7 @@ use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::error::Error;
 use crate::host::{evaluate, match_message};
 use serde_json::{json, Value as Json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
@@ -22,10 +22,12 @@ struct ChildRef {
 
 struct JoinSet {
     remaining: HashSet<ActorId>,
-    results: Vec<Json>,
     total: u64,
     completed: u64,
-    single: bool,
+    acc: Json,
+    reducer: Option<String>,
+    pending: VecDeque<Json>,
+    folding: Option<ActorId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -251,10 +253,12 @@ impl World {
                     "completion": instance.completion,
                     "join": instance.join.as_ref().map(|join| json!({
                         "remaining": join.remaining.iter().map(|ActorId(id)| *id).collect::<Vec<_>>(),
-                        "results": join.results,
                         "total": join.total,
                         "completed": join.completed,
-                        "single": join.single,
+                        "acc": join.acc,
+                        "reducer": join.reducer,
+                        "pending": join.pending.iter().cloned().collect::<Vec<_>>(),
+                        "folding": join.folding.map(|ActorId(id)| id),
                     })),
                     "run": instance.run.as_ref().map(|run| json!({
                         "status": match run.status {
@@ -535,7 +539,12 @@ impl World {
                 Err(Error::new(format!("no choice matched on {}", step.name)))
             }
             StepBody::Task { component } => self.spawn_task(id, component, working),
-            StepBody::Map { items, component } => self.spawn_map(id, items, component, working),
+            StepBody::Map {
+                items,
+                component,
+                reduce,
+                init,
+            } => self.spawn_map(id, items, component, reduce, init, working),
             StepBody::Run { path } => {
                 let plan = working
                     .get(path)
@@ -553,7 +562,7 @@ impl World {
                         key: None,
                         component: kind,
                     });
-                self.arm_join(id, [child].into_iter().collect(), 1, true);
+                self.arm_join(id, [child].into_iter().collect(), 1, None, Json::Null);
                 self.start_run(child, working)
             }
         }
@@ -566,14 +575,8 @@ impl World {
         working: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
         let child = self.spawn_work(id, component)?;
-        self.arm_join(id, [child].into_iter().collect(), 1, true);
-        let mut sends = Vec::new();
-        if self.instances[&child].run.is_some() {
-            sends.extend(self.start_run(child, working)?);
-        } else {
-            sends.push((child, working, Route::Down));
-        }
-        Ok(sends)
+        self.arm_join(id, [child].into_iter().collect(), 1, None, Json::Null);
+        self.start_work(child, working)
     }
 
     fn spawn_map(
@@ -581,8 +584,11 @@ impl World {
         id: ActorId,
         items_path: &str,
         component: &str,
+        reduce: &str,
+        init: &Json,
         working: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        let acc = evaluate(init, &bindings_from(&working))?;
         let items = working
             .get(items_path)
             .and_then(Json::as_array)
@@ -600,23 +606,30 @@ impl World {
                 }),
             ));
         }
+        if children.is_empty() {
+            let next = self.current_next(id);
+            return self.advance(id, acc, next.as_ref());
+        }
         let remaining: HashSet<_> = children.iter().map(|(child, _)| *child).collect();
         let total = remaining.len() as u64;
-        self.arm_join(id, remaining, total, false);
-        if children.is_empty() {
-            self.instances.get_mut(&id).expect("actor").join = None;
-            let next = self.current_next(id);
-            return self.advance(id, json!([]), next.as_ref());
-        }
+        self.arm_join(id, remaining, total, Some(reduce.to_string()), acc);
         let mut sends = Vec::new();
         for (child, message) in children {
-            if self.instances[&child].run.is_some() {
-                sends.extend(self.start_run(child, message)?);
-            } else {
-                sends.push((child, message, Route::Down));
-            }
+            sends.extend(self.start_work(child, message)?);
         }
         Ok(sends)
+    }
+
+    fn start_work(
+        &mut self,
+        child: ActorId,
+        message: Json,
+    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        if self.instances[&child].run.is_some() {
+            self.start_run(child, message)
+        } else {
+            Ok(vec![(child, message, Route::Down)])
+        }
     }
 
     fn spawn_work(&mut self, parent: ActorId, kind: &str) -> Result<ActorId, Error> {
@@ -652,13 +665,22 @@ impl World {
         Ok(child)
     }
 
-    fn arm_join(&mut self, id: ActorId, remaining: HashSet<ActorId>, total: u64, single: bool) {
+    fn arm_join(
+        &mut self,
+        id: ActorId,
+        remaining: HashSet<ActorId>,
+        total: u64,
+        reducer: Option<String>,
+        acc: Json,
+    ) {
         self.instances.get_mut(&id).expect("actor").join = Some(JoinSet {
             remaining,
-            results: Vec::new(),
             total,
             completed: 0,
-            single,
+            acc,
+            reducer,
+            pending: VecDeque::new(),
+            folding: None,
         });
     }
 
@@ -745,10 +767,7 @@ impl World {
             return Ok(vec![]);
         };
         if self.instances[&parent].run.is_some() {
-            if let Some(joined) = self.note_complete(parent, id, output.clone()) {
-                return self.handle(parent, &joined.1, Route::Join);
-            }
-            return Ok(vec![]);
+            return self.on_work_complete(parent, id, output);
         }
         Ok(vec![(parent, output, Route::Up)])
     }
@@ -762,13 +781,9 @@ impl World {
         if self.instances[&id].run.is_some() {
             return match route {
                 Route::Join => {
-                    let output = join_output(self.instances[&id].join.as_ref(), message);
-                    if let Some(run) = self.instances.get_mut(&id).and_then(|i| i.run.as_mut()) {
-                        run.output = output.clone();
-                    }
                     let next = self.current_next(id);
                     self.instances.get_mut(&id).expect("actor").join = None;
-                    self.advance(id, output, next.as_ref())
+                    self.advance(id, message.clone(), next.as_ref())
                 }
                 Route::Inject => self.start_run(id, message.clone()),
                 Route::Up => Ok(vec![]),
@@ -871,27 +886,111 @@ impl World {
         Ok(sends)
     }
 
-    fn note_complete(
+    fn on_work_complete(
         &mut self,
         parent: ActorId,
         child: ActorId,
         payload: Json,
-    ) -> Option<(ActorId, Json, Route)> {
-        let join = self.instances.get_mut(&parent)?.join.as_mut()?;
-        if !join.remaining.remove(&child) {
-            return None;
+    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        let Some(join) = self.instances.get(&parent).and_then(|instance| instance.join.as_ref())
+        else {
+            return Ok(vec![]);
+        };
+        if join.folding == Some(child) {
+            if let Some(join) = self
+                .instances
+                .get_mut(&parent)
+                .and_then(|instance| instance.join.as_mut())
+            {
+                join.acc = payload;
+                join.folding = None;
+            }
+            return self.pump_reduce(parent);
         }
-        join.results.push(payload);
-        join.completed += 1;
-        if !join.remaining.is_empty() {
-            return None;
+        let reduce = join.reducer.is_some();
+        let removed = self
+            .instances
+            .get_mut(&parent)
+            .and_then(|instance| instance.join.as_mut())
+            .is_some_and(|join| join.remaining.remove(&child));
+        if !removed {
+            return Ok(vec![]);
         }
-        let results = Json::Array(join.results.clone());
-        Some((
-            parent,
-            json!({"kind": "Joined", "results": results}),
-            Route::Join,
-        ))
+        if let Some(join) = self
+            .instances
+            .get_mut(&parent)
+            .and_then(|instance| instance.join.as_mut())
+        {
+            join.completed += 1;
+            if reduce {
+                join.pending.push_back(payload.clone());
+            }
+        }
+        if reduce {
+            return self.pump_reduce(parent);
+        }
+        let done = self
+            .instances
+            .get(&parent)
+            .and_then(|instance| instance.join.as_ref())
+            .is_some_and(|join| join.remaining.is_empty());
+        if !done {
+            return Ok(vec![]);
+        }
+        self.instances.get_mut(&parent).expect("actor").join = None;
+        let next = self.current_next(parent);
+        self.advance(parent, payload, next.as_ref())
+    }
+
+    fn pump_reduce(
+        &mut self,
+        parent: ActorId,
+    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        let (reducer, item, acc, finished) = {
+            let join = match self
+                .instances
+                .get_mut(&parent)
+                .and_then(|instance| instance.join.as_mut())
+            {
+                Some(join) => join,
+                None => return Ok(vec![]),
+            };
+            if join.folding.is_some() {
+                return Ok(vec![]);
+            }
+            if let Some(item) = join.pending.pop_front() {
+                let reducer = join
+                    .reducer
+                    .clone()
+                    .ok_or_else(|| Error::new("map join missing reducer"))?;
+                (reducer, Some(item), join.acc.clone(), None)
+            } else if join.remaining.is_empty() {
+                (String::new(), None, Json::Null, Some(join.acc.clone()))
+            } else {
+                return Ok(vec![]);
+            }
+        };
+        if let Some(acc) = finished {
+            self.instances.get_mut(&parent).expect("actor").join = None;
+            let next = self.current_next(parent);
+            return self.advance(parent, acc, next.as_ref());
+        }
+        let child = self.spawn_work(parent, &reducer)?;
+        if let Some(join) = self
+            .instances
+            .get_mut(&parent)
+            .and_then(|instance| instance.join.as_mut())
+        {
+            join.folding = Some(child);
+        }
+        self.start_work(
+            child,
+            json!({
+                "kind": "Reduce",
+                "acc": acc,
+                "item": item.expect("pending item"),
+            }),
+        )
     }
 
     fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
@@ -927,19 +1026,6 @@ impl World {
         } else {
             Route::Inject
         }
-    }
-}
-
-fn join_output(join: Option<&JoinSet>, message: &Json) -> Json {
-    let results = message
-        .get("results")
-        .cloned()
-        .or_else(|| join.map(|join| Json::Array(join.results.clone())))
-        .unwrap_or(Json::Null);
-    let unwrap = join.is_some_and(|join| join.single);
-    match &results {
-        Json::Array(items) if unwrap && items.len() == 1 => items[0].clone(),
-        _ => results,
     }
 }
 
@@ -1019,9 +1105,18 @@ fn check_workflow(program: &Program, workflow: &Workflow) -> Result<(), Error> {
         .collect();
     for step in &workflow.steps {
         match &step.body {
-            StepBody::Task { component } | StepBody::Map { component, .. } => {
+            StepBody::Task { component } => {
                 if program.kind(component).is_none() {
                     return Err(Error::new(format!("unknown step kind {component}")));
+                }
+            }
+            StepBody::Map {
+                component, reduce, ..
+            } => {
+                for kind in [component, reduce] {
+                    if program.kind(kind).is_none() {
+                        return Err(Error::new(format!("unknown step kind {kind}")));
+                    }
                 }
             }
             StepBody::Choice { clauses } => {
@@ -1050,9 +1145,16 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
             .map(|child| child.component.as_str())
             .collect();
         for step in &workflow.steps {
-            if let StepBody::Task { component } | StepBody::Map { component, .. } = &step.body {
+            let kinds = match &step.body {
+                StepBody::Task { component } => vec![component.as_str()],
+                StepBody::Map {
+                    component, reduce, ..
+                } => vec![component.as_str(), reduce.as_str()],
+                _ => vec![],
+            };
+            for component in kinds {
                 if let Some(kind) = program.kind(component) {
-                    if !kind.ports.is_empty() && !prototypes.contains(component.as_str()) {
+                    if !kind.ports.is_empty() && !prototypes.contains(component) {
                         return Err(Error::new(format!(
                             "fanout kind {component} must not declare ports"
                         )));
@@ -1152,14 +1254,20 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
                 .unwrap_or_default();
             JoinSet {
                 remaining,
-                results: value
-                    .get("results")
-                    .and_then(Json::as_array)
-                    .cloned()
-                    .unwrap_or_default(),
                 total: value.get("total").and_then(json_u64).unwrap_or(0),
                 completed: value.get("completed").and_then(json_u64).unwrap_or(0),
-                single: value.get("single").and_then(Json::as_bool).unwrap_or(false),
+                acc: value.get("acc").cloned().unwrap_or(Json::Null),
+                reducer: value
+                    .get("reducer")
+                    .and_then(Json::as_str)
+                    .map(str::to_string),
+                pending: value
+                    .get("pending")
+                    .and_then(Json::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
+                folding: value.get("folding").and_then(json_u64).map(ActorId),
             }
         });
     let run = match entry.get("run") {

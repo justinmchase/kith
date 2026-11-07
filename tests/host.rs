@@ -47,27 +47,52 @@ fn object_pattern_matches_ping_and_rejects_pong() {
 
 #[test]
 // req:workflows-005
-fn length_of_a_captured_array_is_the_fan_in_count() {
+fn reduce_step_adds_one_to_the_accumulator() {
     let pattern = json!({
-        "kind": "variable",
-        "name": "shipments",
-        "pattern": {"kind": "any"}
+        "kind": "over",
+        "keys": {
+            "kind": {
+                "kind": "equal",
+                "value": {"kind": "value.literal", "value": "Reduce"}
+            },
+            "acc": {
+                "kind": "variable",
+                "name": "acc",
+                "pattern": {"kind": "any"}
+            },
+            "item": {
+                "kind": "variable",
+                "name": "item",
+                "pattern": {"kind": "any"}
+            }
+        },
+        "rest": null
     });
-    let message = json!([{"kind": "Shipped"}, {"kind": "Shipped"}]);
+    let message = json!({
+        "kind": "Reduce",
+        "acc": {"kind": "Summary", "total": 1.0},
+        "item": {"kind": "Shipped"}
+    });
     let bindings = match_message(&pattern, &message)
         .expect("match")
-        .expect("array should match");
-    assert_eq!(bindings.get("shipments"), Some(&message));
+        .expect("Reduce should match");
     assert_eq!(
         evaluate(
             &json!({
                 "kind": "invocation",
-                "expression": {"kind": "reference", "name": "length"},
-                "args": [{"kind": "reference", "name": "shipments"}]
+                "expression": {"kind": "reference", "name": "add"},
+                "args": [
+                    {
+                        "kind": "member",
+                        "expression": {"kind": "reference", "name": "acc"},
+                        "name": "total"
+                    },
+                    {"kind": "number", "value": 1}
+                ]
             }),
             &bindings,
         )
-        .expect("length"),
+        .expect("add"),
         json!(2.0)
     );
 }

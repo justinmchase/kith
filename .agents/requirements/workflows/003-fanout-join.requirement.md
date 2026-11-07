@@ -1,7 +1,7 @@
 ---
 id: workflows-003
-title: fanout 0, 1, or N workers joins into an array output
-spec_ref: .agents/specifications/workflows.spec.md#definitions
+title: fanout 0, 1, or N workers reduce into an accumulator
+spec_ref: .agents/specifications/workflows.spec.md#definitions; .agents/specifications/workflows.spec.md#declaration
 ---
 
 # Map fan-out and fan-in
@@ -10,14 +10,16 @@ spec_ref: .agents/specifications/workflows.spec.md#definitions
 
 Preconditions:
 
-- A workflow `start fanout items -> Worker then succeed` and a port-less
-  `Worker` component.
+- A workflow `start fanout items -> Worker reduce Count from 0 then succeed`,
+  a port-less `Worker`, and a port-less `Count` that folds
+  `{ kind: "Reduce", acc, item }` with `(add acc 1)`.
 
 Expected behavior:
 
-- Zero items MUST succeed with `[]`.
-- One or more items MUST each receive `{ kind: "Item", item, index }` and
-  appear in the succeeded array output.
+- Zero items MUST succeed with the `from` identity `0` and MUST NOT invoke
+  the reducer.
+- One or more items MUST each receive `{ kind: "Item", item, index }`. The
+  map output MUST be the count of completions, not an array of payloads.
 - Fan-out of a kind that needs ports without a prototype MUST fail check.
 
 Postconditions:

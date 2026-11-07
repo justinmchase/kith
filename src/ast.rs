@@ -65,7 +65,13 @@ pub enum StepBody {
     #[serde(rename = "task")]
     Task { component: String },
     #[serde(rename = "map")]
-    Map { items: String, component: String },
+    Map {
+        items: String,
+        component: String,
+        reduce: String,
+        #[serde(rename = "from")]
+        init: Json,
+    },
     #[serde(rename = "choice")]
     Choice { clauses: Vec<ChoiceClause> },
     #[serde(rename = "pass")]

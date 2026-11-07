@@ -26,8 +26,9 @@ capitals.
   in-flight work, status.
 - **Task**: run one component or workflow until it `complete`s. That payload
   is the step output and the next step's input.
-- **Map**: dynamic fan-out of a list path; fan-in joins completions in
-  completion order into an array output.
+- **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: each
+  completion is folded into an accumulator with the previous aggregate and
+  that one item, not collected into an array.
 
 ## Axioms
 
@@ -35,6 +36,8 @@ capitals.
 - Completing a step transitions along `then` (or a choice clause). The working
   value is the output of the step that just finished.
 - Fan-out cardinality is known only at run time, including zero and one.
+  Fan-in is a reduce: the working value after a map is the accumulator, not
+  a collection of item payloads.
 - The graph is a value. A declared `workflow Name` is sugar for a named IR.
   `run path` executes whatever graph is in the working value at `path`.
 - A run MUST be serializable as a Uffda data codec record. Restoring a
@@ -48,7 +51,9 @@ capitals.
 - A task or map kind MUST exist and MUST NOT require unfilled ports unless a
   scene prototype supplies that tree.
 - `complete V` on a work item MUST send `V` to the waiting workflow and count
-  down the join set. The last completion advances `then`.
+  down the join set. For a map, `V` MUST be folded one item at a time. The
+  last fold (or the `from` identity when the list is empty) advances `then`.
+  The join MUST NOT materialize an array of all payloads as the step output.
 - Choice matches the working value against clause patterns in order. `else`
   MUST be last if present. No match MUST fail the run.
 - Snapshot and restore MUST round-trip a run, including in-flight map items.
@@ -58,9 +63,9 @@ capitals.
 ### Declaration
 
 The normative workflow is `examples/order.kith`: validate, choose, charge,
-choose, map nested `ShipItem` workflows, then tally. Tasks `complete`; the
-graph moves with `then` / `pick`. A map item MAY wait without completing until
-the host sends a later message into that work item.
+choose, map nested `ShipItem` workflows, reduce into `Summarize`. Tasks
+`complete`; the graph moves with `then` / `pick`. A map item MAY wait without
+completing until the host sends a later message into that work item.
 
 ```kith
 workflow Order {
@@ -74,8 +79,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> ShipItem then Tally;
-  Tally: Summarize then succeed;
+  Fulfill: fanout items -> ShipItem reduce Summarize from { kind: "Summary", total: 0 } then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -87,7 +91,7 @@ workflow ShipItem {
 
 ```kith
 workflow Import {
-  start fanout items -> Worker then succeed;
+  start fanout items -> Worker reduce Count from 0 then succeed;
 }
 
 workflow Host {
@@ -99,10 +103,13 @@ workflow Host {
   unnamed). `Name: Body then Target` is a later node.
 - **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
   (Step Functions Task).
-- **map** `fanout path -> Kind` — `path` is a key on the working object.
-  Spawn one `Kind` per element with `{ kind: "Item", item, index }`. Completions
-  fan in as an array (Step Functions Map). The next step MAY aggregate that
-  array (for example `(length shipments)` in `Summarize`).
+- **map** `fanout path -> Kind reduce Reducer from Init` — `path` is a key on
+  the working object. Spawn one `Kind` per element with
+  `{ kind: "Item", item, index }` (Step Functions Map). Fan-in is a fold, not
+  an array. `Init` is the accumulator for zero items. Each completion, in
+  completion order, invokes `Reducer` once with
+  `{ kind: "Reduce", acc, item }` and the reducer's `complete` payload becomes
+  the next `acc`. Only that accumulator is retained.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
@@ -146,7 +153,7 @@ record MUST NOT be JSON.
 
 - `{ kind: "workflow", name, start, steps: [FlowStep] }`
 - `{ name, start: boolean, body: StepBody, next: Next | null }`
-- `body.kind`: `task` `{ component }`, `map` `{ items, component }`,
+- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce, from }`,
   `choice` `{ clauses: [{ pattern, step }] }`, `pass` `{ value }`,
   `run` `{ path }`, `succeed`, `fail` `{ error }`
 - `next.kind`: `goto` `{ step }`, `succeed`, `fail` `{ error }`
@@ -156,12 +163,12 @@ record MUST NOT be JSON.
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `ShipItem` / `Carrier`
 work items. After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
-MUST succeed with `{ kind: "Summary", total: 2, shipments: [...] }`.
+MUST fold each `Shipped` payload into `{ kind: "Summary", total: 2 }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
 Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
-`Worker`s and succeed with two payloads.
+`Worker`s and reduce them with `Count` to `2`.
 
 ## Why this design
 
@@ -171,6 +178,10 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
   (`send to` / `send up`). Order is a graph (`then` / `pick` / `fanout`).
 - **The graph is data.** That is what makes dynamic steps, runtime-built
   workflows, and rehydration the same interpreter.
+- **Fan-in is a reduce, not a collect.** A results array is O(n) memory and
+  forces the next step to re-walk every payload. `(acc, item) -> acc'` keeps
+  a constant-size aggregate. Collecting into a list is still possible: write
+  a reducer that concatenates, and accept the cost.
 
 ## Open questions
 
@@ -178,3 +189,4 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
   single object key.
 - Nested Map iterators that are full subgraphs, not a single kind.
 - Exactly-once after a crash versus at-least-once restore.
+- Bounded map concurrency so a pending fold queue cannot grow with n.

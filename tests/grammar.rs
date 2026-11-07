@@ -149,7 +149,8 @@ fn import_source_parses_fanout_and_join() {
     let import = program.workflow("Import").expect("Import");
     assert!(matches!(
         import.steps[0].body,
-        kith::ast::StepBody::Map { ref component, .. } if component == "Worker"
+        kith::ast::StepBody::Map { ref component, ref reduce, .. }
+            if component == "Worker" && reduce == "Count"
     ));
     World::check(&program).expect("import checks");
 }
@@ -170,7 +171,8 @@ fn order_source_parses_tasks_picks_and_map() {
         .any(|step| matches!(step.body, kith::ast::StepBody::Choice { .. })));
     assert!(order.steps.iter().any(|step| matches!(
         step.body,
-        kith::ast::StepBody::Map { ref component, .. } if component == "ShipItem"
+        kith::ast::StepBody::Map { ref component, ref reduce, .. }
+            if component == "ShipItem" && reduce == "Summarize"
     )));
     assert!(program.workflow("ShipItem").is_some());
     assert!(program.component("Summarize").is_some());

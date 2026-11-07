@@ -51,7 +51,7 @@ fn task_flow(name: &str, component: &str) -> Workflow {
     }
 }
 
-fn map_flow(name: &str, items: &str, component: &str) -> Workflow {
+fn map_flow(name: &str, items: &str, component: &str, reduce: &str) -> Workflow {
     Workflow {
         kind: "workflow".into(),
         name: name.into(),
@@ -62,6 +62,8 @@ fn map_flow(name: &str, items: &str, component: &str) -> Workflow {
             body: StepBody::Map {
                 items: items.into(),
                 component: component.into(),
+                reduce: reduce.into(),
+                init: json!({"kind": "number", "value": 0}),
             },
             next: Some(Next::Succeed {}),
         }],
@@ -640,49 +642,80 @@ fn worker() -> Component {
     }
 }
 
+fn count_reducer() -> Component {
+    Component {
+        kind: "component".into(),
+        name: "Count".into(),
+        fields: vec![],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                pattern: json!({
+                    "kind": "over",
+                    "keys": {
+                        "kind": {
+                            "kind": "equal",
+                            "value": {"kind": "value.literal", "value": "Reduce"}
+                        },
+                        "acc": {
+                            "kind": "variable",
+                            "name": "acc",
+                            "pattern": {"kind": "any"}
+                        },
+                        "item": {
+                            "kind": "variable",
+                            "name": "item",
+                            "pattern": {"kind": "any"}
+                        }
+                    },
+                    "rest": null
+                }),
+                body: vec![Statement::Complete {
+                    message: json!({
+                        "kind": "invocation",
+                        "expression": {"kind": "reference", "name": "add"},
+                        "args": [
+                            {"kind": "reference", "name": "acc"},
+                            {"kind": "number", "value": 1}
+                        ]
+                    }),
+                }],
+            }],
+        }],
+    }
+}
+
 #[test]
 // req:workflows-003
-fn fanout_zero_one_and_many_join_all() {
+fn fanout_zero_one_and_many_reduce() {
     let program = scene_program(
-        vec![map_flow("Import", "items", "Worker")],
-        vec![worker()],
+        vec![map_flow("Import", "items", "Worker", "Count")],
+        vec![worker(), count_reducer()],
         instance("Import", None, vec![]),
     );
 
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "Start", "items": []})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(world.output(world.root_id()), Some(&json!([])));
+    assert_eq!(world.output(world.root_id()), Some(&json!(0.0)));
 
     let mut world = World::start(program.clone()).expect("start");
     world
         .inject(json!({"kind": "Start", "items": ["a"]}))
         .unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world
-            .output(world.root_id())
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(world.output(world.root_id()), Some(&json!(1.0)));
 
     let mut world = World::start(program).expect("start");
     world
         .inject(json!({"kind": "Start", "items": ["a", "b", "c"]}))
         .unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world
-            .output(world.root_id())
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        3
-    );
+    assert_eq!(world.output(world.root_id()), Some(&json!(3.0)));
 }
 
 #[test]
@@ -692,8 +725,8 @@ fn fanout_of_kind_with_ports_fails_check() {
     boxed.name = "Boxed".into();
     boxed.ports.push(port("Worker", "inner"));
     let program = scene_program(
-        vec![map_flow("Import", "items", "Boxed")],
-        vec![worker(), boxed],
+        vec![map_flow("Import", "items", "Boxed", "Count")],
+        vec![worker(), boxed, count_reducer()],
         instance("Import", None, vec![]),
     );
     let err = World::check(&program).expect_err("ports");
@@ -849,7 +882,7 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     let output = world.output(world.root_id()).unwrap();
     assert_eq!(output["kind"], json!("Summary"));
     assert_eq!(output["total"], json!(2.0));
-    assert_eq!(output["shipments"].as_array().unwrap().len(), 2);
+    assert!(output.get("shipments").is_none());
     assert!(world
         .prints()
         .iter()

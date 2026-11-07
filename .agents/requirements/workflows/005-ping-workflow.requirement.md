@@ -17,7 +17,8 @@ Expected behavior:
 - Injecting a paid order with two items MUST accept and charge, then wait on
   two `ShipItem` workflows. Each Carrier MUST `print` a pickup request.
 - `World::send` of `{ kind: "Delivered" }` to each Carrier MUST complete
-  those items. `Summarize` MUST succeed with `{ kind: "Summary", total: 2 }`.
+  those items. `Summarize` MUST fold each shipment and succeed with
+  `{ kind: "Summary", total: 2 }`.
 - Snapshot after pickup and restore MUST still accept those confirmations.
 - Injecting `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
