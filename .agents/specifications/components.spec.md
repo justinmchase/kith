@@ -80,15 +80,36 @@ capitals.
 A component declaration names the kind, optional fields, optional ports, and
 the machine. A scene constructs instances and fills ports.
 
-The normative ping program is a [workflow](./workflows.spec.md#declaration)
-task of `Child`. Components stay local machines:
+The normative ping program is a parent/child machine. `Ping` owns `Child` by
+port; they talk with `send to` and `send up`. Workflows are a different
+primitive ([workflows](./workflows.spec.md)).
 
 ```kith
 component Child {
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      complete { kind: "Pong", n: n };
+      send up { kind: "Pong", n: n };
     }
+  }
+}
+
+component Ping {
+  field heard: number = 0;
+  Child child;
+
+  start Idle {
+    on ({ kind: "Ping", n: number }) {
+      send to child { kind: "Ping", n: n };
+    }
+    on ({ kind: "Pong", n: number }) {
+      heard -> n;
+    }
+  }
+}
+
+export scene Main {
+  Ping() {
+    child = Child();
   }
 }
 ```
@@ -174,9 +195,9 @@ MUST be `null` when the send is `send down any`.
 
 ## Example
 
-Injecting `{ kind: "Ping", n: 7 }` at the `Ping` workflow MUST run task
-`Child`, which MUST `complete` `{ kind: "Pong", n: 7 }`, and the run MUST
-succeed with that payload. See [workflows](./workflows.spec.md#example).
+Injecting `{ kind: "Ping", n: 7 }` at `Ping` MUST `send to child`, Child MUST
+`send up` `{ kind: "Pong", n: 7 }`, and `Ping.heard` MUST be `7`. The Order
+workflow is in [workflows](./workflows.spec.md#example).
 
 ## Why this design
 

@@ -127,7 +127,7 @@ rule ChoiceClause =
     -> { pattern: { kind: "any" }, step: n }
   )
   | (
-    p:Pattern "-" ">" n:Identifier ";"
+    "(" p:Pattern ")" "-" ">" n:Identifier ";"
     -> { pattern: p, step: n }
   )
 ;

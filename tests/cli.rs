@@ -88,8 +88,7 @@ fn parse_check_compile_and_run_ping() {
         "run must print a data codec record, not JSON"
     );
     let fields = decode(&stdout).expect("run codec");
-    assert_eq!(fields["kind"], json!("Pong"));
-    assert_eq!(fields["n"], json!(7.0));
+    assert_eq!(fields["heard"], json!(7.0));
 }
 
 #[test]
@@ -113,8 +112,23 @@ fn parse_does_not_resolve_imports_but_check_does() {
     let ran = run(&["run", uses, "--message", r#"{"kind":"Ping","n":7}"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
-    assert_eq!(fields["kind"], json!("Pong"));
-    assert_eq!(fields["n"], json!(7.0));
+    assert_eq!(fields["heard"], json!(7.0));
+}
+
+#[test]
+// req:workflows-005
+fn run_order_workflow_ships_line_items() {
+    let order = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/order.kith");
+    let ran = run(&[
+        "run",
+        order.to_str().unwrap(),
+        "--message",
+        r#"{"kind":"Order","orderId":"o-1","items":["sku-a","sku-b"],"card":"ok"}"#,
+    ]);
+    assert!(ran.status.success(), "{}", stderr(&ran));
+    let output = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
+    assert_eq!(output.as_array().unwrap().len(), 2);
+    assert_eq!(output[0]["kind"], json!("Shipped"));
 }
 
 fn stderr(output: &std::process::Output) -> String {

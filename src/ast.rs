@@ -286,24 +286,54 @@ pub fn ping_program() -> Program {
                         "kind": "handler",
                         "pattern": ping_pattern("Ping"),
                         "body": [{
-                            "kind": "complete",
+                            "kind": "sendUp",
                             "message": ping_object("Pong")
                         }]
                     }]
                 }]
+            },
+            {
+                "kind": "component",
+                "name": "Ping",
+                "fields": [{
+                    "kind": "field",
+                    "name": "heard",
+                    "pattern": {"kind": "type", "type": "number"},
+                    "init": {"kind": "number", "value": 0}
+                }],
+                "ports": [{
+                    "kind": "port",
+                    "component": "Child",
+                    "name": "child"
+                }],
+                "states": [{
+                    "kind": "state",
+                    "name": "Idle",
+                    "start": true,
+                    "handlers": [
+                        {
+                            "kind": "handler",
+                            "pattern": ping_pattern("Ping"),
+                            "body": [{
+                                "kind": "sendTo",
+                                "port": "child",
+                                "message": ping_object("Ping")
+                            }]
+                        },
+                        {
+                            "kind": "handler",
+                            "pattern": ping_pattern("Pong"),
+                            "body": [{
+                                "kind": "assign",
+                                "field": "heard",
+                                "expression": {"kind": "reference", "name": "n"}
+                            }]
+                        }
+                    ]
+                }]
             }
         ],
-        "workflows": [{
-            "kind": "workflow",
-            "name": "Ping",
-            "start": "Start",
-            "steps": [{
-                "name": "Start",
-                "start": true,
-                "body": { "kind": "task", "component": "Child" },
-                "next": { "kind": "succeed" }
-            }]
-        }],
+        "workflows": [],
         "scenes": [{
             "kind": "scene",
             "name": "Main",
@@ -311,7 +341,12 @@ pub fn ping_program() -> Program {
                 "kind": "instance",
                 "component": "Ping",
                 "key": null,
-                "children": []
+                "children": [{
+                    "kind": "instance",
+                    "component": "Child",
+                    "key": "child",
+                    "children": []
+                }]
             }
         }]
     }))

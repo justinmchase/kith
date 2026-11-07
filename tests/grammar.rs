@@ -20,23 +20,26 @@ fn ping_source_parses_to_the_component_tree() {
         .map(|component| component.name.as_str())
         .collect();
     assert!(component_names.contains(&"Child"));
-    assert!(program.workflow("Ping").is_some());
-    let ping = program.workflow("Ping").expect("Ping");
-    assert!(matches!(
-        ping.steps[0].body,
-        kith::ast::StepBody::Task { ref component } if component == "Child"
-    ));
+    assert!(component_names.contains(&"Ping"));
+    let ping = program.component("Ping").expect("Ping");
+    assert!(ping.fields.iter().any(|field| field.name == "heard"));
+    assert!(ping
+        .ports
+        .iter()
+        .any(|port| port.name == "child" && port.component == "Child"));
     let scene = program.scene("Main").expect("Main");
     assert_eq!(scene.root.component, "Ping");
     assert!(scene.root.key.is_none());
+    assert!(scene
+        .root
+        .children
+        .iter()
+        .any(|child| child.key.as_deref() == Some("child") && child.component == "Child"));
 
     let mut world = World::start(program).expect("interpreter accepts parsed tree");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world.output(world.root_id()),
-        Some(&json!({"kind": "Pong", "n": 7.0}))
-    );
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
 
 #[test]
@@ -46,7 +49,6 @@ fn mixed_unnamed_child_and_send_down_kind_parse() {
 export Child;
 export Other;
 export Parent;
-export Wrap;
 export Main;
 
 component Child {
@@ -81,16 +83,10 @@ component Parent {
   }
 }
 
-workflow Wrap {
-  start Parent then succeed;
-}
-
 export scene Main {
-  Wrap() {
-    Parent() {
-      child = Child();
-      Other();
-    }
+  Parent() {
+    child = Child();
+    Other();
   }
 }
 "#;
@@ -106,10 +102,9 @@ export scene Main {
         }
         other => panic!("expected sendDown Child, got {other:?}"),
     }
-    let wrap = program.scene("Main").expect("Main").root.children.clone();
-    assert_eq!(wrap[0].component, "Parent");
-    assert_eq!(wrap[0].children[0].key.as_deref(), Some("child"));
-    assert_eq!(wrap[0].children[1].key, None);
+    let children = &program.scene("Main").expect("Main").root.children;
+    assert_eq!(children[0].key.as_deref(), Some("child"));
+    assert_eq!(children[1].key, None);
 }
 
 #[test]
@@ -128,10 +123,7 @@ fn import_list_parses_and_relative_files_resolve() {
     let mut world = World::start(program).expect("start imported child");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world.output(world.root_id()),
-        Some(&json!({"kind": "Pong", "n": 7.0}))
-    );
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 
     let dir = std::env::temp_dir().join(format!("kith-import-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -160,4 +152,25 @@ fn import_source_parses_fanout_and_join() {
         kith::ast::StepBody::Map { ref component, .. } if component == "Worker"
     ));
     World::check(&program).expect("import checks");
+}
+
+#[test]
+// req:grammar-001 req:workflows-005
+fn order_source_parses_tasks_picks_and_map() {
+    let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
+    let order = program.workflow("Order").expect("Order");
+    assert!(order.steps.iter().any(|step| step.start
+        && matches!(
+            step.body,
+            kith::ast::StepBody::Task { ref component } if component == "ValidateOrder"
+        )));
+    assert!(order
+        .steps
+        .iter()
+        .any(|step| matches!(step.body, kith::ast::StepBody::Choice { .. })));
+    assert!(order.steps.iter().any(|step| matches!(
+        step.body,
+        kith::ast::StepBody::Map { ref component, .. } if component == "ShipItem"
+    )));
+    World::check(&program).expect("order checks");
 }

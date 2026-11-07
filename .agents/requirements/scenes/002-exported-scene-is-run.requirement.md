@@ -14,8 +14,7 @@ Preconditions:
 
 Expected behavior:
 
-- `World::start` and `kith run` MUST construct the unique exported scene,
-  whose root MUST be a workflow.
+- `World::start` and `kith run` MUST construct the unique exported scene.
 - A program that exports no scene MUST be rejected.
 - A program that exports more than one scene MUST be rejected.
 

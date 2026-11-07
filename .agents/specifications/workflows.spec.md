@@ -1,12 +1,14 @@
 # Workflows
 
-This chapter defines workflows as a **flow graph**, in the same family as
-Amazon States Language (Task, Map, Choice, Pass, Succeed, Fail), not as a
-second component state machine. Source is Kith syntax. The graph is data: it
-MAY be declared, built at run time, snapshotted, and rehydrated. Terms are
-defined in the [glossary](./glossary.spec.md). Components and `complete` are
-defined in [components](./components.spec.md). The scene still names which
-graph the world runs ([scenes](./scenes.spec.md)).
+This chapter defines workflows as a **flow graph** in the same family as
+[AWS Step Functions](https://docs.aws.amazon.com/step-functions/) (Task, Map,
+Choice, Pass, Succeed, Fail — Amazon States Language's verbs, not its JSON).
+Source is Kith syntax. The graph is data: it MAY be declared, built at run
+time, snapshotted, and rehydrated. Terms are defined in the
+[glossary](./glossary.spec.md). Components and `complete` are defined in
+[components](./components.spec.md). A scene MAY run a workflow or a
+component ([scenes](./scenes.spec.md)). The parent/child machine example is
+[Ping](./components.spec.md#declaration).
 
 ## Conventions
 
@@ -40,8 +42,8 @@ capitals.
 
 ## Constraints
 
-- The unique exported scene's root MUST be a workflow. `kith run` and
-  `World::start` run that graph.
+- A scene root MAY be a workflow or a component. `kith run` and `World::start`
+  run that instance. When the root is a workflow, inject starts the run.
 - A workflow MUST have exactly one `start` step.
 - A task or map kind MUST exist and MUST NOT require unfilled ports unless a
   scene prototype supplies that tree.
@@ -55,21 +57,25 @@ capitals.
 
 ### Declaration
 
+The normative workflow is `examples/order.kith`: validate, choose, charge,
+choose, map-ship. Tasks are components that `complete`; the graph moves with
+`then` / `pick`.
+
 ```kith
-component Child {
-  start Idle {
-    on ({ kind: "Ping", n: number }) {
-      complete { kind: "Pong", n: n };
-    }
-  }
-}
-
-workflow Ping {
-  start Child then succeed;
-}
-
-export scene Main {
-  Ping();
+workflow Order {
+  start Validate: ValidateOrder then Stock;
+  Stock: pick {
+    ({ kind: "Accepted" }) -> Pay;
+    else -> Reject;
+  };
+  Pay: ChargeCard then Paid;
+  Paid: pick {
+    ({ kind: "Paid" }) -> Fulfill;
+    else -> Decline;
+  };
+  Fulfill: fanout items -> ShipItem then succeed;
+  Reject: fail "invalid order";
+  Decline: fail "payment declined";
 }
 ```
 
@@ -81,29 +87,21 @@ workflow Import {
 workflow Host {
   start run plan then succeed;
 }
-
-workflow Checkout {
-  start Validate: ValidateOrder then Decide;
-  Decide: pick {
-    { ok: true } -> Pay;
-    else -> Reject;
-  };
-  Pay: ChargeCard then succeed;
-  Reject: fail "invalid";
-}
 ```
 
 - `start Body then Target` is the entry node (implicit name `Start` when
   unnamed). `Name: Body then Target` is a later node.
-- **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`.
+- **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
+  (Step Functions Task).
 - **map** `fanout path -> Kind` — `path` is a key on the working object.
   Spawn one `Kind` per element with `{ kind: "Item", item, index }`. Output is
-  the array of payloads.
-- **choice** `pick { Pattern -> Name; else -> Name; }` — like ASL Choice.
-- **pass** `pass Expression` — replace the working value (ASL Pass).
+  the array of payloads (Step Functions Map).
+- **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
+  Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
+- **pass** `pass Expression` — replace the working value (Pass).
 - **run** `run path` — execute the workflow IR at that key (dynamic graph).
-- **succeed** / **fail Expression** — terminal (ASL Succeed / Fail).
-- `then Name` | `then succeed` | `then fail E` is ASL `Next` / `End`.
+- **succeed** / **fail Expression** — terminal (Succeed / Fail).
+- `then Name` | `then succeed` | `then fail E` is Next / End.
 
 Scene children under a workflow are **prototypes**, not live children. A task
 or map that names that kind clones the prototype tree (ports filled). Otherwise
@@ -112,7 +110,8 @@ it spawns a bare instance (no ports allowed).
 ### Working value
 
 - Inject at the root sets the working value and enters `start`.
-- A step's output becomes the next step's input (ASL default ResultPath `$`).
+- A step's output becomes the next step's input (Step Functions default
+  ResultPath `$`).
 - The run's output is the working value at succeed. `kith run` prints it.
 
 ### Dynamic graphs
@@ -139,24 +138,27 @@ record MUST NOT be JSON.
 
 ## Example
 
-Inject `{ kind: "Ping", n: 7 }` at `Ping` MUST run task `Child` and succeed
-with `{ kind: "Pong", n: 7 }`.
+Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
+at `Order` MUST accept, charge, map two `ShipItem`s, and succeed with two
+`Shipped` payloads.
+
+Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
 Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
 `Worker`s and succeed with two payloads.
 
 ## Why this design
 
-- **ASL's graph, Kith's syntax.** Task / Map / Choice / Pass / Succeed / Fail
-  are the right verbs. XML/JSON is not.
-- **Components stay machines; workflows stay flows.** `on` is how a task
-  finishes. `then` is how the application moves.
+- **Step Functions' graph, Kith's syntax.** Task / Map / Choice / Pass /
+  Succeed / Fail are the right verbs. JSON state machines are not.
+- **Components stay machines; workflows stay flows.** Ping is has-a
+  (`send to` / `send up`). Order is a graph (`then` / `pick` / `fanout`).
 - **The graph is data.** That is what makes dynamic steps, runtime-built
   workflows, and rehydration the same interpreter.
 
 ## Open questions
 
-- Parallel (ASL Parallel), Wait/timers, Retry/Catch, JSONPath InputPath /
-  ResultPath beyond a single object key.
+- Parallel, Wait/timers, Retry/Catch, JSONPath InputPath / ResultPath beyond a
+  single object key.
 - Nested Map iterators that are full subgraphs, not a single kind.
 - Exactly-once after a crash versus at-least-once restore.

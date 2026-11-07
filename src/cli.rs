@@ -105,9 +105,7 @@ pub fn run_program(program: Program, message: Option<Json>) -> Result<String, Er
         world.inject(message)?;
         world.run_until_idle()?;
     }
-    let fields =
-        serde_json::to_value(world.root_fields()).map_err(|error| Error::new(error.to_string()))?;
-    encode(&fields)
+    encode(&world.result())
 }
 
 fn artifact_path(source: &Path) -> PathBuf {

@@ -32,8 +32,8 @@ capitals.
 
 ## Constraints
 
-- A scene MUST have exactly one top-level instance. That instance MUST be a
-  workflow. It is the program root when the scene is run.
+- A scene MUST have exactly one top-level instance. That instance MAY be a
+  component or a workflow. It is the program root when the scene is run.
 - `name = Kind() { ... }` MUST fill port `name` with one instance of `Kind`.
 - `Kind() { ... }` with no `name =` MUST add an unnamed child of that kind.
 - A scene MUST NOT share an instance between two parents.
@@ -46,7 +46,7 @@ capitals.
   declare.
 - `kith run` and `World::start` MUST run the unique exported scene of the
   program. A program that exports no scene, or more than one scene, MUST be
-  rejected. Check MUST fail if the scene root is not a workflow.
+  rejected. Check MUST fail if the scene root names an unknown kind.
 
 ## Mechanism
 
@@ -70,9 +70,10 @@ export scene Main {
 - `export scene Name` or `export Name;` (when `Name` is a scene) makes the
   scene the program's run target when it is the unique exported scene.
 
-The normative ping program is in [workflows](./workflows.spec.md#declaration).
-Its scene is `Main`: a `Ping` workflow root. Scene children under a workflow
-are prototypes cloned when a task or map names that kind.
+The normative ping program is in [components](./components.spec.md#declaration).
+Its scene is `Main`: a `Ping` component root with port `child` filled by
+`Child`. Scene children under a workflow are prototypes cloned when a task or
+map names that kind; see [workflows](./workflows.spec.md#declaration).
 
 ### Import and export
 

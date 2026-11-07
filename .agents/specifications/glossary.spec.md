@@ -28,10 +28,9 @@ capitals.
 - **Package**: modules published together under one name and version, imported
   as Uffda's packages are.
 - **Root**: the instance that has no parent. A running program has one root:
-  the top-level workflow of its exported scene.
+  the top-level instance of its exported scene (a component or a workflow).
 - **Scene**: a named instance tree that constructs workflow and component
-  kinds, fills ports, and may add unnamed children. The root MUST be a
-  workflow.
+  kinds, fills ports, and may add unnamed children.
 - **Port**: a typed named slot on a component or workflow for one child
   (`Kind name;`). The scene fills it. `send to name` addresses that instance.
 
@@ -94,9 +93,9 @@ capitals.
 
 ## Workflows
 
-- **Workflow**: a flow graph (task, map, choice, pass, run, succeed, fail)
-  whose unique exported scene root the world runs. It is not a component
-  state machine. The graph is a value.
+- **Workflow**: a flow graph (task, map, choice, pass, run, succeed, fail) in
+  the family of AWS Step Functions. It is not a component state machine. The
+  graph is a value. A scene MAY run a workflow as its root.
 - **Step**: one node in a workflow graph. It is not an actor. Completing it
   follows `then` (or a choice clause).
 - **Run**: one execution of a graph, serializable and restorable.

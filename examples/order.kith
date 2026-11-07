@@ -1,0 +1,55 @@
+export ValidateOrder;
+export ChargeCard;
+export ShipItem;
+export Order;
+export Main;
+
+component ValidateOrder {
+  start Idle {
+    on ({ kind: "Order", orderId: any, items: any, card: any }) {
+      complete { kind: "Accepted", orderId: orderId, items: items, card: card };
+    }
+    on (any) {
+      complete { kind: "Rejected" };
+    }
+  }
+}
+
+component ChargeCard {
+  start Idle {
+    on ({ kind: "Accepted", card: "ok", orderId: any, items: any }) {
+      complete { kind: "Paid", orderId: orderId, items: items };
+    }
+    on ({ kind: "Accepted", orderId: any, items: any, card: any }) {
+      complete { kind: "Declined", orderId: orderId };
+    }
+  }
+}
+
+component ShipItem {
+  start Idle {
+    on ({ kind: "Item", item: any, index: number }) {
+      complete { kind: "Shipped", item: item, index: index };
+    }
+  }
+}
+
+workflow Order {
+  start Validate: ValidateOrder then Stock;
+  Stock: pick {
+    ({ kind: "Accepted" }) -> Pay;
+    else -> Reject;
+  };
+  Pay: ChargeCard then Paid;
+  Paid: pick {
+    ({ kind: "Paid" }) -> Fulfill;
+    else -> Decline;
+  };
+  Fulfill: fanout items -> ShipItem then succeed;
+  Reject: fail "invalid order";
+  Decline: fail "payment declined";
+}
+
+export scene Main {
+  Order();
+}

@@ -154,23 +154,19 @@ fn object_kind(kind: &str) -> serde_json::Value {
 
 fn mixed_parent_program(handlers: Vec<Handler>) -> Program {
     scene_program(
-        vec![task_flow("Wrap", "Parent")],
+        vec![],
         vec![
             idle("Parent", vec![port("Child", "child")], handlers),
             counting("Child"),
             counting("Other"),
         ],
         instance(
-            "Wrap",
+            "Parent",
             None,
-            vec![instance(
-                "Parent",
-                None,
-                vec![
-                    instance("Child", Some("child"), vec![]),
-                    instance("Other", None, vec![]),
-                ],
-            )],
+            vec![
+                instance("Child", Some("child"), vec![]),
+                instance("Other", None, vec![]),
+            ],
         ),
     )
 }
@@ -188,7 +184,7 @@ fn parent_owns_scene_constructed_children() {
     let mut world = World::start(program).expect("mixed start");
     world.inject(json!({"kind": "Nope"})).ok();
     world.run_until_idle().ok();
-    let parent = world.children_of_kind(world.root_id(), "Parent")[0];
+    let parent = world.root_id();
     assert!(world.child(parent, "child").is_some());
     assert_eq!(world.children_of_kind(parent, "Other").len(), 1);
 }
@@ -197,23 +193,25 @@ fn parent_owns_scene_constructed_children() {
 // req:scenes-001 req:scenes-003
 fn check_rejects_unknown_kind_duplicate_missing_and_wrong_port() {
     let mut unknown = mixed_parent_program(vec![]);
-    unknown.scenes[0].root.children[0].children[0].component = "Nope".into();
+    unknown.scenes[0].root.children[0].component = "Nope".into();
     assert!(World::check(&unknown).is_err());
 
     let mut duplicate = mixed_parent_program(vec![]);
-    duplicate.scenes[0].root.children[0]
+    duplicate.scenes[0]
+        .root
         .children
         .push(instance("Child", Some("child"), vec![]));
     let err = World::check(&duplicate).expect_err("duplicate port");
     assert!(err.message.contains("duplicate port fill"));
 
     let mut missing = mixed_parent_program(vec![]);
-    missing.scenes[0].root.children[0].children.clear();
+    missing.scenes[0].root.children.clear();
     let err = World::check(&missing).expect_err("missing port");
     assert!(err.message.contains("missing port fill"));
 
     let mut extra = mixed_parent_program(vec![]);
-    extra.scenes[0].root.children[0]
+    extra.scenes[0]
+        .root
         .children
         .push(instance("Child", Some("other"), vec![]));
     let err = World::check(&extra).expect_err("unknown port");
@@ -221,7 +219,7 @@ fn check_rejects_unknown_kind_duplicate_missing_and_wrong_port() {
 
     let mut wrong = mixed_parent_program(vec![]);
     wrong.components.push(idle("OtherKind", vec![], vec![]));
-    wrong.scenes[0].root.children[0].children[0].component = "OtherKind".into();
+    wrong.scenes[0].root.children[0].component = "OtherKind".into();
     let err = World::check(&wrong).expect_err("wrong kind");
     assert!(err.message.contains("expects Child"));
 }
@@ -254,25 +252,37 @@ fn check_requires_exactly_one_start_state() {
     assert!(World::check(&none).is_err());
 
     let mut two = ping_program();
-    two.workflows[0].steps.push(FlowStep {
-        name: "Other".into(),
-        start: true,
-        body: StepBody::Succeed {},
-        next: None,
+    two.workflows.push(Workflow {
+        kind: "workflow".into(),
+        name: "Flow".into(),
+        start: "Start".into(),
+        steps: vec![
+            FlowStep {
+                name: "Start".into(),
+                start: true,
+                body: StepBody::Succeed {},
+                next: None,
+            },
+            FlowStep {
+                name: "Other".into(),
+                start: true,
+                body: StepBody::Succeed {},
+                next: None,
+            },
+        ],
     });
     assert!(World::check(&two).is_err());
 }
 
 #[test]
 // req:workflows-001
-fn check_rejects_component_scene_root() {
+fn check_accepts_a_component_scene_root() {
     let program = scene_program(
         vec![],
         vec![idle("Box", vec![], vec![])],
         instance("Box", None, vec![]),
     );
-    let err = World::check(&program).expect_err("component root");
-    assert!(err.message.contains("scene root must be a workflow"));
+    World::check(&program).expect("component root");
 }
 
 #[test]
@@ -329,26 +339,22 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
         ],
     );
     let program = scene_program(
-        vec![task_flow("Wrap", "Parent")],
+        vec![],
         vec![parent, counting("Child"), counting("Other")],
         instance(
-            "Wrap",
+            "Parent",
             None,
-            vec![instance(
-                "Parent",
-                None,
-                vec![
-                    instance("Child", Some("child"), vec![]),
-                    instance("Other", None, vec![]),
-                ],
-            )],
+            vec![
+                instance("Child", Some("child"), vec![]),
+                instance("Other", None, vec![]),
+            ],
         ),
     );
 
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "To"})).unwrap();
     world.run_until_idle().unwrap();
-    let parent_id = world.children_of_kind(world.root_id(), "Parent")[0];
+    let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
@@ -357,7 +363,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "Kind"})).unwrap();
     world.run_until_idle().unwrap();
-    let parent_id = world.children_of_kind(world.root_id(), "Parent")[0];
+    let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
@@ -366,7 +372,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "OtherKind"})).unwrap();
     world.run_until_idle().unwrap();
-    let parent_id = world.children_of_kind(world.root_id(), "Parent")[0];
+    let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(0.0)));
@@ -375,7 +381,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     let mut world = World::start(program).expect("start");
     world.inject(json!({"kind": "All"})).unwrap();
     world.run_until_idle().unwrap();
-    let parent_id = world.children_of_kind(world.root_id(), "Parent")[0];
+    let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
@@ -435,16 +441,12 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
         ],
     );
     let program = scene_program(
-        vec![task_flow("Wrap", "Parent")],
+        vec![],
         vec![parent, child],
         instance(
-            "Wrap",
+            "Parent",
             None,
-            vec![instance(
-                "Parent",
-                None,
-                vec![instance("Child", Some("child"), vec![])],
-            )],
+            vec![instance("Child", Some("child"), vec![])],
         ),
     );
 
@@ -506,28 +508,20 @@ fn first_matching_handler_consumes_the_message() {
             ],
         }],
     };
-    let program = scene_program(
-        vec![task_flow("Wrap", "One")],
-        vec![one],
-        instance("Wrap", None, vec![]),
-    );
+    let program = scene_program(vec![], vec![one], instance("One", None, vec![]));
     let mut world = World::start(program).expect("start");
     world.inject(json!("go")).unwrap();
     world.run_until_idle().unwrap();
-    let one = world.children_of_kind(world.root_id(), "One")[0];
-    assert_eq!(world.field(one, "picked"), Some(&json!(1.0)));
+    assert_eq!(world.field(world.root_id(), "picked"), Some(&json!(1.0)));
 }
 
 #[test]
-// req:components-006 req:workflows-005
+// req:components-006
 fn ping_example_sets_heard_to_seven() {
     let mut world = World::start(ping_program()).expect("start");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world.output(world.root_id()),
-        Some(&json!({"kind": "Pong", "n": 7.0}))
-    );
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
 
 #[test]
@@ -739,7 +733,22 @@ fn child_workflow_completes_to_parent() {
 #[test]
 // req:workflows-006
 fn snapshot_restore_continues_a_run() {
-    let program = ping_program();
+    let child = idle(
+        "Child",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            pattern: json!({"kind": "any"}),
+            body: vec![Statement::Complete {
+                message: object_kind("Pong"),
+            }],
+        }],
+    );
+    let program = scene_program(
+        vec![task_flow("Flow", "Child")],
+        vec![child],
+        instance("Flow", None, vec![]),
+    );
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     let snap = world.snapshot().expect("snapshot");
@@ -750,8 +759,8 @@ fn snapshot_restore_continues_a_run() {
     let mut restored = World::restore(program, &snap).expect("restore");
     restored.run_until_idle().unwrap();
     assert_eq!(
-        restored.output(restored.root_id()),
-        Some(&json!({"kind": "Pong", "n": 7.0}))
+        restored.output(restored.root_id()).unwrap()["kind"],
+        json!("Pong")
     );
 }
 
@@ -794,4 +803,36 @@ fn run_path_executes_dynamic_ir() {
         .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.output(world.root_id()).unwrap()["kind"], json!("Dyn"));
+}
+
+#[test]
+// req:workflows-005
+fn order_workflow_fulfills_accepted_paid_items() {
+    let program = kith::parse::parse_source(include_str!("../examples/order.kith"))
+        .expect("parse order.kith");
+    let mut world = World::start(program).expect("start order");
+    world
+        .inject(json!({
+            "kind": "Order",
+            "orderId": "o-1",
+            "items": ["sku-a", "sku-b"],
+            "card": "ok"
+        }))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    let output = world.output(world.root_id()).unwrap().as_array().unwrap();
+    assert_eq!(output.len(), 2);
+    assert_eq!(output[0]["kind"], json!("Shipped"));
+    assert_eq!(output[1]["kind"], json!("Shipped"));
+}
+
+#[test]
+// req:workflows-005
+fn order_workflow_rejects_an_invalid_order() {
+    let program = kith::parse::parse_source(include_str!("../examples/order.kith"))
+        .expect("parse order.kith");
+    let mut world = World::start(program).expect("start order");
+    world.inject(json!({"kind": "Nope"})).unwrap();
+    let err = world.run_until_idle().expect_err("invalid order");
+    assert!(err.message.contains("invalid order"));
 }

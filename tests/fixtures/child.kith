@@ -3,7 +3,7 @@ export Child;
 component Child {
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      complete { kind: "Pong", n: n };
+      send up { kind: "Pong", n: n };
     }
   }
 }

@@ -71,8 +71,8 @@ impl World {
             return Err(Error::new("expected a program tree"));
         }
         let scene = program.unique_exported_scene().map_err(Error::new)?;
-        if program.workflow(&scene.root.component).is_none() {
-            return Err(Error::new("scene root must be a workflow"));
+        if program.kind(&scene.root.component).is_none() {
+            return Err(Error::new(format!("unknown kind {}", scene.root.component)));
         }
         for component in &program.components {
             if component.start_state().is_none() {
@@ -184,6 +184,13 @@ impl World {
             .get(&self.root_id())
             .map(|instance| instance.fields.clone())
             .unwrap_or_default()
+    }
+
+    pub fn result(&self) -> Json {
+        if let Some(output) = self.output(self.root_id()) {
+            return output.clone();
+        }
+        serde_json::to_value(self.root_fields()).unwrap_or(Json::Null)
     }
 
     pub fn inject(&mut self, message: Json) -> Result<(), Error> {

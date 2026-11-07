@@ -5,15 +5,27 @@ export Main;
 component Child {
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      complete { kind: "Pong", n: n };
+      send up { kind: "Pong", n: n };
     }
   }
 }
 
-workflow Ping {
-  start Child then succeed;
+component Ping {
+  field heard: number = 0;
+  Child child;
+
+  start Idle {
+    on ({ kind: "Ping", n: number }) {
+      send to child { kind: "Ping", n: n };
+    }
+    on ({ kind: "Pong", n: number }) {
+      heard -> n;
+    }
+  }
 }
 
 export scene Main {
-  Ping();
+  Ping() {
+    child = Child();
+  }
 }

@@ -36,12 +36,13 @@ The executable name MUST be `kith`. The initial surface MUST be:
 - `compile` MUST be reproducible from the same sources and grammar artifacts.
 - `run` MUST execute only compiled trees: if given source, it compiles first
   (in memory or to the artifact path) and then interprets.
-- `run` MUST start the unique exported scene of the program, whose root MUST
-  be a workflow. `parse` prints one file's syntax tree as a Uffda data codec
-  record and MUST NOT resolve imports. `check` and `compile` MUST resolve
-  relative `.kith` imports before checking. `compile` MUST write a `.kith.ast`
-  data codec artifact. `run` MUST print the succeed output as a data codec
-  record. `--message` remains JSON for this slice.
+- `run` MUST start the unique exported scene of the program. `parse` prints
+  one file's syntax tree as a Uffda data codec record and MUST NOT resolve
+  imports. `check` and `compile` MUST resolve relative `.kith` imports before
+  checking. `compile` MUST write a `.kith.ast` data codec artifact. `run` MUST
+  print a data codec record of the root component's fields, or of the
+  workflow succeed output when the root is a workflow. `--message` remains
+  JSON for this slice.
 
 ## Deferred commands
 

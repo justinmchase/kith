@@ -24,8 +24,9 @@ primitives rather than redefining them.
   and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
-- [Workflows](./workflows.spec.md): the flow graph (task, map, choice, pass,
-  run, succeed, fail), dynamic graphs, and serializable runs.
+- [Workflows](./workflows.spec.md): AWS Step Functions-style flow graphs
+  (task, map, choice, pass, run, succeed, fail), dynamic graphs, and
+  serializable runs.
 - [Runtime](./runtime.spec.md): the split between Uffda's matcher and Kith's
   actor interpreter, and how the `kith` binary consumes crates.io.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
