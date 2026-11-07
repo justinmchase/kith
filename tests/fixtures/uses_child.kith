@@ -5,10 +5,11 @@ export Main;
 
 component Parent {
   field heard: number = 0;
+  Child child;
 
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      send down ({ key: "child" }) { kind: "Ping", n: n };
+      send to child { kind: "Ping", n: n };
     }
     on ({ kind: "Pong", n: number }) {
       heard -> n;
@@ -18,6 +19,6 @@ component Parent {
 
 export scene Main {
   Parent() {
-    child = Child()
+    child = Child();
   }
 }

@@ -105,7 +105,7 @@ capitals.
 
 ### Routing
 
-- The dispatcher performs send up and send down as
+- The dispatcher performs send to, send down, and send up as
   [components](./components.spec.md#routing) specifies. Routing chooses a
   mailbox; it does not run a transition.
 - Routing to a destroyed instance MUST drop the message.

@@ -42,8 +42,9 @@ primitives rather than defining their own.
   subtype another component's machine.
 - **Messages are the only communication.** Components and workflows MUST NOT
   call one another as functions to cause behavior. They send messages. A
-  message is routed up toward the root (`send up`) or down to matching
-  children (`send down`), then matched as a Uffda pattern.
+  message is routed to a named port (`send to`), down to children of a kind
+  (`send down`), or up toward the root (`send up`), then matched as a Uffda
+  pattern.
 - **State machines are the only behavior.** Choosing what happens — which
   messages to send, whether to change state, whether to spawn work — MUST be
   done by a transition of a state machine. Expressions compute values and have

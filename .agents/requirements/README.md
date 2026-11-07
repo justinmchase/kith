@@ -18,6 +18,7 @@ verify it cite it with `req:{id}`.
 
 - [Nested construction](./scenes/001-nested-construction.requirement.md)
 - [Exported scene is run](./scenes/002-exported-scene-is-run.requirement.md)
+- [Port kind fill](./scenes/003-port-kind.requirement.md)
 
 ## Dispatch
 

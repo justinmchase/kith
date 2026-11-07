@@ -23,6 +23,10 @@ fn ping_source_parses_to_the_component_tree() {
     assert!(component_names.contains(&"Parent"));
     let parent = program.component("Parent").expect("Parent");
     assert!(parent.fields.iter().any(|field| field.name == "heard"));
+    assert!(parent
+        .ports
+        .iter()
+        .any(|port| port.name == "child" && port.component == "Child"));
     let scene = program.scene("Main").expect("Main");
     assert_eq!(scene.root.component, "Parent");
     assert!(scene.root.key.is_none());
@@ -36,6 +40,77 @@ fn ping_source_parses_to_the_component_tree() {
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
+}
+
+#[test]
+// req:grammar-001 req:components-003
+fn mixed_unnamed_child_and_send_down_kind_parse() {
+    let source = r#"
+export Child;
+export Other;
+export Parent;
+export Main;
+
+component Child {
+  start Idle {
+    on (any) {}
+  }
+}
+
+component Other {
+  start Idle {
+    on (any) {}
+  }
+}
+
+component Parent {
+  Child child;
+
+  start Idle {
+    on ({ kind: "To" }) {
+      send to child { kind: "X" };
+    }
+    on ({ kind: "Kind" }) {
+      send down Child { kind: "X" };
+    }
+    on ({ kind: "All" }) {
+      send down any { kind: "X" };
+    }
+  }
+}
+
+export scene Main {
+  Parent() {
+    child = Child();
+    Other();
+  }
+}
+"#;
+    let program = parse_source(source).expect("parse mixed");
+    let parent = program.component("Parent").expect("Parent");
+    let ping = parent.states[0].handlers[0].body[0].clone();
+    let down = parent.states[0].handlers[1].body[0].clone();
+    let any = parent.states[0].handlers[2].body[0].clone();
+    match ping {
+        kith::ast::Statement::SendTo { ref port, .. } => assert_eq!(port, "child"),
+        other => panic!("expected sendTo, got {other:?}"),
+    }
+    match down {
+        kith::ast::Statement::SendDown {
+            ref component, ..
+        } => assert_eq!(component.as_deref(), Some("Child")),
+        other => panic!("expected sendDown Child, got {other:?}"),
+    }
+    match any {
+        kith::ast::Statement::SendDown {
+            ref component, ..
+        } => assert!(component.is_none()),
+        other => panic!("expected sendDown any, got {other:?}"),
+    }
+    let children = &program.scene("Main").expect("Main").root.children;
+    assert_eq!(children[0].key.as_deref(), Some("child"));
+    assert_eq!(children[1].key, None);
+    assert_eq!(children[1].component, "Other");
 }
 
 #[test]

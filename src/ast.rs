@@ -34,6 +34,8 @@ pub struct Component {
     pub name: String,
     #[serde(default)]
     pub fields: Vec<Field>,
+    #[serde(default)]
+    pub ports: Vec<Port>,
     pub states: Vec<State>,
 }
 
@@ -45,6 +47,13 @@ pub struct Field {
     pub pattern: Option<Json>,
     #[serde(default)]
     pub init: Option<Json>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Port {
+    pub kind: String,
+    pub component: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -88,8 +97,13 @@ pub enum Statement {
     Assign { field: String, expression: Json },
     #[serde(rename = "sendUp")]
     SendUp { message: Json },
+    #[serde(rename = "sendTo")]
+    SendTo { port: String, message: Json },
     #[serde(rename = "sendDown")]
-    SendDown { children: Json, message: Json },
+    SendDown {
+        component: Option<String>,
+        message: Json,
+    },
 }
 
 impl Program {
@@ -133,6 +147,10 @@ impl Component {
             None
         }
     }
+
+    pub fn port(&self, name: &str) -> Option<&Port> {
+        self.ports.iter().find(|port| port.name == name)
+    }
 }
 
 pub fn ping_program() -> Program {
@@ -149,6 +167,7 @@ pub fn ping_program() -> Program {
                 "kind": "component",
                 "name": "Child",
                 "fields": [],
+                "ports": [],
                 "states": [{
                     "kind": "state",
                     "name": "Idle",
@@ -172,6 +191,11 @@ pub fn ping_program() -> Program {
                     "pattern": {"kind": "type", "type": "number"},
                     "init": {"kind": "number", "value": 0}
                 }],
+                "ports": [{
+                    "kind": "port",
+                    "component": "Child",
+                    "name": "child"
+                }],
                 "states": [{
                     "kind": "state",
                     "name": "Idle",
@@ -181,8 +205,8 @@ pub fn ping_program() -> Program {
                             "kind": "handler",
                             "pattern": ping_pattern("Ping"),
                             "body": [{
-                                "kind": "sendDown",
-                                "children": key_pattern("child"),
+                                "kind": "sendTo",
+                                "port": "child",
                                 "message": ping_object("Ping")
                             }]
                         },
@@ -233,32 +257,6 @@ pub fn ping_pattern(kind: &str) -> serde_json::Value {
             }
         },
         "rest": null
-    })
-}
-
-pub fn key_pattern(key: &str) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "over",
-        "keys": {
-            "key": {
-                "kind": "variable",
-                "name": "key",
-                "pattern": {
-                    "kind": "equal",
-                    "value": {"kind": "value.literal", "value": key}
-                }
-            }
-        },
-        "rest": null
-    })
-}
-
-pub fn component_pattern(name: &str) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "resolve",
-        "targetKind": "reference",
-        "name": name,
-        "args": []
     })
 }
 

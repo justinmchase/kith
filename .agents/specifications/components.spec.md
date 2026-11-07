@@ -1,8 +1,8 @@
 # Components
 
-This chapter defines components: kinds with fields and state machines, and
-sending messages up or down the instance tree a [scene](./scenes.spec.md)
-built. Dispatch of those messages is defined in
+This chapter defines components: kinds with fields, typed ports, and state
+machines, and sending messages to a port, down by kind, or up the tree a
+[scene](./scenes.spec.md) built. Dispatch of those messages is defined in
 [dispatch](./dispatch.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
 
@@ -14,9 +14,10 @@ capitals.
 
 ## Definitions
 
-- **Component declaration**: the source that names a component, its fields, and
-  its state machine. It MUST NOT declare children.
+- **Component declaration**: the source that names a component, its fields, its
+  ports, and its state machine.
 - **Field**: named state a component instance holds, matched by a pattern.
+- **Port**: a typed named slot for one child instance, filled by a scene.
 
 ## Axioms
 
@@ -35,8 +36,7 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent, as the target of a send down from that
-  parent.
+  reached only through their parent: `send to` a port, or `send down` a kind.
 
 ### Behavior
 
@@ -53,20 +53,21 @@ capitals.
 
 ### Routing
 
-- A send MUST name a direction: `send up`, or `send down` with a child
-  pattern. Routing is explicit only: there is no capture phase, and an
+- A send MUST name a direction: `send to` a port, `send down` a kind, or
+  `send up`. Routing is explicit only: there is no capture phase, and an
   unhandled message MUST NOT travel up unless the send was `send up`.
 - `send up` offers the message to the parent, then to that parent's parent,
   until a transition consumes it or the root does not. An unmatched send up at
   the root MUST be dropped with no error.
-- `send down P V` offers `V` to each direct child whose [routing
-  record](./scenes.spec.md#routing-records) matches `P`. It MUST NOT skip a
-  generation. Zero matching children MUST fail that send with a diagnostic.
-  An unmatched handler at a selected child MUST fail that send with a
+- `send to name V` offers `V` to the child that fills port `name`. An unknown
+  port MUST fail that send with a diagnostic.
+- `send down Kind V` offers `V` to each direct child of kind `Kind`, including
+  a named port whose kind is `Kind`. It MUST NOT skip a generation. Zero
+  matching children MUST fail that send with a diagnostic.
+- `send down any V` offers `V` to every direct child. Zero children MUST fail.
+- An unmatched handler at a selected child MUST fail that send with a
   diagnostic; it MUST NOT be forwarded to the child's children.
 - Several matching children MUST each receive one send, independently.
-- `P` MUST match routing records `{ key, component }` only. It MUST NOT match
-  a child's fields or machine state.
 - A component MUST NOT send a message by calling another instance as a
   function.
 
@@ -74,9 +75,8 @@ capitals.
 
 ### Declaration
 
-A component declaration names the kind, optional fields, and the machine. A
-scene constructs instances. This form is the declaration syntax of the first
-slice.
+A component declaration names the kind, optional fields, optional ports, and
+the machine. A scene constructs instances and fills ports.
 
 ```kith
 export Child;
@@ -93,10 +93,11 @@ component Child {
 
 component Parent {
   field heard: number = 0;
+  Child child;
 
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      send down ({ key: "child" }) { kind: "Ping", n: n };
+      send to child { kind: "Ping", n: n };
     }
     on ({ kind: "Pong", n: number }) {
       heard -> n;
@@ -106,7 +107,7 @@ component Parent {
 
 export scene Main {
   Parent() {
-    child = Child()
+    child = Child();
   }
 }
 ```
@@ -115,6 +116,7 @@ export scene Main {
   by a scene.
 - `field name: pattern = expression` is local state. The pattern MUST match
   the field's value after every transition.
+- `Kind name;` is a port: one child of kind `Kind` bound as `name`.
 - `start State { ... }` is the start state. Ordinary states use
   `state Name { ... }`.
 - `on (pattern) { ... }` is a transition in that state. The pattern is grouped
@@ -126,17 +128,10 @@ export scene Main {
 
 ### Sending
 
+- `send to name V` sends `V` to the named port.
+- `send down Kind V` sends `V` to each direct child of that kind.
+- `send down any V` sends `V` to every direct child.
 - `send up V` sends `V` toward the parent.
-- `send down P V` sends `V` to each direct child whose routing record matches
-  `P`.
-- `P` is a Uffda pattern. A compound pattern MUST be grouped so it is not
-  Then-composed with `V`:
-  - `({ key: "child" })` matches the slot key.
-  - `({ component: "Child" })` matches the kind.
-  - a bare identifier `Child` MUST mean `{ component: "Child" }`.
-  - `any` matches every direct child.
-- A bare identifier MUST NOT be treated as a slot key. Scene names MUST NOT
-  be injected as variables in the component.
 
 A send enqueues work for the dispatcher. The sender MUST NOT observe a
 handler's result as a return value. If a later transition needs a result, the
@@ -147,21 +142,20 @@ receiver sends a message back.
 - When an instance takes a message, the runtime matches it against the `on`
   patterns of the current state, in declaration order, and takes the first
   match.
-- A matching transition consumes the message: send up MUST NOT continue, and
-  send down MUST NOT be offered to further children of the same selected
-  child. Several children selected by one `send down` are independent sends.
+- A matching transition consumes the message: send up MUST NOT continue.
+  Several children selected by one `send down` are independent sends.
 - An unmatched message that was travelling up MUST continue to the next
   ancestor, and MUST be dropped with no error if the root does not consume it.
-- An unmatched message that was sent down to this instance MUST fail that send
-  with a diagnostic. It MUST NOT be forwarded to this instance's children.
+- An unmatched message that was sent to or down to this instance MUST fail that
+  send with a diagnostic. It MUST NOT be forwarded to this instance's children.
 
 ### Identity and lifetime
 
 - Each instance MUST have an identity unique among instances of its kind in the
   running program.
 - Scene-constructed children MUST be created when the parent instance is
-  created, one instance per slot, in declaration order. They live as long as
-  the parent.
+  created, one instance per construction, in declaration order. They live as
+  long as the parent.
 - The first slice MUST NOT spawn extra children of a constructed kind. Fan-out
   is [workflows](./workflows.spec.md).
 
@@ -175,41 +169,43 @@ subtrees keep Uffda's own AST kinds (`over`, `variable`, `invocation`,
 - `{ kind: "program", imports: [Import], exports: [Export], components: [Component], scenes: [Scene] }`
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
-- `{ kind: "component", name: string, fields: [Field], states: [State] }`
+- `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
 - `{ kind: "field", name: string, pattern: Pattern, init: Expression }`
+- `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
 - `{ kind: "state", name: string, start: boolean, handlers: [Handler] }`
 - `{ kind: "handler", pattern: Pattern, body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression }`
-- `{ kind: "sendDown", children: Pattern, message: Expression }`
+- `{ kind: "sendTo", port: string, message: Expression }`
+- `{ kind: "sendDown", component: string | null, message: Expression }`
 
 Exactly one state in a component MUST have `start: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
-MUST be `null`.
+MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
+MUST be `null` when the send is `send down any`.
 
 ## Example
 
 Injecting `{ kind: "Ping", n: 7 }` at the `Parent` root of scene `Main` MUST
-send down to the child in slot `child`, the child MUST send up
-`{ kind: "Pong", n: 7 }`, and `Parent.heard` MUST become `7`.
+`send to child`, the child MUST send up `{ kind: "Pong", n: 7 }`, and
+`Parent.heard` MUST become `7`.
 
 ## Why this design
 
 - **Has-a rather than is-a.** Inheritance would let a child override a parent's
   transitions and reach into its state. That hides the message protocol and
-  breaks the tree as the only composition. Scenes and wrapping keep the
-  protocol explicit.
+  breaks the tree as the only composition. Ports plus a scene keep the protocol
+  explicit.
 - **No function calls for behavior.** A call stack is a hidden scheduling and
   error path. Messages make routing, failure, and parallelism visible to the
   dispatcher.
-- **Pattern-matched receives and send-down.** Uffda already matches values. A
-  separate switch language would duplicate it. Selecting children with the same
-  pattern language keeps key, kind, and `any` as one form.
-- **`send up` / `send down`.** One verb and two directions, instead of a
-  metaphor (`bubble`) paired with a direction (`down`).
+- **Pattern-matched receives.** Uffda already matches values. A separate switch
+  language would duplicate it.
+- **`send to` / `send down` / `send up`.** A named port is not a kind. `to`
+  names the port; `down` names the kind; `up` is the ancestor chain.
 
 ## Open questions
 

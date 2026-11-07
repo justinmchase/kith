@@ -14,7 +14,7 @@ enum Route {
 
 struct ChildRef {
     id: ActorId,
-    key: String,
+    key: Option<String>,
     component: String,
 }
 
@@ -48,6 +48,18 @@ impl World {
                     component.name
                 )));
             }
+            let mut port_names = HashSet::new();
+            for port in &component.ports {
+                if !port_names.insert(port.name.as_str()) {
+                    return Err(Error::new(format!("duplicate port {}", port.name)));
+                }
+                if program.component(&port.component).is_none() {
+                    return Err(Error::new(format!(
+                        "unknown port kind {}",
+                        port.component
+                    )));
+                }
+            }
         }
         check_instance(program, &scene.root)?;
         Ok(())
@@ -76,13 +88,27 @@ impl World {
         self.instances.get(&id)?.fields.get(name)
     }
 
-    pub fn child(&self, id: ActorId, slot: &str) -> Option<ActorId> {
+    pub fn child(&self, id: ActorId, port: &str) -> Option<ActorId> {
         self.instances
             .get(&id)?
             .children
             .iter()
-            .find(|child| child.key == slot)
+            .find(|child| child.key.as_deref() == Some(port))
             .map(|child| child.id)
+    }
+
+    pub fn children_of_kind(&self, id: ActorId, kind: &str) -> Vec<ActorId> {
+        self.instances
+            .get(&id)
+            .map(|instance| {
+                instance
+                    .children
+                    .iter()
+                    .filter(|child| child.component == kind)
+                    .map(|child| child.id)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn kind(&self, id: ActorId) -> Option<&str> {
@@ -159,14 +185,10 @@ impl World {
         );
         let mut children = Vec::new();
         for child in &node.children {
-            let key = child
-                .key
-                .clone()
-                .ok_or_else(|| Error::new("scene child is missing a slot key"))?;
             let child_id = self.spawn_instance(child, Some(id))?;
             children.push(ChildRef {
                 id: child_id,
-                key,
+                key: child.key.clone(),
                 component: child.component.clone(),
             });
         }
@@ -247,9 +269,21 @@ impl World {
                         .ok_or_else(|| Error::new("send up from root"))?;
                     sends.push((parent, value, Route::Up));
                 }
-                Statement::SendDown { children, message } => {
+                Statement::SendTo { port, message } => {
                     let value = evaluate(message, bindings)?;
-                    let selected = self.select_children(id, children)?;
+                    let child = self.instances[&id]
+                        .children
+                        .iter()
+                        .find(|child| child.key.as_deref() == Some(port.as_str()))
+                        .ok_or_else(|| Error::new(format!("unknown port {port}")))?;
+                    sends.push((child.id, value, Route::Down));
+                }
+                Statement::SendDown {
+                    component,
+                    message,
+                } => {
+                    let value = evaluate(message, bindings)?;
+                    let selected = self.select_children(id, component.as_deref());
                     if selected.is_empty() {
                         return Err(Error::new("no child matched send down"));
                     }
@@ -262,22 +296,18 @@ impl World {
         Ok(sends)
     }
 
-    fn select_children(&self, id: ActorId, pattern: &Json) -> Result<Vec<ActorId>, Error> {
-        let instance = self
-            .instances
+    fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
+        self.instances
             .get(&id)
-            .ok_or_else(|| Error::new("unknown actor"))?;
-        let mut selected = Vec::new();
-        for child in &instance.children {
-            let record = serde_json::json!({
-                "key": child.key,
-                "component": child.component,
-            });
-            if routing_matches(pattern, &record)? {
-                selected.push(child.id);
-            }
-        }
-        Ok(selected)
+            .map(|instance| {
+                instance
+                    .children
+                    .iter()
+                    .filter(|child| kind.is_none_or(|kind| child.component == kind))
+                    .map(|child| child.id)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn deliver(&mut self, to: ActorId, value: Json, route: Route) -> Result<(), Error> {
@@ -303,33 +333,37 @@ impl World {
 }
 
 fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
-    if program.component(&node.component).is_none() {
-        return Err(Error::new(format!("unknown component {}", node.component)));
-    }
-    let mut child_keys = HashSet::new();
+    let component = program
+        .component(&node.component)
+        .ok_or_else(|| Error::new(format!("unknown component {}", node.component)))?;
+    let declared: HashMap<&str, &str> = component
+        .ports
+        .iter()
+        .map(|port| (port.name.as_str(), port.component.as_str()))
+        .collect();
+    let mut filled = HashSet::new();
     for child in &node.children {
-        let key = child
-            .key
-            .as_deref()
-            .ok_or_else(|| Error::new("scene child is missing a slot key"))?;
-        if !child_keys.insert(key.to_string()) {
-            return Err(Error::new(format!("duplicate slot key {key}")));
+        if let Some(key) = child.key.as_deref() {
+            if !filled.insert(key) {
+                return Err(Error::new(format!("duplicate port fill {key}")));
+            }
+            match declared.get(key) {
+                None => return Err(Error::new(format!("unknown port {key}"))),
+                Some(kind) if *kind != child.component.as_str() => {
+                    return Err(Error::new(format!(
+                        "port {key} expects {kind} but scene filled {}",
+                        child.component
+                    )));
+                }
+                Some(_) => {}
+            }
         }
         check_instance(program, child)?;
     }
+    for port in &component.ports {
+        if !filled.contains(port.name.as_str()) {
+            return Err(Error::new(format!("missing port fill {}", port.name)));
+        }
+    }
     Ok(())
-}
-
-fn routing_matches(pattern: &Json, record: &Json) -> Result<bool, Error> {
-    if pattern.get("kind").and_then(Json::as_str) == Some("any") {
-        return Ok(true);
-    }
-    if pattern.get("kind").and_then(Json::as_str) == Some("resolve") {
-        let name = pattern
-            .get("name")
-            .and_then(Json::as_str)
-            .ok_or_else(|| Error::new("send down identifier is missing a name"))?;
-        return Ok(record.get("component").and_then(Json::as_str) == Some(name));
-    }
-    Ok(match_message(pattern, record)?.is_some())
 }

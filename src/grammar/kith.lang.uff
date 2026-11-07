@@ -38,6 +38,11 @@ rule Field =
   -> { kind: "field", name: n, pattern: p, init: e }
 ;
 
+rule Port =
+  not "field" not "start" not "state" k:Identifier n:Identifier ";"
+  -> { kind: "port", component: k, name: n }
+;
+
 rule Assign =
   n:Identifier "-" ">" e:Expression ";"
   -> { kind: "assign", field: n, expression: e }
@@ -48,22 +53,25 @@ rule SendUp =
   -> { kind: "sendUp", message: e }
 ;
 
-rule DownTarget =
-  | ("any" -> { kind: "any" })
-  | ("(" p:Pattern ")" -> p)
-  | (
-    n:Identifier
-    -> { kind: "resolve", targetKind: "reference", name: n, args: [] }
-  )
+rule SendTo =
+  "send" "to" n:Identifier e:Expression ";"
+  -> { kind: "sendTo", port: n, message: e }
 ;
 
 rule SendDown =
-  "send" "down" p:DownTarget e:Expression ";"
-  -> { kind: "sendDown", children: p, message: e }
+  | (
+    "send" "down" "any" e:Expression ";"
+    -> { kind: "sendDown", component: null, message: e }
+  )
+  | (
+    "send" "down" n:Identifier e:Expression ";"
+    -> { kind: "sendDown", component: n, message: e }
+  )
 ;
 
 rule Statement =
   | Assign
+  | SendTo
   | SendUp
   | SendDown
 ;
@@ -92,15 +100,14 @@ rule State =
 rule ComponentDeclaration =
   "component" n:Identifier "{"
     f:Field*
+    p:Port*
     s:State+
   "}"
-  -> { kind: "component", name: n, fields: f, states: s }
+  -> { kind: "component", name: n, fields: f, ports: p, states: s }
 ;
 
-rule InstanceBody = "{" c:Slot* "}" -> c;
-
-rule Slot =
-  k:Identifier "=" n:Identifier "(" ")" b:InstanceBody?
+rule NamedChild =
+  k:Identifier "=" n:Identifier "(" ")" b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
@@ -109,12 +116,29 @@ rule Slot =
   }
 ;
 
+rule UnnamedChild =
+  n:Identifier "(" ")" b:InstanceBody? ";"?
+  -> {
+    kind: "instance",
+    component: n,
+    key: null,
+    children: (coalesce b [])
+  }
+;
+
+rule ChildConstruction =
+  | NamedChild
+  | UnnamedChild
+;
+
+rule InstanceBody = "{" c:ChildConstruction* "}" -> c;
+
 rule Construction =
   n:Identifier "(" ")" b:InstanceBody?
   -> {
     kind: "instance",
     component: n,
-    key: undefined,
+    key: null,
     children: (coalesce b [])
   }
 ;

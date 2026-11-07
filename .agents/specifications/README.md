@@ -17,9 +17,10 @@ primitives rather than redefining them.
   principles, and how it sits on Uffda.
 - [Glossary](./glossary.spec.md): the vocabulary every other chapter, and the
   language's keywords, use.
-- [Components](./components.spec.md): kinds, fields, state machines, `send up`
-  / `send down`, the declaration syntax, and the syntax tree.
-- [Scenes](./scenes.spec.md): the instance tree, slot keys, routing records,
+- [Components](./components.spec.md): kinds, fields, ports, state machines,
+  `send to` / `send down` / `send up`, the declaration syntax, and the syntax
+  tree.
+- [Scenes](./scenes.spec.md): the instance tree, port fills, unnamed children,
   and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
