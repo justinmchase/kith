@@ -36,6 +36,9 @@ The executable name MUST be `kith`. The initial surface MUST be:
 - `compile` MUST be reproducible from the same sources and grammar artifacts.
 - `run` MUST execute only compiled trees: if given source, it compiles first
   (in memory or to the artifact path) and then interprets.
+- `run` MUST start the unique exported scene of the program. `parse` prints
+  one file's syntax tree and MUST NOT resolve imports. `check` and `compile`
+  MUST resolve relative `.kith` imports before checking.
 
 ## Deferred commands
 
@@ -60,8 +63,8 @@ language server.
 
 ## Open questions
 
-- **Whether `run` takes a selected root instance** (a component or workflow
-  name) or always runs the module's default export.
+- **Selecting among several exported scenes** from the CLI, if a later slice
+  allows more than one.
 - **Exit codes** aligned with Uffda (usage/execution 2, bad project 3) vs a
   Kith-specific table.
 - **Stdin / `-e` / codec vs JSON** output flags; follow Uffda where it does

@@ -1,7 +1,7 @@
 ---
 id: components-001
-title: A parent owns declared children; it does not inherit them
-spec_ref: .agents/specifications/components.spec.md#composition
+title: A parent owns scene-constructed children; it does not inherit them
+spec_ref: .agents/specifications/components.spec.md#composition; .agents/specifications/scenes.spec.md#constraints
 ---
 
 # Has-a children
@@ -10,14 +10,17 @@ spec_ref: .agents/specifications/components.spec.md#composition
 
 Preconditions:
 
-- A program declares a parent component with a `child` slot of another kind.
+- A program's exported scene constructs a parent that declares a port and
+  fills it, and MAY add unnamed children in the same collection.
 
 Expected behavior:
 
-- Constructing the parent MUST create exactly one child instance per declared
-  slot.
-- The child MUST be reachable from the parent by slot name and MUST NOT be
-  reachable as a subtype of the parent.
+- Constructing the scene MUST create exactly one child instance per nested
+  construction, named ports and unnamed children together.
+- A named port MUST be reachable with `send to` that port name.
+- An unnamed child MUST live in the parent's child collection and MUST NOT
+  require a port on the parent kind.
+- The child MUST NOT be reachable as a subtype of the parent.
 - The runtime MUST NOT copy or override the child's machine from the parent.
 
 Postconditions:

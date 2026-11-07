@@ -7,7 +7,7 @@ statements.
 
 Kith sits between [Uffda](https://github.com/justinmchase/uffda) and higher-level
 languages such as [Coleslaw](https://github.com/justinmchase/coleslaw). Uffda
-supplies grammars, patterns, and expressions. Kith supplies components,
+supplies grammars, patterns, and expressions. Kith supplies components, scenes,
 workflows, and the actor dispatcher. A language built on Kith MUST use these
 primitives rather than redefining them.
 
@@ -17,8 +17,11 @@ primitives rather than redefining them.
   principles, and how it sits on Uffda.
 - [Glossary](./glossary.spec.md): the vocabulary every other chapter, and the
   language's keywords, use.
-- [Components](./components.spec.md): has-a composition, children, state
-  machines, explicit bubble/down, the declaration syntax, and the syntax tree.
+- [Components](./components.spec.md): kinds, fields, ports, state machines,
+  `send to` / `send down` / `send up`, the declaration syntax, and the syntax
+  tree.
+- [Scenes](./scenes.spec.md): the instance tree, port fills, unnamed children,
+  and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
 - [Workflows](./workflows.spec.md): first-class long-running work, child

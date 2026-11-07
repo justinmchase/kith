@@ -14,7 +14,7 @@ capitals.
 
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
-  example `component`, `workflow`, `child`).
+  example `component`, `workflow`, `scene`, `send`, `to`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -26,8 +26,12 @@ capitals.
 - **Module**: one Kith source file.
 - **Package**: modules published together under one name and version, imported
   as Uffda's packages are.
-- **Root**: the component or workflow instance that has no parent. A running
-  program has one root.
+- **Root**: the instance that has no parent. A running program has one root:
+  the top-level instance of its exported scene.
+- **Scene**: a named instance tree that constructs component kinds, fills
+  ports, and may add unnamed children.
+- **Port**: a typed named slot on a component for one child (`Kind name;`).
+  The scene fills it. `send to name` addresses that instance.
 
 ## Uffda
 
@@ -39,9 +43,9 @@ capitals.
 
 ## Components and trees
 
-- **Component**: a named, composable unit with a state machine, optional state,
-  and optional children. A component has-a its children; it is not a subtype of
-  another component.
+- **Component**: a named, composable kind with a state machine, optional
+  fields, and optional ports. Instances of a component are constructed by a
+  scene. A component is not a subtype of another component.
 - **Instance**: one running component or workflow, with its own identity, state,
   children, and mailbox.
 - **Child**: an instance owned by another instance. Ownership is has-a.
@@ -55,10 +59,11 @@ capitals.
 - **Message**: a value sent from one instance to another, matched as a pattern
   at the receiver. Messages are the only communication that causes behavior.
 - **Send**: the act of placing a message on a route. Sending does not wait for
-  a handler.
-- **Bubble**: a route toward the parent, and then toward the root if not
-  consumed.
-- **Down**: a route toward children: a named child, or every child.
+  a handler. The keyword is `send`.
+- **To**: a route to a named port (`send to`).
+- **Up**: a route toward the parent, and then toward the root if not consumed
+  (`send up`).
+- **Down**: a route toward direct children of a kind (`send down`).
 - **Consume**: a matched transition that handles a message so the message does
   not continue on its route.
 

@@ -14,13 +14,13 @@ capitals.
 
 Kith is a runtime layer for programs whose structure is a tree of components
 and whose work is messages, state machines, and workflows. A Kith program
-declares components and workflows. The Kith runtime dispatches messages by
-matching them as Uffda patterns, runs enabled transitions, and executes
-independent actors in parallel.
+declares components, scenes, and workflows. The Kith runtime constructs the
+exported scene, dispatches messages by matching them as Uffda patterns, runs
+enabled transitions, and executes independent actors in parallel.
 
 Kith is built with Uffda: its grammar is a Uffda language, messages are matched
 by Uffda patterns, and expressions are Uffda expressions. Higher-level languages
-MAY be built on Kith. They MUST use Kith's component, workflow, and dispatch
+MAY be built on Kith. They MUST use Kith's component, scene, workflow, and dispatch
 primitives rather than defining their own.
 
 ## What Kith is not
@@ -38,12 +38,13 @@ primitives rather than defining their own.
 ## Principles
 
 - **Has-a, not is-a.** Composition is the only relationship between components.
-  A component owns children; it MUST NOT inherit, override, or subtype another
-  component's machine.
+  A scene owns the instance tree; a component MUST NOT inherit, override, or
+  subtype another component's machine.
 - **Messages are the only communication.** Components and workflows MUST NOT
   call one another as functions to cause behavior. They send messages. A
-  message is routed up toward the root (bubble) or down to children, then
-  matched as a Uffda pattern.
+  message is routed to a named port (`send to`), down to children of a kind
+  (`send down`), or up toward the root (`send up`), then matched as a Uffda
+  pattern.
 - **State machines are the only behavior.** Choosing what happens — which
   messages to send, whether to change state, whether to spawn work — MUST be
   done by a transition of a state machine. Expressions compute values and have
@@ -56,9 +57,9 @@ primitives rather than defining their own.
 - **Expressions are pure.** Uffda expressions compute values. Effects are
   explicit: sending a message, changing machine state, spawning or joining
   work.
-- **One tree per program root.** A running program is a tree of component and
-  workflow instances. Each instance has at most one parent. The tree is has-a
-  all the way down.
+- **One tree per exported scene.** A running program is the instance tree of
+  its unique exported scene. Each instance has at most one parent. The tree is
+  has-a all the way down.
 - **Scheduling is a source of variation.** The order in which independent actors
   run is not part of a program's meaning. A checker MUST be able to vary that
   order. Everything else a machine does, given the same messages in the same
@@ -69,7 +70,7 @@ primitives rather than defining their own.
 ```text
 Uffda     grammars, patterns, expressions, matching
   ↓
-Kith      component, workflow, actor dispatch
+Kith      component, scene, workflow, actor dispatch
   ↓
 Coleslaw  business applications
 ```
@@ -114,5 +115,6 @@ everything outside a machine's control. The language MUST stay checkable.
   machines. Whether their rules should be one chapter, once the two primitives
   have settled.
 - **Syntax spelling.** The first-slice declaration form is frozen in
-  [components](./components.spec.md#declaration). Later keywords MUST NOT
+  [components](./components.spec.md#declaration) and
+  [scenes](./scenes.spec.md#declaration). Later keywords MUST NOT
   silently change that form.
