@@ -1,2 +1,4 @@
 specs v1
 https://github.com/justinmchase/specs
+
+tests: tests/*.rs,src/**/*.rs

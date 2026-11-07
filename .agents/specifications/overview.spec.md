@@ -113,6 +113,6 @@ everything outside a machine's control. The language MUST stay checkable.
 - **Shared machines chapter.** Components and workflows both have state
   machines. Whether their rules should be one chapter, once the two primitives
   have settled.
-- **Syntax spelling.** Keywords, punctuation, and how children, fields, and
-  handlers are written are not frozen. The chapters state the contract;
-  sketches are illustrative until a grammar chapter exists.
+- **Syntax spelling.** The first-slice declaration form is frozen in
+  [components](./components.spec.md#declaration). Later keywords MUST NOT
+  silently change that form.

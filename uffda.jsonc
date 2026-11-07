@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "@justinmchase/uffda": "jsr:@justinmchase/uffda@^0.10.8"
+  },
+  "exports": {
+    ".": "./src/grammar/kith.lang.uff"
+  },
+  "outDir": "./bin"
+}

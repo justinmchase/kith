@@ -18,7 +18,7 @@ primitives rather than redefining them.
 - [Glossary](./glossary.spec.md): the vocabulary every other chapter, and the
   language's keywords, use.
 - [Components](./components.spec.md): has-a composition, children, state
-  machines, and sending messages up or down the tree.
+  machines, explicit bubble/down, the declaration syntax, and the syntax tree.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
 - [Workflows](./workflows.spec.md): first-class long-running work, child

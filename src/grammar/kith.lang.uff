@@ -1,0 +1,93 @@
+import "@justinmchase/uffda/source" Source;
+import "@justinmchase/uffda/tokenizer" TokenizerNoWhitespace;
+import "@justinmchase/uffda/pattern" Pattern;
+import "@justinmchase/uffda/expression" Expression;
+
+export KithLang;
+
+decorator Language<c:any> = c;
+
+rule Identifier =
+  s:string & [(\cL | "_") (\cL | \cNd | "_")*]
+  -> s
+;
+
+rule Field =
+  "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
+  -> { kind: "field", name: n, pattern: p, init: e }
+;
+
+rule Child =
+  "child" k:Identifier n:Identifier ";"
+  -> { kind: "child", component: k, name: n }
+;
+
+rule Assign =
+  n:Identifier "-" ">" e:Expression ";"
+  -> { kind: "assign", field: n, expression: e }
+;
+
+rule Bubble =
+  "bubble" e:Expression ";"
+  -> { kind: "bubble", message: e }
+;
+
+rule DownNamed =
+  "down" n:Identifier e:Expression ";"
+  -> { kind: "down", child: n, message: e }
+;
+
+rule DownAll =
+  "down" e:Expression ";"
+  -> { kind: "downAll", message: e }
+;
+
+rule Statement =
+  | Assign
+  | Bubble
+  | DownNamed
+  | DownAll
+;
+
+rule Handler =
+  "on" p:Pattern "{" b:Statement* "}"
+  -> { kind: "handler", pattern: p, body: b }
+;
+
+rule StartState =
+  "start" n:Identifier "{" h:Handler* "}"
+  -> { kind: "state", name: n, start: true, handlers: h }
+;
+
+rule NamedState =
+  "state" n:Identifier "{" h:Handler* "}"
+  -> { kind: "state", name: n, start: false, handlers: h }
+;
+
+rule State =
+  | StartState
+  | NamedState
+;
+
+rule ComponentDeclaration =
+  "component" n:Identifier "{"
+    f:Field*
+    c:Child*
+    s:State+
+  "}"
+  -> { kind: "component", name: n, fields: f, children: c, states: s }
+;
+
+rule Program =
+  c:ComponentDeclaration*
+  "root" r:Identifier ";"
+  end
+  -> { kind: "program", components: c, root: r }
+;
+
+[Language { id: "kith", name: "Kith", extensions: [".kith"] }]
+rule KithLang =
+  |> Source
+  |> [TokenizerNoWhitespace]
+  |> [Program]
+;
