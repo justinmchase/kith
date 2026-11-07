@@ -894,14 +894,12 @@ fn paid_order() -> serde_json::Value {
 }
 
 fn confirm_deliveries(world: &mut World) {
-    let ships = world.children_of_kind(world.root_id(), "ShipItem");
-    assert_eq!(ships.len(), 2);
-    for ship in ships {
-        for carrier in world.children_of_kind(ship, "Carrier") {
-            world
-                .send(carrier, json!({"kind": "Delivered"}))
-                .expect("deliver");
-        }
+    let carriers = world.children_of_kind(world.root_id(), "Carrier");
+    assert_eq!(carriers.len(), 2);
+    for carrier in carriers {
+        world
+            .send(carrier, json!({"kind": "Delivered"}))
+            .expect("deliver");
     }
 }
 
@@ -918,10 +916,8 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     );
     assert_eq!(world.prints().len(), 2);
     assert_eq!(world.prints()[0]["kind"], json!("PickupRequested"));
-    for ship in world.children_of_kind(world.root_id(), "ShipItem") {
-        for carrier in world.children_of_kind(ship, "Carrier") {
-            assert_eq!(world.state(carrier), Some("Shipping"));
-        }
+    for carrier in world.children_of_kind(world.root_id(), "Carrier") {
+        assert_eq!(world.state(carrier), Some("Shipping"));
     }
 
     confirm_deliveries(&mut world);
@@ -946,10 +942,8 @@ fn order_snapshot_restore_resumes_delivery() {
     let snap = world.snapshot().expect("snapshot");
     let mut restored = World::restore(program, &snap).expect("restore");
     assert_eq!(restored.prints().len(), 2);
-    for ship in restored.children_of_kind(restored.root_id(), "ShipItem") {
-        for carrier in restored.children_of_kind(ship, "Carrier") {
-            assert_eq!(restored.state(carrier), Some("Shipping"));
-        }
+    for carrier in restored.children_of_kind(restored.root_id(), "Carrier") {
+        assert_eq!(restored.state(carrier), Some("Shipping"));
     }
     confirm_deliveries(&mut restored);
     restored.run_until_idle().unwrap();

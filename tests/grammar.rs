@@ -172,9 +172,8 @@ fn order_source_parses_tasks_picks_and_map() {
     assert!(order.steps.iter().any(|step| matches!(
         step.body,
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
-            if component == "ShipItem" && reduce == "Summarize"
+            if component == "Carrier" && reduce == "Summarize"
     )));
-    assert!(program.workflow("ShipItem").is_some());
     assert!(program.component("Summarize").is_some());
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");

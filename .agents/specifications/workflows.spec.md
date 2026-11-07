@@ -63,9 +63,9 @@ capitals.
 ### Declaration
 
 The normative workflow is `examples/order.kith`: validate, choose, charge,
-choose, map nested `ShipItem` workflows, reduce into `Summarize`. Tasks
-`complete`; the graph moves with `then` / `pick`. A map item MAY wait without
-completing until the host sends a later message into that work item.
+choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
+the graph moves with `then` / `pick`. A map item MAY wait without completing
+until the host sends a later message into that work item.
 
 ```kith
 workflow Order {
@@ -79,13 +79,9 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> ShipItem reduce Summarize from { kind: "Summary", total: 0 } then succeed;
+  Fulfill: fanout items -> Carrier reduce Summarize from { kind: "Summary", total: 0 } then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
-}
-
-workflow ShipItem {
-  start Carrier then succeed;
 }
 ```
 
@@ -162,8 +158,8 @@ record MUST NOT be JSON.
 ## Example
 
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
-at `Order` MUST accept and charge, then wait on two `ShipItem` / `Carrier`
-work items. After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
+at `Order` MUST accept and charge, then wait on two `Carrier` work items.
+After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
 MUST fold each `Shipped` payload into `{ kind: "Summary", total: 2 }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
