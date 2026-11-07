@@ -42,7 +42,7 @@ fn parse_check_compile_and_run_ping() {
     let bad = dir.join("bad.kith");
     std::fs::write(
         &bad,
-        "export Broken;\nexport Main;\nworkflow Broken {\n  step Idle {}\n}\nexport scene Main {\n  Broken()\n}\n",
+        "export Broken;\nexport Main;\nworkflow Broken {\n  Idle: succeed;\n}\nexport scene Main {\n  Broken()\n}\n",
     )
     .unwrap();
     let rejected = run(&["check", bad.to_str().unwrap()]);
@@ -71,7 +71,8 @@ fn parse_check_compile_and_run_ping() {
     let ran = run(&["run", ping, "--message", r#"{"kind":"Ping","n":7}"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields: serde_json::Value = serde_json::from_slice(&ran.stdout).expect("run json");
-    assert_eq!(fields["heard"], json!(7.0));
+    assert_eq!(fields["kind"], json!("Pong"));
+    assert_eq!(fields["n"], json!(7.0));
 }
 
 #[test]
@@ -95,7 +96,8 @@ fn parse_does_not_resolve_imports_but_check_does() {
     let ran = run(&["run", uses, "--message", r#"{"kind":"Ping","n":7}"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields: serde_json::Value = serde_json::from_slice(&ran.stdout).expect("run json");
-    assert_eq!(fields["heard"], json!(7.0));
+    assert_eq!(fields["kind"], json!("Pong"));
+    assert_eq!(fields["n"], json!(7.0));
 }
 
 fn stderr(output: &std::process::Output) -> String {

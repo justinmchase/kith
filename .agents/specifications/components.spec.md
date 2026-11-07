@@ -50,8 +50,8 @@ capitals.
   first executable slice MUST NOT spawn or destroy children; scene-constructed
   children exist for the parent's lifetime. Dynamic spawn is a
   [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
-  `join`, `goto`, or `step`. A component MAY `complete V` so it can be a
-  fan-out work item.
+  `then`, `pick`, `run`, `succeed`, or `fail`. A component MAY `complete V` so
+  it can be a task or map work item.
 
 ### Routing
 
@@ -81,7 +81,7 @@ A component declaration names the kind, optional fields, optional ports, and
 the machine. A scene constructs instances and fills ports.
 
 The normative ping program is a [workflow](./workflows.spec.md#declaration)
-root with a `Child` component. Components stay local machines:
+task of `Child`. Components stay local machines:
 
 ```kith
 component Child {
@@ -173,9 +173,9 @@ MUST be `null` when the send is `send down any`.
 
 ## Example
 
-Injecting `{ kind: "Ping", n: 7 }` at the `Ping` workflow root of scene `Main`
-MUST `send to child`, the child MUST `complete` `{ kind: "Pong", n: 7 }`, and
-`Ping.heard` MUST become `7`. See [workflows](./workflows.spec.md#example).
+Injecting `{ kind: "Ping", n: 7 }` at the `Ping` workflow MUST run task
+`Child`, which MUST `complete` `{ kind: "Pong", n: 7 }`, and the run MUST
+succeed with that payload. See [workflows](./workflows.spec.md#example).
 
 ## Why this design
 
@@ -198,6 +198,6 @@ MUST `send to child`, the child MUST `complete` `{ kind: "Pong", n: 7 }`, and
 - **How higher languages specialize a component** (restriction of messages,
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
-- **Goto state.** Components still have no `goto`. Workflows use `goto` to
-  enter another step; see [workflows](./workflows.spec.md).
+- **Goto state.** Components still have no `goto`. Workflows enter another
+  step with `then Name` or a `pick` clause; see [workflows](./workflows.spec.md).
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.

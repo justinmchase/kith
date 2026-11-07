@@ -45,11 +45,54 @@ pub struct Component {
 pub struct Workflow {
     pub kind: String,
     pub name: String,
+    pub start: String,
+    pub steps: Vec<FlowStep>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FlowStep {
+    pub name: String,
     #[serde(default)]
-    pub fields: Vec<Field>,
+    pub start: bool,
+    pub body: StepBody,
     #[serde(default)]
-    pub ports: Vec<Port>,
-    pub steps: Vec<Step>,
+    pub next: Option<Next>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum StepBody {
+    #[serde(rename = "task")]
+    Task { component: String },
+    #[serde(rename = "map")]
+    Map { items: String, component: String },
+    #[serde(rename = "choice")]
+    Choice { clauses: Vec<ChoiceClause> },
+    #[serde(rename = "pass")]
+    Pass { value: Json },
+    #[serde(rename = "run")]
+    Run { path: String },
+    #[serde(rename = "succeed")]
+    Succeed {},
+    #[serde(rename = "fail")]
+    Fail { error: Json },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum Next {
+    #[serde(rename = "goto")]
+    Goto { step: String },
+    #[serde(rename = "succeed")]
+    Succeed {},
+    #[serde(rename = "fail")]
+    Fail { error: Json },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChoiceClause {
+    pub pattern: Json,
+    pub step: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -95,25 +138,6 @@ pub struct State {
     pub handlers: Vec<Handler>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Step {
-    pub kind: String,
-    pub name: String,
-    pub start: bool,
-    #[serde(default)]
-    pub enter: Vec<Statement>,
-    #[serde(default)]
-    pub handlers: Vec<Handler>,
-    #[serde(default)]
-    pub join: Option<Join>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Join {
-    pub kind: String,
-    #[serde(default)]
-    pub body: Vec<Statement>,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Handler {
@@ -139,10 +163,6 @@ pub enum Statement {
     },
     #[serde(rename = "complete")]
     Complete { message: Json },
-    #[serde(rename = "fanout")]
-    Fanout { collection: Json, component: String },
-    #[serde(rename = "goto")]
-    Goto { step: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,8 +202,8 @@ impl Program {
             return Some(Kind {
                 sort: KindSort::Workflow,
                 name: workflow.name.as_str(),
-                fields: &workflow.fields,
-                ports: &workflow.ports,
+                fields: &[],
+                ports: &[],
             });
         }
         None
@@ -230,21 +250,17 @@ impl Component {
 }
 
 impl Workflow {
-    pub fn start_step(&self) -> Option<&Step> {
+    pub fn start_step(&self) -> Option<&FlowStep> {
         let starts: Vec<_> = self.steps.iter().filter(|step| step.start).collect();
-        if starts.len() == 1 {
-            Some(starts[0])
-        } else {
-            None
+        match starts.as_slice() {
+            [step] => Some(*step),
+            [] => self.steps.iter().find(|step| step.name == self.start),
+            _ => None,
         }
     }
 
-    pub fn step(&self, name: &str) -> Option<&Step> {
+    pub fn step(&self, name: &str) -> Option<&FlowStep> {
         self.steps.iter().find(|step| step.name == name)
-    }
-
-    pub fn port(&self, name: &str) -> Option<&Port> {
-        self.ports.iter().find(|port| port.name == name)
     }
 }
 
@@ -281,43 +297,12 @@ pub fn ping_program() -> Program {
         "workflows": [{
             "kind": "workflow",
             "name": "Ping",
-            "fields": [{
-                "kind": "field",
-                "name": "heard",
-                "pattern": {"kind": "type", "type": "number"},
-                "init": {"kind": "number", "value": 0}
-            }],
-            "ports": [{
-                "kind": "port",
-                "component": "Child",
-                "name": "child"
-            }],
+            "start": "Start",
             "steps": [{
-                "kind": "step",
-                "name": "Run",
+                "name": "Start",
                 "start": true,
-                "enter": [],
-                "join": null,
-                "handlers": [
-                    {
-                        "kind": "handler",
-                        "pattern": ping_pattern("Ping"),
-                        "body": [{
-                            "kind": "sendTo",
-                            "port": "child",
-                            "message": ping_object("Ping")
-                        }]
-                    },
-                    {
-                        "kind": "handler",
-                        "pattern": ping_pattern("Pong"),
-                        "body": [{
-                            "kind": "assign",
-                            "field": "heard",
-                            "expression": {"kind": "reference", "name": "n"}
-                        }]
-                    }
-                ]
+                "body": { "kind": "task", "component": "Child" },
+                "next": { "kind": "succeed" }
             }]
         }],
         "scenes": [{
@@ -327,12 +312,7 @@ pub fn ping_program() -> Program {
                 "kind": "instance",
                 "component": "Ping",
                 "key": null,
-                "children": [{
-                    "kind": "instance",
-                    "component": "Child",
-                    "key": "child",
-                    "children": []
-                }]
+                "children": []
             }
         }]
     }))

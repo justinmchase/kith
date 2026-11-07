@@ -10,13 +10,13 @@ spec_ref: .agents/specifications/scenes.spec.md#declaration; .agents/specificati
 
 Preconditions:
 
-- Source declares `export scene Main { Ping() { child = Child() } }` and
-  both kinds, with `Child child` on workflow `Ping`.
+- Source declares `export scene Main { Ping() }` and workflow `Ping` with
+  start task `Child`.
 
 Expected behavior:
 
-- Starting the program MUST create a `Ping` workflow root and one `Child`
-  filling port `child`.
+- Starting the program MUST create a `Ping` workflow root. Injecting Ping
+  MUST spawn the `Child` task.
 - Check MUST reject a duplicate port fill under one parent.
 - Check MUST reject a construction that names an unknown kind.
 - Check MUST reject a missing port fill.

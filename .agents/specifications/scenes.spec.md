@@ -70,9 +70,9 @@ export scene Main {
 - `export scene Name` or `export Name;` (when `Name` is a scene) makes the
   scene the program's run target when it is the unique exported scene.
 
-The normative ping program is in [components](./components.spec.md#declaration).
-Its scene is `Main`: a `Ping` workflow root with port `child` filled by
-`Child`.
+The normative ping program is in [workflows](./workflows.spec.md#declaration).
+Its scene is `Main`: a `Ping` workflow root. Scene children under a workflow
+are prototypes cloned when a task or map names that kind.
 
 ### Import and export
 
@@ -86,7 +86,7 @@ Its scene is `Main`: a `Ping` workflow root with port `child` filled by
 
 ## Why this design
 
-- **Ports versus the graph.** `Child child;` on Ping is a Unity-style
+- **Ports versus the graph.** `Child child;` on a component is a Unity-style
   serialized field: a typed collaborator the scene must fill. Unnamed
   `Logger()` children are extra hierarchy, reached by kind, not extra ports.
 - **Scene still builds the tree.** The kind names the ports; the scene says

@@ -1,23 +1,24 @@
 ---
 id: workflows-003
-title: fanout 0, 1, or N workers and join all collects completions
-spec_ref: .agents/specifications/workflows.spec.md#fan-out-and-join
+title: fanout 0, 1, or N workers joins into an array output
+spec_ref: .agents/specifications/workflows.spec.md#definitions
 ---
 
-# Fan-out and join all
+# Map fan-out and fan-in
 
 ## Requirement
 
 Preconditions:
 
-- A workflow `fanout`s a list to a port-less `Worker` component and `join all`.
+- A workflow `start fanout items -> Worker then succeed` and a port-less
+  `Worker` component.
 
 Expected behavior:
 
-- Zero items MUST join immediately with an empty `results` list.
-- One or more items MUST each receive `{ kind: "Item", item, index }`,
-  `complete`, and appear in `results`.
-- Fan-out of a kind that declares ports MUST fail check.
+- Zero items MUST succeed with `[]`.
+- One or more items MUST each receive `{ kind: "Item", item, index }` and
+  appear in the succeeded array output.
+- Fan-out of a kind that needs ports without a prototype MUST fail check.
 
 Postconditions:
 

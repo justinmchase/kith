@@ -1,22 +1,22 @@
 ---
 id: workflows-002
-title: goto enters another workflow step and runs its enter statements
+title: then and pick transition to the next step with the working value
 spec_ref: .agents/specifications/workflows.spec.md#declaration
 ---
 
-# Goto steps
+# Flow transitions
 
 ## Requirement
 
 Preconditions:
 
-- A workflow has a start step that `goto`s a later step whose enter body
-  assigns a field.
+- A workflow has `start pass ... then Next` and a later named step, or a
+  `pick` with a matching clause.
 
 Expected behavior:
 
-- After the enabling message, the instance MUST be in the later step and the
-  enter assignment MUST be visible.
+- Completing a step MUST enter the `then` target (or the matching pick
+  clause) with that step's output as the working value.
 
 Postconditions:
 

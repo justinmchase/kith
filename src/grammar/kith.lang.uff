@@ -75,16 +75,6 @@ rule Complete =
   -> { kind: "complete", message: e }
 ;
 
-rule Fanout =
-  "fanout" e:Expression "-" ">" k:Identifier ";"
-  -> { kind: "fanout", collection: e, component: k }
-;
-
-rule Goto =
-  "goto" n:Identifier ";"
-  -> { kind: "goto", step: n }
-;
-
 rule ComponentStatement =
   | Assign
   | SendTo
@@ -93,26 +83,10 @@ rule ComponentStatement =
   | Complete
 ;
 
-rule WorkflowStatement =
-  | Fanout
-  | Goto
-  | ComponentStatement
-;
-
 # Group the message pattern so the handler body `{` is not a Then object.
 rule ComponentHandler =
   "on" "(" p:Pattern ")" "{" b:ComponentStatement* "}"
   -> { kind: "handler", pattern: p, body: b }
-;
-
-rule WorkflowHandler =
-  "on" "(" p:Pattern ")" "{" b:WorkflowStatement* "}"
-  -> { kind: "handler", pattern: p, body: b }
-;
-
-rule JoinAll =
-  "join" "all" "{" b:WorkflowStatement* "}"
-  -> { kind: "all", body: b }
 ;
 
 rule StartState =
@@ -139,50 +113,71 @@ rule ComponentDeclaration =
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
 ;
 
-rule StartStep =
-  "start" n:Identifier "{"
-    e:WorkflowStatement*
-    h:WorkflowHandler*
-    j:JoinAll?
-  "}"
-  -> {
-    kind: "step",
-    name: n,
-    start: true,
-    enter: e,
-    handlers: h,
-    join: (coalesce j null)
-  }
+rule FlowTarget =
+  | ("succeed" -> { kind: "succeed" })
+  | ("fail" e:Expression -> { kind: "fail", error: e })
+  | (n:Identifier -> { kind: "goto", step: n })
 ;
 
-rule NamedStep =
-  "step" n:Identifier "{"
-    e:WorkflowStatement*
-    h:WorkflowHandler*
-    j:JoinAll?
-  "}"
-  -> {
-    kind: "step",
-    name: n,
-    start: false,
-    enter: e,
-    handlers: h,
-    join: (coalesce j null)
-  }
+rule FlowThen = "then" t:FlowTarget -> t;
+
+rule ChoiceClause =
+  | (
+    "else" "-" ">" n:Identifier ";"
+    -> { pattern: { kind: "any" }, step: n }
+  )
+  | (
+    p:Pattern "-" ">" n:Identifier ";"
+    -> { pattern: p, step: n }
+  )
 ;
 
-rule WorkflowStep =
-  | StartStep
-  | NamedStep
+rule StepBody =
+  | (
+    "fanout" p:Identifier "-" ">" k:Identifier
+    -> { kind: "map", items: p, component: k }
+  )
+  | ("run" p:Identifier -> { kind: "run", path: p })
+  | ("pass" e:Expression -> { kind: "pass", value: e })
+  | ("pick" "{" c:ChoiceClause* "}" -> { kind: "choice", clauses: c })
+  | ("succeed" -> { kind: "succeed" })
+  | ("fail" e:Expression -> { kind: "fail", error: e })
+  | (k:Identifier -> { kind: "task", component: k })
+;
+
+rule FlowStep =
+  | (
+    "start" n:Identifier ":" b:StepBody t:FlowThen? ";"
+    -> {
+      name: n,
+      start: true,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
+  | (
+    "start" b:StepBody t:FlowThen? ";"
+    -> {
+      name: "Start",
+      start: true,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
+  | (
+    n:Identifier ":" b:StepBody t:FlowThen? ";"
+    -> {
+      name: n,
+      start: false,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
 ;
 
 rule WorkflowDeclaration =
-  "workflow" n:Identifier "{"
-    f:Field*
-    p:Port*
-    s:WorkflowStep+
-  "}"
-  -> { kind: "workflow", name: n, fields: f, ports: p, steps: s }
+  "workflow" n:Identifier "{" s:FlowStep+ "}"
+  -> { kind: "workflow", name: n, start: "Start", steps: s }
 ;
 
 rule NamedChild =

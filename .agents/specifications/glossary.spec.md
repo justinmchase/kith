@@ -14,8 +14,8 @@ capitals.
 
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
-  example `component`, `workflow`, `scene`, `step`, `send`, `to`, `fanout`,
-  `join`, `goto`, `complete`).
+  example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `then`,
+  `pick`, `run`, `succeed`, `fail`, `complete`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -94,19 +94,19 @@ capitals.
 
 ## Workflows
 
-- **Workflow**: a first-class orchestrating instance with steps, optional
-  fields and ports, progress, and the same mailbox runtime as a component.
-  The unique exported scene's root is a workflow.
-- **Step**: a named phase of a workflow. It is declaration syntax, not a
-  distinct actor.
-- **Complete**: finishing an instance as a work item (`complete V`): mark
-  done for join accounting and send up `V`.
+- **Workflow**: a flow graph (task, map, choice, pass, run, succeed, fail)
+  whose unique exported scene root the world runs. It is not a component
+  state machine. The graph is a value.
+- **Step**: one node in a workflow graph. It is not an actor. Completing it
+  follows `then` (or a choice clause).
+- **Run**: one execution of a graph, serializable and restorable.
+- **Complete**: finishing a component or nested workflow as a work item
+  (`complete V`). The payload is the step output.
 - **Child workflow**: a workflow instance owned by another workflow or by a
   component. Ownership is has-a.
-- **Fan-out**: spawning zero or more child instances from a collection,
-  dynamically, as part of a transition (`fanout expr -> Kind`).
-- **Join**: waiting for fan-out children to complete, then enabling a
-  later turn with their results (`join all`).
+- **Fan-out**: a map step (`fanout path -> Kind`) that spawns one work item
+  per list element.
+- **Join**: fan-in of those work items into one array output, then `then`.
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

@@ -17,11 +17,11 @@ Expected behavior:
 
 - `kith parse` MUST print a `program` syntax tree with scene `Main` and MUST
   NOT start actors.
-- `kith check` MUST accept the example and MUST reject a component with no
-  start state.
+- `kith check` MUST accept the example and MUST reject a workflow with no
+  start step, and a program with no exported scene.
 - `kith compile` MUST write a program artifact.
 - `kith run examples/ping.kith --message '{"kind":"Ping","n":7}'` MUST leave
-  `Ping.heard` at `7` and exit 0.
+  `{ "kind": "Pong", "n": 7 }` and exit 0.
 
 Postconditions:
 

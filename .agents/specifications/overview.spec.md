@@ -45,10 +45,10 @@ primitives rather than defining their own.
   message is routed to a named port (`send to`), down to children of a kind
   (`send down`), or up toward the root (`send up`), then matched as a Uffda
   pattern.
-- **State machines are the only behavior.** Choosing what happens — which
-  messages to send, whether to change state, whether to spawn work — MUST be
-  done by a transition of a state machine. Expressions compute values and have
-  no effect.
+- **Machines and flows.** Component behavior is a state machine: a matched
+  message may send, assign, and `complete`. Workflow behavior is a flow graph:
+  completing a step follows `then` (or a `pick` clause) with that step's
+  output as the working value. Expressions compute values and have no effect.
 - **Dispatch is the runtime.** User code MUST NOT schedule actors, wait on
   threads, or lock shared state. The dispatcher treats components and
   in-flight transitions as actors and is the parallelization mechanism.

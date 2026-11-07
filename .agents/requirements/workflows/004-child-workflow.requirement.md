@@ -1,7 +1,7 @@
 ---
 id: workflows-004
-title: A workflow port may be filled by a child workflow that completes
-spec_ref: .agents/specifications/workflows.spec.md#child-workflows
+title: A task may run a child workflow until it succeeds
+spec_ref: .agents/specifications/workflows.spec.md#declaration
 ---
 
 # Child workflow
@@ -10,13 +10,13 @@ spec_ref: .agents/specifications/workflows.spec.md#child-workflows
 
 Preconditions:
 
-- A parent workflow declares a port whose kind is a workflow. The scene fills
-  it. The parent sends to that port; the child `complete`s.
+- A parent workflow's start task names another workflow. The child succeeds
+  with a payload.
 
 Expected behavior:
 
-- The parent MUST receive the completion as send up and MAY record it in a
-  field.
+- The parent MUST take that payload as the task output and MAY `then succeed`
+  with it.
 
 Postconditions:
 

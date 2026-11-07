@@ -11,18 +11,7 @@ component Worker {
 }
 
 workflow Import {
-  start Fetch {
-    on ({ kind: "Start", items: any }) {
-      fanout items -> Worker;
-    }
-    join all {
-      goto Done;
-    }
-  }
-
-  step Done {
-    complete { kind: "Imported", results: results };
-  }
+  start fanout items -> Worker then succeed;
 }
 
 export scene Main {

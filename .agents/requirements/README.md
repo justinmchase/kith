@@ -33,10 +33,12 @@ verify it cite it with `req:{id}`.
 ## Workflows
 
 - [Distinct primitive and scene root](./workflows/001-distinct-and-root.requirement.md)
-- [Goto steps](./workflows/002-goto-steps.requirement.md)
-- [Fan-out and join all](./workflows/003-fanout-join.requirement.md)
+- [Then and pick](./workflows/002-goto-steps.requirement.md)
+- [Map fan-out and fan-in](./workflows/003-fanout-join.requirement.md)
 - [Child workflow](./workflows/004-child-workflow.requirement.md)
 - [Ping workflow](./workflows/005-ping-workflow.requirement.md)
+- [Snapshot and restore](./workflows/006-snapshot-restore.requirement.md)
+- [Dynamic run](./workflows/007-dynamic-run.requirement.md)
 
 ## Grammar
 

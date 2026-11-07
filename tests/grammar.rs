@@ -22,24 +22,21 @@ fn ping_source_parses_to_the_component_tree() {
     assert!(component_names.contains(&"Child"));
     assert!(program.workflow("Ping").is_some());
     let ping = program.workflow("Ping").expect("Ping");
-    assert!(ping.fields.iter().any(|field| field.name == "heard"));
-    assert!(ping
-        .ports
-        .iter()
-        .any(|port| port.name == "child" && port.component == "Child"));
+    assert!(matches!(
+        ping.steps[0].body,
+        kith::ast::StepBody::Task { ref component } if component == "Child"
+    ));
     let scene = program.scene("Main").expect("Main");
     assert_eq!(scene.root.component, "Ping");
     assert!(scene.root.key.is_none());
-    assert!(scene
-        .root
-        .children
-        .iter()
-        .any(|child| child.key.as_deref() == Some("child") && child.component == "Child"));
 
     let mut world = World::start(program).expect("interpreter accepts parsed tree");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
+    assert_eq!(
+        world.output(world.root_id()),
+        Some(&json!({"kind": "Pong", "n": 7.0}))
+    );
 }
 
 #[test]
@@ -49,21 +46,26 @@ fn mixed_unnamed_child_and_send_down_kind_parse() {
 export Child;
 export Other;
 export Parent;
+export Wrap;
 export Main;
 
 component Child {
   start Idle {
-    on (any) {}
+    on (any) {
+      complete { kind: "X" };
+    }
   }
 }
 
 component Other {
   start Idle {
-    on (any) {}
+    on (any) {
+      complete { kind: "X" };
+    }
   }
 }
 
-workflow Parent {
+component Parent {
   Child child;
 
   start Idle {
@@ -79,36 +81,35 @@ workflow Parent {
   }
 }
 
+workflow Wrap {
+  start Parent then succeed;
+}
+
 export scene Main {
-  Parent() {
-    child = Child();
-    Other();
+  Wrap() {
+    Parent() {
+      child = Child();
+      Other();
+    }
   }
 }
 "#;
     let program = parse_source(source).expect("parse mixed");
-    let parent = program.workflow("Parent").expect("Parent");
-    let ping = parent.steps[0].handlers[0].body[0].clone();
-    let down = parent.steps[0].handlers[1].body[0].clone();
-    let any = parent.steps[0].handlers[2].body[0].clone();
-    match ping {
-        kith::ast::Statement::SendTo { ref port, .. } => assert_eq!(port, "child"),
+    let parent = program.component("Parent").expect("Parent");
+    match &parent.states[0].handlers[0].body[0] {
+        kith::ast::Statement::SendTo { port, .. } => assert_eq!(port, "child"),
         other => panic!("expected sendTo, got {other:?}"),
     }
-    match down {
-        kith::ast::Statement::SendDown { ref component, .. } => {
+    match &parent.states[0].handlers[1].body[0] {
+        kith::ast::Statement::SendDown { component, .. } => {
             assert_eq!(component.as_deref(), Some("Child"))
         }
         other => panic!("expected sendDown Child, got {other:?}"),
     }
-    match any {
-        kith::ast::Statement::SendDown { ref component, .. } => assert!(component.is_none()),
-        other => panic!("expected sendDown any, got {other:?}"),
-    }
-    let children = &program.scene("Main").expect("Main").root.children;
-    assert_eq!(children[0].key.as_deref(), Some("child"));
-    assert_eq!(children[1].key, None);
-    assert_eq!(children[1].component, "Other");
+    let wrap = program.scene("Main").expect("Main").root.children.clone();
+    assert_eq!(wrap[0].component, "Parent");
+    assert_eq!(wrap[0].children[0].key.as_deref(), Some("child"));
+    assert_eq!(wrap[0].children[1].key, None);
 }
 
 #[test]
@@ -127,7 +128,10 @@ fn import_list_parses_and_relative_files_resolve() {
     let mut world = World::start(program).expect("start imported child");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
+    assert_eq!(
+        world.output(world.root_id()),
+        Some(&json!({"kind": "Pong", "n": 7.0}))
+    );
 
     let dir = std::env::temp_dir().join(format!("kith-import-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -138,7 +142,7 @@ fn import_list_parses_and_relative_files_resolve() {
     .unwrap();
     std::fs::write(
         dir.join("main.kith"),
-        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start Idle {}\n}\nexport scene Main {\n  Box()\n}\n",
+        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start succeed;\n}\nexport scene Main {\n  Box()\n}\n",
     )
     .unwrap();
     let err = resolve_program(&dir.join("main.kith")).expect_err("missing export");
@@ -152,13 +156,8 @@ fn import_source_parses_fanout_and_join() {
     let program = parse_source(source).expect("parse import.kith");
     let import = program.workflow("Import").expect("Import");
     assert!(matches!(
-        import.steps[0].handlers[0].body[0],
-        kith::ast::Statement::Fanout { .. }
+        import.steps[0].body,
+        kith::ast::StepBody::Map { ref component, .. } if component == "Worker"
     ));
-    assert_eq!(
-        import.steps[0].join.as_ref().map(|join| join.kind.as_str()),
-        Some("all")
-    );
-    assert!(!import.steps[1].start);
     World::check(&program).expect("import checks");
 }

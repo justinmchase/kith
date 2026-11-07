@@ -1,4 +1,4 @@
-use serde_json::Value as Json;
+use serde_json::{json, Value as Json};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -62,6 +62,47 @@ impl Dispatcher {
             }
         }
         Ok(())
+    }
+}
+
+impl Dispatcher {
+    pub fn snapshot(&self) -> Json {
+        let mut mailboxes = serde_json::Map::new();
+        for (ActorId(id), queue) in &self.mailboxes {
+            let values: Vec<Json> = queue.iter().map(|message| message.value.clone()).collect();
+            mailboxes.insert(id.to_string(), Json::Array(values));
+        }
+        let ready: Vec<Json> = self
+            .ready
+            .iter()
+            .map(|ActorId(id)| Json::from(*id))
+            .collect();
+        json!({ "mailboxes": mailboxes, "ready": ready })
+    }
+
+    pub fn restore(value: &Json) -> Result<Self, String> {
+        let mut dispatcher = Self::new();
+        if let Some(mailboxes) = value.get("mailboxes").and_then(Json::as_object) {
+            for (key, queue) in mailboxes {
+                let id = ActorId(key.parse().map_err(|_| "bad actor id")?);
+                dispatcher.register(id);
+                let mailbox = dispatcher.mailboxes.entry(id).or_default();
+                mailbox.clear();
+                if let Some(values) = queue.as_array() {
+                    for value in values {
+                        mailbox.push_back(Message { value: value.clone() });
+                    }
+                }
+            }
+        }
+        dispatcher.ready.clear();
+        if let Some(ready) = value.get("ready").and_then(Json::as_array) {
+            for id in ready {
+                let id = id.as_u64().ok_or("bad ready id")?;
+                dispatcher.ready.push_back(ActorId(id));
+            }
+        }
+        Ok(dispatcher)
     }
 }
 

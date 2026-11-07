@@ -15,9 +15,9 @@ Preconditions:
 Expected behavior:
 
 - Parsing the normative Ping/Child source MUST produce a `program` tree with
-  exports `Child`, `Ping`, and `Main`, component `Child`, workflow `Ping` with
-  a `heard` field and a `Child child` port, and scene `Main` whose root is
-  `Ping` with a child instance of `Child` filling port `child`.
+  exports `Child`, `Ping`, and `Main`, component `Child`, workflow `Ping`
+  whose start task is `Child` then succeed, and scene `Main` whose root is
+  `Ping`.
 - The tree MUST be the same shape the interpreter accepts as a hand-built AST.
 - The tree MUST NOT include a program `root` string or `children` on a
   component.

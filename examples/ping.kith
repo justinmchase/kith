@@ -11,21 +11,9 @@ component Child {
 }
 
 workflow Ping {
-  field heard: number = 0;
-  Child child;
-
-  start Run {
-    on ({ kind: "Ping", n: number }) {
-      send to child { kind: "Ping", n: n };
-    }
-    on ({ kind: "Pong", n: number }) {
-      heard -> n;
-    }
-  }
+  start Child then succeed;
 }
 
 export scene Main {
-  Ping() {
-    child = Child();
-  }
+  Ping();
 }

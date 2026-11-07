@@ -1,6 +1,6 @@
 ---
 id: workflows-005
-title: Ping workflow sends to child, child completes Pong, heard becomes 7
+title: Ping task Child succeeds with Pong n 7
 spec_ref: .agents/specifications/workflows.spec.md#example
 ---
 
@@ -10,14 +10,12 @@ spec_ref: .agents/specifications/workflows.spec.md#example
 
 Preconditions:
 
-- The normative Ping/Child program is loaded, as source or as a hand-built
-  syntax tree, including exported scene `Main`.
+- The normative Ping program is loaded (task `Child` then succeed).
 
 Expected behavior:
 
-- Injecting `{ kind: "Ping", n: 7 }` at the `Ping` root MUST `send to child`,
-  the child MUST `complete` `{ kind: "Pong", n: 7 }`, and `Ping.heard` MUST be
-  `7`.
+- Injecting `{ kind: "Ping", n: 7 }` MUST run `Child` and succeed with
+  `{ kind: "Pong", n: 7 }`.
 
 Postconditions:
 
