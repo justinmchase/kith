@@ -813,7 +813,7 @@ impl World {
             .find(|state| state.name == state_name)
             .ok_or_else(|| Error::new("unknown state"))?;
         for handler in &state.handlers {
-            if let Some(mut bindings) = match_message(&handler.pattern, message)? {
+            if let Some(mut bindings) = match_handler(handler, message)? {
                 for (name, value) in &fields {
                     bindings.entry(name.clone()).or_insert(value.clone());
                 }
@@ -875,12 +875,12 @@ impl World {
                 }
                 Statement::Goto { state } => {
                     let kind = self.instances[&id].kind.clone();
-                    let known = self
-                        .program
-                        .component(&kind)
-                        .is_some_and(|component| {
-                            component.states.iter().any(|declared| declared.name == *state)
-                        });
+                    let known = self.program.component(&kind).is_some_and(|component| {
+                        component
+                            .states
+                            .iter()
+                            .any(|declared| declared.name == *state)
+                    });
                     if !known {
                         return Err(Error::new(format!("unknown state {state}")));
                     }
@@ -906,7 +906,10 @@ impl World {
         child: ActorId,
         payload: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        let Some(join) = self.instances.get(&parent).and_then(|instance| instance.join.as_ref())
+        let Some(join) = self
+            .instances
+            .get(&parent)
+            .and_then(|instance| instance.join.as_ref())
         else {
             return Ok(vec![]);
         };
@@ -956,10 +959,7 @@ impl World {
         self.advance(parent, payload, next.as_ref())
     }
 
-    fn pump_reduce(
-        &mut self,
-        parent: ActorId,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn pump_reduce(&mut self, parent: ActorId) -> Result<Vec<(ActorId, Json, Route)>, Error> {
         let (reducer, item, acc, finished) = {
             let join = match self
                 .instances
@@ -997,14 +997,7 @@ impl World {
         {
             join.folding = Some(child);
         }
-        self.start_work(
-            child,
-            json!({
-                "kind": "Reduce",
-                "acc": acc,
-                "item": item.expect("pending item"),
-            }),
-        )
+        self.start_work(child, json!([acc, item.expect("pending item")]))
     }
 
     fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
@@ -1041,6 +1034,26 @@ impl World {
             Route::Inject
         }
     }
+}
+
+fn match_handler(
+    handler: &crate::ast::Handler,
+    message: &Json,
+) -> Result<Option<HashMap<String, Json>>, Error> {
+    let Some(item_pattern) = &handler.item else {
+        return match_message(&handler.pattern, message);
+    };
+    let Some([acc, item]) = message.as_array().map(Vec::as_slice) else {
+        return Ok(None);
+    };
+    let Some(mut bindings) = match_message(&handler.pattern, acc)? else {
+        return Ok(None);
+    };
+    let Some(item_bindings) = match_message(item_pattern, item)? else {
+        return Ok(None);
+    };
+    bindings.extend(item_bindings);
+    Ok(Some(bindings))
 }
 
 fn bindings_from(value: &Json) -> HashMap<String, Json> {

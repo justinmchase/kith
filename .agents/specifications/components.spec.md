@@ -127,6 +127,10 @@ export scene Main {
   groups a full Uffda pattern (Or / Then / Pipe) so `|` and juxtaposition
   cannot eat the handler body. Bindings from the match are in scope for the
   body.
+- `on Acc Item { ... }` matches two values: Acc against the accumulator and
+  Item against one completed map item. Item is a `name: pattern` capture, an
+  atom, or `(pattern)` so a following `{` stays the handler body. There is no
+  `{ kind: "Reduce" }` envelope. See [reduce](./workflows.spec.md#declaration).
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `on any`
   remains valid; `else` is the spelling for a fallthrough clause.
@@ -192,7 +196,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
 - `{ kind: "state", name: string, start: boolean, handlers: [Handler] }`
-- `{ kind: "handler", pattern: Pattern, body: [Statement] }`
+- `{ kind: "handler", pattern: Pattern, item: Pattern | null, body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression }`
 - `{ kind: "sendTo", port: string, message: Expression }`
@@ -205,7 +209,8 @@ Exactly one state in a component MUST have `start: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
-MUST be `null` when the send is `send down any`.
+MUST be `null` when the send is `send down any`. `handler.item` MAY be omitted
+when the transition matches one message.
 
 ## Example
 

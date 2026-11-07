@@ -111,9 +111,9 @@ capitals.
 - **Fan-out**: a map step (`fanout path -> Kind reduce Reducer from Init`)
   that spawns one work item per list element.
 - **Join**: fan-in of those work items. Each completion is reduced into an
-  accumulator (`{ kind: "Reduce", acc, item }`), then `then`.
-- **Reduce**: the fold that is fan-in. The reducer receives the aggregate
-  and one item; its `complete` payload is the next aggregate.
+  accumulator, then `then`.
+- **Reduce**: the fold that is fan-in. The reducer matches the aggregate
+  then one item (`on Acc Item`); its `complete` payload is the next aggregate.
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

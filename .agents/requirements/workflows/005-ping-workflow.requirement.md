@@ -18,11 +18,11 @@ Expected behavior:
   two `Carrier` work items. Each Carrier MUST `print` a pickup request.
 - `World::send` of `{ kind: "Delivered" }` to each Carrier MUST complete
   those items. `Summarize` MUST fold each shipment and succeed with
-  `{ kind: "Summary", total: 2 }`.
+  `{ total: 2 }`.
 - Snapshot after pickup and restore MUST still accept those confirmations.
 - Injecting `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs`, `tests/grammar.rs`, `tests/cli.rs`, and
-  `tests/host.rs` (`req:workflows-005`).
+- Tests: `tests/interpreter.rs`, `tests/grammar.rs`, and `tests/cli.rs`
+  (`req:workflows-005`).

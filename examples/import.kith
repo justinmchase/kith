@@ -13,7 +13,7 @@ component Worker {
 
 component Count {
   start Idle {
-    on { kind: "Reduce", acc: any, item: any } {
+    on acc: any item: any {
       complete (add acc 1);
     }
   }

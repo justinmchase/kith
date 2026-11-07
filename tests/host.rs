@@ -46,47 +46,28 @@ fn object_pattern_matches_ping_and_rejects_pong() {
 }
 
 #[test]
-// req:workflows-005
+// req:workflows-003
 fn reduce_step_adds_one_to_the_accumulator() {
     let pattern = json!({
         "kind": "over",
         "keys": {
-            "kind": {
-                "kind": "equal",
-                "value": {"kind": "value.literal", "value": "Reduce"}
-            },
-            "acc": {
+            "total": {
                 "kind": "variable",
-                "name": "acc",
-                "pattern": {"kind": "any"}
-            },
-            "item": {
-                "kind": "variable",
-                "name": "item",
+                "name": "total",
                 "pattern": {"kind": "any"}
             }
-        },
-        "rest": null
+        }
     });
-    let message = json!({
-        "kind": "Reduce",
-        "acc": {"kind": "Summary", "total": 1.0},
-        "item": {"kind": "Shipped"}
-    });
-    let bindings = match_message(&pattern, &message)
+    let bindings = match_message(&pattern, &json!({"total": 1.0}))
         .expect("match")
-        .expect("Reduce should match");
+        .expect("accumulator should match");
     assert_eq!(
         evaluate(
             &json!({
                 "kind": "invocation",
                 "expression": {"kind": "reference", "name": "add"},
                 "args": [
-                    {
-                        "kind": "member",
-                        "expression": {"kind": "reference", "name": "acc"},
-                        "name": "total"
-                    },
+                    {"kind": "reference", "name": "total"},
                     {"kind": "number", "value": 1}
                 ]
             }),

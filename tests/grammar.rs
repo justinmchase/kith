@@ -152,6 +152,13 @@ fn import_source_parses_fanout_and_join() {
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
             if component == "Worker" && reduce == "Count"
     ));
+    let count = program.component("Count").expect("Count");
+    let fold = &count.states[0].handlers[0];
+    assert_eq!(fold.pattern["kind"], "variable");
+    assert_eq!(fold.pattern["name"], "acc");
+    let item = fold.item.as_ref().expect("item pattern");
+    assert_eq!(item["kind"], "variable");
+    assert_eq!(item["name"], "item");
     World::check(&program).expect("import checks");
 }
 
@@ -174,7 +181,13 @@ fn order_source_parses_tasks_picks_and_map() {
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
             if component == "Carrier" && reduce == "Summarize"
     )));
-    assert!(program.component("Summarize").is_some());
+    let summarize = program.component("Summarize").expect("Summarize");
+    let fold = &summarize.states[0].handlers[0];
+    assert_eq!(fold.pattern["kind"], "over");
+    assert!(fold.pattern["keys"].get("total").is_some());
+    let item = fold.item.as_ref().expect("item pattern");
+    assert_eq!(item["kind"], "variable");
+    assert_eq!(item["name"], "item");
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");
     assert_eq!(last.pattern["kind"], "any");

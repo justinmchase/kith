@@ -65,9 +65,18 @@ capitals.
 The normative workflow is `examples/order.kith`: validate, choose, charge,
 choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
 the graph moves with `then` / `pick`. A map item MAY wait without completing
-until the host sends a later message into that work item.
+until the host sends a later message into that work item. The reducer matches
+the accumulator then the item, not a tagged envelope.
 
 ```kith
+component Summarize {
+  start Idle {
+    on { total } item: any {
+      complete { total: (add total 1) };
+    }
+  }
+}
+
 workflow Order {
   start Validate: ValidateOrder then Stock;
   Stock: pick {
@@ -79,7 +88,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> Carrier reduce Summarize from { kind: "Summary", total: 0 } then succeed;
+  Fulfill: fanout items -> Carrier reduce Summarize from { total: 0 } then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -103,9 +112,10 @@ workflow Host {
   the working object. Spawn one `Kind` per element with
   `{ kind: "Item", item, index }` (Step Functions Map). Fan-in is a fold, not
   an array. `Init` is the accumulator for zero items. Each completion, in
-  completion order, invokes `Reducer` once with
-  `{ kind: "Reduce", acc, item }` and the reducer's `complete` payload becomes
-  the next `acc`. Only that accumulator is retained.
+  completion order, invokes `Reducer` once: its `on Acc Item` matches Acc
+  against the current accumulator and Item against that one payload. The
+  reducer's `complete` payload becomes the next `acc`. Only that accumulator
+  is retained.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
@@ -160,7 +170,7 @@ record MUST NOT be JSON.
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `Carrier` work items.
 After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
-MUST fold each `Shipped` payload into `{ kind: "Summary", total: 2 }`.
+MUST fold each `Shipped` payload into `{ total: 2 }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 

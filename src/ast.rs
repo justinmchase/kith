@@ -148,6 +148,8 @@ pub struct State {
 pub struct Handler {
     pub kind: String,
     pub pattern: Json,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<Json>,
     #[serde(default)]
     pub body: Vec<Statement>,
 }

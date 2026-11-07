@@ -114,15 +114,34 @@ rule OnBareTokens = not "{" not "(" t:any -> [t];
 
 rule OnBarePattern = |> OnBareTokens |> PatternTokens;
 
+rule OnCapturePattern =
+  n:Identifier ":" p:OnPattern
+  -> { kind: "variable", name: n, pattern: p }
+;
+
 rule OnPattern =
   | ("(" p:Pattern ")" -> p)
   | OnObjectPattern
+  | OnCapturePattern
+  | OnBarePattern
+;
+
+# Second pattern cannot start with `{`, or it would eat the handler body.
+rule OnItemPattern =
+  | ("(" p:Pattern ")" -> p)
+  | OnCapturePattern
   | OnBarePattern
 ;
 
 rule ComponentHandler =
-  "on" p:OnPattern "{" b:ComponentStatement* "}"
-  -> { kind: "handler", pattern: p, body: b }
+  | (
+    "on" a:OnPattern i:OnItemPattern "{" b:ComponentStatement* "}"
+    -> { kind: "handler", pattern: a, item: i, body: b }
+  )
+  | (
+    "on" p:OnPattern "{" b:ComponentStatement* "}"
+    -> { kind: "handler", pattern: p, body: b }
+  )
 ;
 
 # Default clause, last in the state. Same tree as `on any`.

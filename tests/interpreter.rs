@@ -87,6 +87,7 @@ fn counting(name: &str) -> Component {
             start: true,
             handlers: vec![Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: json!({"kind": "any"}),
                 body: vec![Statement::Assign {
                     field: "seen".into(),
@@ -350,6 +351,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
         vec![
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("To"),
                 body: vec![Statement::SendTo {
                     port: "child".into(),
@@ -358,6 +360,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("Kind"),
                 body: vec![Statement::SendDown {
                     component: Some("Child".into()),
@@ -366,6 +369,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("OtherKind"),
                 body: vec![Statement::SendDown {
                     component: Some("Other".into()),
@@ -374,6 +378,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("All"),
                 body: vec![Statement::SendDown {
                     component: None,
@@ -440,6 +445,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
         vec![],
         vec![Handler {
             kind: "handler".into(),
+            item: None,
             pattern: kind_eq("Go"),
             body: vec![Statement::SendUp {
                 message: object_kind("Ghost"),
@@ -452,6 +458,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
         vec![
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("Go"),
                 body: vec![Statement::SendTo {
                     port: "child".into(),
@@ -460,6 +467,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("Miss"),
                 body: vec![Statement::SendTo {
                     port: "child".into(),
@@ -468,6 +476,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("None"),
                 body: vec![Statement::SendDown {
                     component: Some("Ghost".into()),
@@ -476,6 +485,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
             },
             Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: kind_eq("Missing"),
                 body: vec![Statement::SendTo {
                     port: "missing".into(),
@@ -535,6 +545,7 @@ fn first_matching_handler_consumes_the_message() {
             handlers: vec![
                 Handler {
                     kind: "handler".into(),
+                    item: None,
                     pattern: json!({"kind": "any"}),
                     body: vec![Statement::Assign {
                         field: "picked".into(),
@@ -543,6 +554,7 @@ fn first_matching_handler_consumes_the_message() {
                 },
                 Handler {
                     kind: "handler".into(),
+                    item: None,
                     pattern: json!({"kind": "any"}),
                     body: vec![Statement::Assign {
                         field: "picked".into(),
@@ -647,6 +659,7 @@ fn worker() -> Component {
             start: true,
             handlers: vec![Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: json!({
                     "kind": "over",
                     "keys": {
@@ -696,25 +709,15 @@ fn count_reducer() -> Component {
             start: true,
             handlers: vec![Handler {
                 kind: "handler".into(),
+                item: Some(json!({
+                    "kind": "variable",
+                    "name": "item",
+                    "pattern": {"kind": "any"}
+                })),
                 pattern: json!({
-                    "kind": "over",
-                    "keys": {
-                        "kind": {
-                            "kind": "equal",
-                            "value": {"kind": "value.literal", "value": "Reduce"}
-                        },
-                        "acc": {
-                            "kind": "variable",
-                            "name": "acc",
-                            "pattern": {"kind": "any"}
-                        },
-                        "item": {
-                            "kind": "variable",
-                            "name": "item",
-                            "pattern": {"kind": "any"}
-                        }
-                    },
-                    "rest": null
+                    "kind": "variable",
+                    "name": "acc",
+                    "pattern": {"kind": "any"}
                 }),
                 body: vec![Statement::Complete {
                     message: json!({
@@ -784,6 +787,7 @@ fn child_workflow_completes_to_parent() {
         vec![],
         vec![Handler {
             kind: "handler".into(),
+            item: None,
             pattern: json!({"kind": "any"}),
             body: vec![Statement::Complete {
                 message: object_kind("Done"),
@@ -813,6 +817,7 @@ fn snapshot_restore_continues_a_run() {
         vec![],
         vec![Handler {
             kind: "handler".into(),
+            item: None,
             pattern: json!({"kind": "any"}),
             body: vec![Statement::Complete {
                 message: object_kind("Pong"),
@@ -862,6 +867,7 @@ fn run_path_executes_dynamic_ir() {
             vec![],
             vec![Handler {
                 kind: "handler".into(),
+                item: None,
                 pattern: json!({"kind": "any"}),
                 body: vec![Statement::Complete {
                     message: object_kind("Dyn"),
@@ -910,10 +916,7 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     world.inject(paid_order()).unwrap();
     world.run_until_idle().unwrap();
     assert!(!world.completed(world.root_id()));
-    assert_eq!(
-        world.progress(world.root_id()).unwrap()["total"],
-        json!(2)
-    );
+    assert_eq!(world.progress(world.root_id()).unwrap()["total"], json!(2));
     assert_eq!(world.prints().len(), 2);
     assert_eq!(world.prints()[0]["kind"], json!("PickupRequested"));
     for carrier in world.children_of_kind(world.root_id(), "Carrier") {
@@ -923,8 +926,8 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     confirm_deliveries(&mut world);
     world.run_until_idle().unwrap();
     let output = world.output(world.root_id()).unwrap();
-    assert_eq!(output["kind"], json!("Summary"));
     assert_eq!(output["total"], json!(2.0));
+    assert!(output.get("kind").is_none());
     assert!(output.get("shipments").is_none());
     assert!(world
         .prints()
@@ -948,8 +951,8 @@ fn order_snapshot_restore_resumes_delivery() {
     confirm_deliveries(&mut restored);
     restored.run_until_idle().unwrap();
     assert_eq!(
-        restored.output(restored.root_id()).unwrap()["kind"],
-        json!("Summary")
+        restored.output(restored.root_id()).unwrap()["total"],
+        json!(2.0)
     );
 }
 

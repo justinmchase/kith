@@ -11,8 +11,8 @@ spec_ref: .agents/specifications/workflows.spec.md#definitions; .agents/specific
 Preconditions:
 
 - A workflow `start fanout items -> Worker reduce Count from 0 then succeed`,
-  a port-less `Worker`, and a port-less `Count` that folds
-  `{ kind: "Reduce", acc, item }` with `(add acc 1)`.
+  a port-less `Worker`, and a port-less `Count` that folds with
+  `on acc: any item: any { complete (add acc 1); }`.
 
 Expected behavior:
 
@@ -24,4 +24,5 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:workflows-003`).
+- Tests: `tests/interpreter.rs`, `tests/grammar.rs`, and `tests/host.rs`
+  (`req:workflows-003`).
