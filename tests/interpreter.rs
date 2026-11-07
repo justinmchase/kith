@@ -701,35 +701,50 @@ fn count_reducer() -> Component {
     Component {
         kind: "component".into(),
         name: "Count".into(),
-        fields: vec![],
+        fields: vec![Field {
+            kind: "field".into(),
+            name: "total".into(),
+            pattern: Some(json!({"kind": "type", "type": "number"})),
+            init: None,
+        }],
         ports: vec![],
         states: vec![State {
             kind: "state".into(),
-            name: "Idle".into(),
+            name: "Start".into(),
             start: true,
-            handlers: vec![Handler {
-                kind: "handler".into(),
-                item: Some(json!({
-                    "kind": "variable",
-                    "name": "item",
-                    "pattern": {"kind": "any"}
-                })),
-                pattern: json!({
-                    "kind": "variable",
-                    "name": "acc",
-                    "pattern": {"kind": "any"}
-                }),
-                body: vec![Statement::Complete {
-                    message: json!({
-                        "kind": "invocation",
-                        "expression": {"kind": "reference", "name": "add"},
-                        "args": [
-                            {"kind": "reference", "name": "acc"},
-                            {"kind": "number", "value": 1}
-                        ]
+            handlers: vec![
+                Handler {
+                    kind: "handler".into(),
+                    item: Some(json!({
+                        "kind": "variable",
+                        "name": "item",
+                        "pattern": {"kind": "any"}
+                    })),
+                    pattern: json!({
+                        "kind": "equal",
+                        "value": {"kind": "value.literal", "value": "item"}
                     }),
-                }],
-            }],
+                    body: vec![Statement::Assign {
+                        field: "total".into(),
+                        expression: json!({
+                            "kind": "invocation",
+                            "expression": {"kind": "reference", "name": "add"},
+                            "args": [
+                                {"kind": "reference", "name": "total"},
+                                {"kind": "number", "value": 1}
+                            ]
+                        }),
+                    }],
+                },
+                Handler {
+                    kind: "handler".into(),
+                    item: None,
+                    pattern: json!({"kind": "any"}),
+                    body: vec![Statement::Complete {
+                        message: json!({"kind": "reference", "name": "total"}),
+                    }],
+                },
+            ],
         }],
     }
 }
@@ -910,7 +925,7 @@ fn confirm_deliveries(world: &mut World) {
 }
 
 #[test]
-// req:workflows-005 req:components-007 req:components-009
+// req:workflows-005 req:components-007 req:components-009 req:components-010
 fn order_workflow_waits_for_delivery_then_summarizes() {
     let mut world = World::start(order_program()).expect("start order");
     world.inject(paid_order()).unwrap();
@@ -926,8 +941,8 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     confirm_deliveries(&mut world);
     world.run_until_idle().unwrap();
     let output = world.output(world.root_id()).unwrap();
+    assert_eq!(output["kind"], json!("Summarize"));
     assert_eq!(output["total"], json!(2.0));
-    assert!(output.get("kind").is_none());
     assert!(output.get("shipments").is_none());
     assert!(world
         .prints()
@@ -951,8 +966,8 @@ fn order_snapshot_restore_resumes_delivery() {
     confirm_deliveries(&mut restored);
     restored.run_until_idle().unwrap();
     assert_eq!(
-        restored.output(restored.root_id()).unwrap()["total"],
-        json!(2.0)
+        restored.output(restored.root_id()).unwrap()["kind"],
+        json!("Summarize")
     );
 }
 

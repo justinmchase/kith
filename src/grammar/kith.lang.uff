@@ -34,8 +34,14 @@ rule ExportList =
 ;
 
 rule Field =
-  "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
-  -> { kind: "field", name: n, pattern: p, init: e }
+  | (
+    "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
+    -> { kind: "field", name: n, pattern: p, init: e }
+  )
+  | (
+    "field" n:Identifier ":" p:Pattern ";"
+    -> { kind: "field", name: n, pattern: p }
+  )
 ;
 
 rule Port =
@@ -70,9 +76,41 @@ rule SendDown =
   )
 ;
 
+# `{ kind: "Summarize" total }` is `kind: "Summarize"` plus shorthand `total`.
+rule CompleteObjectEntry =
+  | (
+    n:Identifier ":" v:Expression
+    -> { kind: "objectKey", name: n, expression: v }
+  )
+  | (
+    n:Identifier not ":"
+    -> { kind: "objectKey", name: n, expression: { kind: "reference", name: n } }
+  )
+;
+
+rule CompleteObjectTail =
+  ","? more:CompleteObjectEntry -> more
+;
+
+rule CompleteObjectEntries =
+  first:CompleteObjectEntry rest:CompleteObjectTail* ","?
+  -> (flat (pack first rest))
+;
+
+rule CompleteObject =
+  "{" keys:CompleteObjectEntries? "}"
+  -> { kind: "object", keys: (coalesce keys []) }
+;
+
 rule Complete =
-  "complete" e:Expression ";"
-  -> { kind: "complete", message: e }
+  | (
+    "complete" obj:CompleteObject ";"
+    -> { kind: "complete", message: obj }
+  )
+  | (
+    "complete" value:Expression ";"
+    -> { kind: "complete", message: value }
+  )
 ;
 
 rule Print =
@@ -110,6 +148,11 @@ rule OnObjectTokens =
 
 rule OnObjectPattern = |> OnObjectTokens |> PatternTokens;
 
+rule OnQuotedString =
+  "\"" p:SpecifierChar* "\""
+  -> { kind: "equal", value: { kind: "value.literal", value: (join p "") } }
+;
+
 rule OnBareTokens = not "{" not "(" t:any -> [t];
 
 rule OnBarePattern = |> OnBareTokens |> PatternTokens;
@@ -122,6 +165,7 @@ rule OnCapturePattern =
 rule OnPattern =
   | ("(" p:Pattern ")" -> p)
   | OnObjectPattern
+  | OnQuotedString
   | OnCapturePattern
   | OnBarePattern
 ;
@@ -146,13 +190,25 @@ rule ComponentHandler =
 
 # Default clause, last in the state. Same tree as `on any`.
 rule ElseHandler =
-  "else" "{" b:ComponentStatement* "}"
-  -> [{ kind: "handler", pattern: { kind: "any" }, body: b }]
+  | (
+    "else" "{" b:ComponentStatement* "}"
+    -> [{ kind: "handler", pattern: { kind: "any" }, body: b }]
+  )
+  | (
+    "else" s:ComponentStatement
+    -> [{ kind: "handler", pattern: { kind: "any" }, body: [s] }]
+  )
 ;
 
 rule StartState =
-  "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
-  -> { kind: "state", name: n, start: true, handlers: (flat [h (coalesce e [])]) }
+  | (
+    "start" "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: "Start", start: true, handlers: (flat [h (coalesce e [])]) }
+  )
+  | (
+    "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: n, start: true, handlers: (flat [h (coalesce e [])]) }
+  )
 ;
 
 rule NamedState =

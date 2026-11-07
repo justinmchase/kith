@@ -16,6 +16,7 @@ verify it cite it with `req:{id}`.
 - [Print](./components/007-print.requirement.md)
 - [Else handler](./components/008-else.requirement.md)
 - [Goto state](./components/009-goto.requirement.md)
+- [Unnamed start and else complete](./components/010-start-else-complete.requirement.md)
 
 ## Scenes
 

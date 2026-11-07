@@ -110,10 +110,9 @@ capitals.
   component. Ownership is has-a.
 - **Fan-out**: a map step (`fanout path -> Kind reduce Reducer from Init`)
   that spawns one work item per list element.
-- **Join**: fan-in of those work items. Each completion is reduced into an
-  accumulator, then `then`.
-- **Reduce**: the fold that is fan-in. The reducer matches the aggregate
-  then one item (`on Acc Item`); its `complete` payload is the next aggregate.
+- **Join**: fan-in of those work items into one reducer instance, then `then`.
+- **Reduce**: the fold that is fan-in. The reducer holds the aggregate in
+  its fields, takes each item, then `complete`s on the done signal.
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

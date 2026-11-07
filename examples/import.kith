@@ -12,10 +12,13 @@ component Worker {
 }
 
 component Count {
-  start Idle {
-    on acc: any item: any {
-      complete (add acc 1);
+  field total: number;
+
+  start {
+    on "item" item: any {
+      total -> (add total 1);
     }
+    else complete total;
   }
 }
 

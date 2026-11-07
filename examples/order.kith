@@ -48,11 +48,14 @@ component Carrier {
 }
 
 component Summarize {
-  start Idle {
-    on { total } item: any {
-      print { kind: "Tally", total: (add total 1), status: item.kind };
-      complete { total: (add total 1) };
+  field total: number;
+
+  start {
+    on "item" item: any {
+      total -> (add total 1);
+      print { kind: "Tally", total: total, status: item.kind };
     }
+    else complete { kind: "Summarize" total };
   }
 }
 

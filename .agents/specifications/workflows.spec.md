@@ -26,9 +26,9 @@ capitals.
   in-flight work, status.
 - **Task**: run one component or workflow until it `complete`s. That payload
   is the step output and the next step's input.
-- **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: each
-  completion is folded into an accumulator with the previous aggregate and
-  that one item, not collected into an array.
+- **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: one
+  reducer instance holds the aggregate in its fields. Each completion is
+  one item; a done signal asks it to `complete`.
 
 ## Axioms
 
@@ -36,8 +36,8 @@ capitals.
 - Completing a step transitions along `then` (or a choice clause). The working
   value is the output of the step that just finished.
 - Fan-out cardinality is known only at run time, including zero and one.
-  Fan-in is a reduce: the working value after a map is the accumulator, not
-  a collection of item payloads.
+  Fan-in is a reduce: the working value after a map is the reducer's
+  `complete` payload, not a collection of item payloads.
 - The graph is a value. A declared `workflow Name` is sugar for a named IR.
   `run path` executes whatever graph is in the working value at `path`.
 - A run MUST be serializable as a Uffda data codec record. Restoring a
@@ -51,9 +51,10 @@ capitals.
 - A task or map kind MUST exist and MUST NOT require unfilled ports unless a
   scene prototype supplies that tree.
 - `complete V` on a work item MUST send `V` to the waiting workflow and count
-  down the join set. For a map, `V` MUST be folded one item at a time. The
-  last fold (or the `from` identity when the list is empty) advances `then`.
-  The join MUST NOT materialize an array of all payloads as the step output.
+  down the join set. For a map, `V` MUST be sent to the reducer as one item.
+  The reducer's `complete` after the done signal (including when the list is
+  empty) advances `then`. The join MUST NOT materialize an array of all
+  payloads as the step output.
 - Choice matches the working value against clause patterns in order. `else`
   MUST be last if present. No match MUST fail the run.
 - Snapshot and restore MUST round-trip a run, including in-flight map items.
@@ -65,15 +66,18 @@ capitals.
 The normative workflow is `examples/order.kith`: validate, choose, charge,
 choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
 the graph moves with `then` / `pick`. A map item MAY wait without completing
-until the host sends a later message into that work item. The reducer matches
-the accumulator then the item, not a tagged envelope.
+until the host sends a later message into that work item. The reducer is one
+instance: `from` initializes its fields, each completion is `"item"` plus the
+payload, then a done signal takes `else`.
 
 ```kith
 component Summarize {
-  start Idle {
-    on { total } item: any {
-      complete { total: (add total 1) };
+  field total: number;
+  start {
+    on "item" item: any {
+      total -> (add total 1);
     }
+    else complete { kind: "Summarize" total };
   }
 }
 
@@ -110,12 +114,13 @@ workflow Host {
   (Step Functions Task).
 - **map** `fanout path -> Kind reduce Reducer from Init` — `path` is a key on
   the working object. Spawn one `Kind` per element with
-  `{ kind: "Item", item, index }` (Step Functions Map). Fan-in is a fold, not
-  an array. `Init` is the accumulator for zero items. Each completion, in
-  completion order, invokes `Reducer` once: its `on Acc Item` matches Acc
-  against the current accumulator and Item against that one payload. The
-  reducer's `complete` payload becomes the next `acc`. Only that accumulator
-  is retained.
+  `{ kind: "Item", item, index }` (Step Functions Map). Fan-in is one
+  `Reducer` instance, not an array. `from` initializes that instance's
+  fields (`from { total: 0 }` sets `total`; a scalar `from` sets the only
+  field). Each completion is sent as `"item"` plus the payload. After the
+  last item (or immediately when the list is empty) the runtime sends a
+  done signal. The reducer's `else` MUST `complete`; that payload is the
+  map output.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
@@ -170,7 +175,7 @@ record MUST NOT be JSON.
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `Carrier` work items.
 After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
-MUST fold each `Shipped` payload into `{ total: 2 }`.
+MUST fold each `Shipped` payload into `{ kind: "Summarize", total: 2 }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
@@ -186,9 +191,9 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
 - **The graph is data.** That is what makes dynamic steps, runtime-built
   workflows, and rehydration the same interpreter.
 - **Fan-in is a reduce, not a collect.** A results array is O(n) memory and
-  forces the next step to re-walk every payload. `(acc, item) -> acc'` keeps
-  a constant-size aggregate. Collecting into a list is still possible: write
-  a reducer that concatenates, and accept the cost.
+  forces the next step to re-walk every payload. One reducer instance holds
+  a constant-size aggregate in its fields. Collecting into a list is still
+  possible: write a reducer that concatenates, and accept the cost.
 
 ## Open questions
 

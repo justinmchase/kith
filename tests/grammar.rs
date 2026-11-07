@@ -153,17 +153,20 @@ fn import_source_parses_fanout_and_join() {
             if component == "Worker" && reduce == "Count"
     ));
     let count = program.component("Count").expect("Count");
+    assert!(count.fields.iter().any(|field| field.name == "total"));
     let fold = &count.states[0].handlers[0];
-    assert_eq!(fold.pattern["kind"], "variable");
-    assert_eq!(fold.pattern["name"], "acc");
+    assert_eq!(fold.pattern["kind"], "equal");
+    assert_eq!(fold.pattern["value"]["value"], "item");
     let item = fold.item.as_ref().expect("item pattern");
     assert_eq!(item["kind"], "variable");
     assert_eq!(item["name"], "item");
+    let last = count.states[0].handlers.last().expect("else");
+    assert_eq!(last.pattern["kind"], "any");
     World::check(&program).expect("import checks");
 }
 
 #[test]
-// req:grammar-001 req:workflows-005 req:components-008 req:components-009
+// req:grammar-001 req:workflows-005 req:components-008 req:components-009 req:components-010
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -182,12 +185,20 @@ fn order_source_parses_tasks_picks_and_map() {
             if component == "Carrier" && reduce == "Summarize"
     )));
     let summarize = program.component("Summarize").expect("Summarize");
+    assert!(summarize.fields.iter().any(|field| field.name == "total"));
+    assert_eq!(summarize.states[0].name, "Start");
     let fold = &summarize.states[0].handlers[0];
-    assert_eq!(fold.pattern["kind"], "over");
-    assert!(fold.pattern["keys"].get("total").is_some());
+    assert_eq!(fold.pattern["kind"], "equal");
+    assert_eq!(fold.pattern["value"]["value"], "item");
     let item = fold.item.as_ref().expect("item pattern");
     assert_eq!(item["kind"], "variable");
     assert_eq!(item["name"], "item");
+    let done = summarize.states[0].handlers.last().expect("else");
+    assert_eq!(done.pattern["kind"], "any");
+    assert!(matches!(
+        done.body.last(),
+        Some(kith::ast::Statement::Complete { .. })
+    ));
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");
     assert_eq!(last.pattern["kind"], "any");

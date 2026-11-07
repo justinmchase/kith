@@ -118,22 +118,24 @@ export scene Main {
 - `component Name { ... }` declares a kind. Instances of that kind are created
   by a scene.
 - `field name: pattern = expression` is local state. The pattern MUST match
-  the field's value after every transition.
+  the field's value after every transition. `= expression` MAY be omitted;
+  a missing init is uninitialized until a transition or a map `from` assigns it.
 - `Kind name;` is a port: one child of kind `Kind` bound as `name`.
-- `start State { ... }` is the start state. Ordinary states use
-  `state Name { ... }`.
-- `on pattern { ... }` is a transition in that state. An object or a single
-  atom (`any`, a type name) does not need parentheses. `on (pattern) { ... }`
-  groups a full Uffda pattern (Or / Then / Pipe) so `|` and juxtaposition
-  cannot eat the handler body. Bindings from the match are in scope for the
-  body.
-- `on Acc Item { ... }` matches two values: Acc against the accumulator and
-  Item against one completed map item. Item is a `name: pattern` capture, an
-  atom, or `(pattern)` so a following `{` stays the handler body. There is no
-  `{ kind: "Reduce" }` envelope. See [reduce](./workflows.spec.md#declaration).
+- `start State { ... }` is the start state. `start { ... }` is the same with
+  implicit name `Start`. Ordinary states use `state Name { ... }`.
+- `on pattern { ... }` is a transition in that state. An object, a quoted
+  string, or a single atom (`any`, a type name) does not need parentheses.
+  `on (pattern) { ... }` groups a full Uffda pattern (Or / Then / Pipe) so `|`
+  and juxtaposition cannot eat the handler body. Bindings from the match are
+  in scope for the body.
+- `on Tag Item { ... }` matches two values. Item is a `name: pattern` capture,
+  an atom, or `(pattern)` so a following `{` stays the handler body. A map
+  reducer uses `on "item" item: any` for each completion; see
+  [reduce](./workflows.spec.md#declaration).
 - `else { ... }` is the default transition. It MUST be last if present. It
-  is the same handler as `on any`: it matches any remaining message. `on any`
-  remains valid; `else` is the spelling for a fallthrough clause.
+  is the same handler as `on any`: it matches any remaining message. `else`
+  MAY be a single statement: `else complete { kind: "Summarize" total };`.
+  `on any` remains valid; `else` is the spelling for a fallthrough clause.
 - `goto Name;` enters another declared state of this component. The next
   message is matched in `Name`. An unknown name MUST fail check. Workflows
   change step with `then` / `pick`, not `goto`.
@@ -147,7 +149,9 @@ export scene Main {
 - `send down any V` sends `V` to every direct child.
 - `send up V` sends `V` toward the parent.
 - `complete V` marks the instance done for a parent's join set and sends `V`
-  up. Completing the root marks it done and does not send up.
+  up. Completing the root marks it done and does not send up. A `complete`
+  object MAY use identifier shorthand: `{ kind: "Summarize" total }` is
+  `{ kind: "Summarize", total: total }`.
 - `print E` evaluates `E` and records the value as a diagnostic. It MUST NOT
   be an expression. `kith run` writes those records to stderr as data codec
   lines; stdout remains the run result. Uffda globals such as `length` MAY
