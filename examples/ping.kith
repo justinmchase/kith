@@ -4,7 +4,7 @@ export Main;
 
 component Child {
   start Idle {
-    on ({ kind: "Ping", n: number }) {
+    on { kind: "Ping", n: number } {
       send up { kind: "Pong", n: n };
     }
   }
@@ -15,10 +15,10 @@ component Ping {
   Child child;
 
   start Idle {
-    on ({ kind: "Ping", n: number }) {
+    on { kind: "Ping", n: number } {
       send to child { kind: "Ping", n: n };
     }
-    on ({ kind: "Pong", n: number }) {
+    on { kind: "Pong", n: number } {
       heard -> n;
     }
   }

@@ -53,7 +53,7 @@ export Main;
 
 component Child {
   start Idle {
-    on (any) {
+    on any {
       complete { kind: "X" };
     }
   }
@@ -71,13 +71,13 @@ component Parent {
   Child child;
 
   start Idle {
-    on ({ kind: "To" }) {
+    on { kind: "To" } {
       send to child { kind: "X" };
     }
-    on ({ kind: "Kind" }) {
+    on { kind: "Kind" } {
       send down Child { kind: "X" };
     }
-    on ({ kind: "All" }) {
+    on { kind: "All" } {
       send down any { kind: "X" };
     }
   }

@@ -2,7 +2,7 @@ export Child;
 
 component Child {
   start Idle {
-    on ({ kind: "Ping", n: number }) {
+    on { kind: "Ping", n: number } {
       send up { kind: "Pong", n: n };
     }
   }

@@ -8,7 +8,7 @@ export Main;
 
 component ValidateOrder {
   start Idle {
-    on ({ kind: "Order", orderId: any, items: any, card: any }) {
+    on { kind: "Order", orderId: any, items: any, card: any } {
       complete { kind: "Accepted", orderId: orderId, items: items, card: card };
     }
     else {
@@ -19,10 +19,10 @@ component ValidateOrder {
 
 component ChargeCard {
   start Idle {
-    on ({ kind: "Accepted", card: "ok", orderId: any, items: any }) {
+    on { kind: "Accepted", card: "ok", orderId: any, items: any } {
       complete { kind: "Paid", orderId: orderId, items: items };
     }
-    on ({ kind: "Accepted", orderId: any, items: any, card: any }) {
+    on { kind: "Accepted", orderId: any, items: any, card: any } {
       complete { kind: "Declined", orderId: orderId };
     }
   }
@@ -33,12 +33,12 @@ component Carrier {
   field index: number = 0;
 
   start Waiting {
-    on ({ kind: "Item", item: any, index: number }) {
+    on { kind: "Item", item: any, index: number } {
       item -> item;
       index -> index;
       print { kind: "PickupRequested", item: item, index: index };
     }
-    on ({ kind: "Delivered" }) {
+    on { kind: "Delivered" } {
       complete { kind: "Shipped", item: item, index: index };
     }
   }
@@ -46,7 +46,7 @@ component Carrier {
 
 component Summarize {
   start Idle {
-    on ({ kind: "Reduce", acc: any, item: any }) {
+    on { kind: "Reduce", acc: any, item: any } {
       print { kind: "Tally", total: (add acc.total 1), status: item.kind };
       complete { kind: "Summary", total: (add acc.total 1) };
     }

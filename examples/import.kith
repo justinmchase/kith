@@ -5,7 +5,7 @@ export Main;
 
 component Worker {
   start Idle {
-    on ({ kind: "Item", item: any, index: number }) {
+    on { kind: "Item", item: any, index: number } {
       complete { kind: "Done", item: item, index: index };
     }
   }
@@ -13,7 +13,7 @@ component Worker {
 
 component Count {
   start Idle {
-    on ({ kind: "Reduce", acc: any, item: any }) {
+    on { kind: "Reduce", acc: any, item: any } {
       complete (add acc 1);
     }
   }

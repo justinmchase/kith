@@ -88,7 +88,7 @@ primitive ([workflows](./workflows.spec.md)).
 ```kith
 component Child {
   start Idle {
-    on ({ kind: "Ping", n: number }) {
+    on { kind: "Ping", n: number } {
       send up { kind: "Pong", n: n };
     }
   }
@@ -99,10 +99,10 @@ component Ping {
   Child child;
 
   start Idle {
-    on ({ kind: "Ping", n: number }) {
+    on { kind: "Ping", n: number } {
       send to child { kind: "Ping", n: n };
     }
-    on ({ kind: "Pong", n: number }) {
+    on { kind: "Pong", n: number } {
       heard -> n;
     }
   }
@@ -122,13 +122,14 @@ export scene Main {
 - `Kind name;` is a port: one child of kind `Kind` bound as `name`.
 - `start State { ... }` is the start state. Ordinary states use
   `state Name { ... }`.
-- `on (pattern) { ... }` is a transition in that state. The pattern is grouped
-  so the handler body `{` is not a Then object. The pattern is a Uffda pattern,
-  including object-key captures such as `{ n: number }`. Bindings from the
-  match are in scope for the body.
+- `on pattern { ... }` is a transition in that state. An object or a single
+  atom (`any`, a type name) does not need parentheses. `on (pattern) { ... }`
+  groups a full Uffda pattern (Or / Then / Pipe) so `|` and juxtaposition
+  cannot eat the handler body. Bindings from the match are in scope for the
+  body.
 - `else { ... }` is the default transition. It MUST be last if present. It
-  is the same handler as `on (any)`: it matches any remaining message. `on
-  (any)` remains valid; `else` is the spelling for a fallthrough clause.
+  is the same handler as `on any`: it matches any remaining message. `on any`
+  remains valid; `else` is the spelling for a fallthrough clause.
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 

@@ -1,6 +1,6 @@
 import "@justinmchase/uffda/source" Source;
 import "@justinmchase/uffda/tokenizer" TokenizerNoWhitespace;
-import "@justinmchase/uffda/pattern" Pattern;
+import "@justinmchase/uffda/pattern" Pattern PatternTokens;
 import "@justinmchase/uffda/expression" Expression;
 
 export KithLang;
@@ -89,13 +89,37 @@ rule ComponentStatement =
   | Print
 ;
 
-# Group the message pattern so the handler body `{` is not a Then object.
+# A top-level Pattern is Then: it would take the handler `{` as another object.
+# Reparse one object or atom as a complete pattern so the body `{` stays Kith.
+# `on (P)` still groups a full Pattern (Or / Then / Pipe).
+rule OnObjectChunk =
+  | OnObjectTokens
+  | (not "{" not "}" t:any -> [t])
+;
+
+rule OnObjectTokens =
+  o:"{" c:OnObjectChunk* e:"}"
+  -> (flat (pack o (flat c) e))
+;
+
+rule OnObjectPattern = |> OnObjectTokens |> PatternTokens;
+
+rule OnBareTokens = not "{" not "(" t:any -> [t];
+
+rule OnBarePattern = |> OnBareTokens |> PatternTokens;
+
+rule OnPattern =
+  | ("(" p:Pattern ")" -> p)
+  | OnObjectPattern
+  | OnBarePattern
+;
+
 rule ComponentHandler =
-  "on" "(" p:Pattern ")" "{" b:ComponentStatement* "}"
+  "on" p:OnPattern "{" b:ComponentStatement* "}"
   -> { kind: "handler", pattern: p, body: b }
 ;
 
-# Default clause, last in the state. Same tree as `on (any)`.
+# Default clause, last in the state. Same tree as `on any`.
 rule ElseHandler =
   "else" "{" b:ComponentStatement* "}"
   -> [{ kind: "handler", pattern: { kind: "any" }, body: b }]
