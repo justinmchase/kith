@@ -1,5 +1,7 @@
 export ValidateOrder;
 export ChargeCard;
+export Carrier;
+export Summarize;
 export ShipItem;
 export Order;
 export Main;
@@ -26,12 +28,37 @@ component ChargeCard {
   }
 }
 
-component ShipItem {
-  start Idle {
+component Carrier {
+  field item: string = "";
+  field index: number = 0;
+
+  start Waiting {
     on ({ kind: "Item", item: any, index: number }) {
+      item -> item;
+      index -> index;
+      print { kind: "PickupRequested", item: item, index: index };
+    }
+    on ({ kind: "Delivered" }) {
       complete { kind: "Shipped", item: item, index: index };
     }
   }
+}
+
+component Summarize {
+  start Idle {
+    on (shipments: any) {
+      print { kind: "Tally", total: (length shipments) };
+      complete {
+        kind: "Summary",
+        total: (length shipments),
+        shipments: shipments
+      };
+    }
+  }
+}
+
+workflow ShipItem {
+  start Carrier then succeed;
 }
 
 workflow Order {
@@ -45,7 +72,8 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> ShipItem then succeed;
+  Fulfill: fanout items -> ShipItem then Tally;
+  Tally: Summarize then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }

@@ -45,8 +45,9 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes and the same sends.
-- A transition MAY send zero or more messages, change fields, complete, and
-  change the machine's state. It MUST NOT wait by blocking the dispatcher. The
+- A transition MAY send zero or more messages, change fields, `print`,
+  complete, and change the machine's state. It MUST NOT wait by blocking the
+  dispatcher. The
   first executable slice MUST NOT spawn or destroy children; scene-constructed
   children exist for the parent's lifetime. Dynamic spawn is a
   [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
@@ -136,6 +137,10 @@ export scene Main {
 - `send up V` sends `V` toward the parent.
 - `complete V` marks the instance done for a parent's join set and sends `V`
   up. Completing the root marks it done and does not send up.
+- `print E` evaluates `E` and records the value as a diagnostic. It MUST NOT
+  be an expression. `kith run` writes those records to stderr as data codec
+  lines; stdout remains the run result. Uffda globals such as `length` MAY
+  appear in expressions because they are pure.
 
 A send enqueues work for the dispatcher. The sender MUST NOT observe a
 handler's result as a return value. If a later transition needs a result, the
@@ -186,6 +191,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendTo", port: string, message: Expression }`
 - `{ kind: "sendDown", component: string | null, message: Expression }`
 - `{ kind: "complete", message: Expression }`
+- `{ kind: "print", expression: Expression }`
 
 Exactly one state in a component MUST have `start: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing

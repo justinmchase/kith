@@ -39,7 +39,7 @@ rule Field =
 ;
 
 rule Port =
-  not "field" not "start" not "state" not "step" not "join"
+  not "field" not "start" not "state" not "step" not "join" not "print"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -75,12 +75,18 @@ rule Complete =
   -> { kind: "complete", message: e }
 ;
 
+rule Print =
+  "print" e:Expression ";"
+  -> { kind: "print", expression: e }
+;
+
 rule ComponentStatement =
   | Assign
   | SendTo
   | SendUp
   | SendDown
   | Complete
+  | Print
 ;
 
 # Group the message pattern so the handler body `{` is not a Then object.

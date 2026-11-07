@@ -41,8 +41,9 @@ The executable name MUST be `kith`. The initial surface MUST be:
   imports. `check` and `compile` MUST resolve relative `.kith` imports before
   checking. `compile` MUST write a `.kith.ast` data codec artifact. `run` MUST
   print a data codec record of the root component's fields, or of the
-  workflow succeed output when the root is a workflow. `--message` remains
-  JSON for this slice.
+  workflow succeed output when the root is a workflow. `print` values MUST
+  go to stderr as data codec records so stdout stays the run result.
+  `--message` remains JSON for this slice.
 
 ## Deferred commands
 

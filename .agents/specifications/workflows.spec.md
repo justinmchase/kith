@@ -58,8 +58,9 @@ capitals.
 ### Declaration
 
 The normative workflow is `examples/order.kith`: validate, choose, charge,
-choose, map-ship. Tasks are components that `complete`; the graph moves with
-`then` / `pick`.
+choose, map nested `ShipItem` workflows, then tally. Tasks `complete`; the
+graph moves with `then` / `pick`. A map item MAY wait without completing until
+the host sends a later message into that work item.
 
 ```kith
 workflow Order {
@@ -73,9 +74,14 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> ShipItem then succeed;
+  Fulfill: fanout items -> ShipItem then Tally;
+  Tally: Summarize then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
+}
+
+workflow ShipItem {
+  start Carrier then succeed;
 }
 ```
 
@@ -94,8 +100,9 @@ workflow Host {
 - **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
   (Step Functions Task).
 - **map** `fanout path -> Kind` — `path` is a key on the working object.
-  Spawn one `Kind` per element with `{ kind: "Item", item, index }`. Output is
-  the array of payloads (Step Functions Map).
+  Spawn one `Kind` per element with `{ kind: "Item", item, index }`. Completions
+  fan in as an array (Step Functions Map). The next step MAY aggregate that
+  array (for example `(length shipments)` in `Summarize`).
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
@@ -113,6 +120,14 @@ it spawns a bare instance (no ports allowed).
 - A step's output becomes the next step's input (Step Functions default
   ResultPath `$`).
 - The run's output is the working value at succeed. `kith run` prints it.
+
+### Waiting for an outside message
+
+A task or map item that does not `complete` leaves the run at that step. That
+is the callback pattern: request pickup, freeze with `World::snapshot`, later
+`World::restore` and `World::send` a confirmation into the waiting component.
+The workflow graph has no `on`; the message is matched by the work item. The
+join set advances when that item `complete`s.
 
 ### Dynamic graphs
 
@@ -139,8 +154,9 @@ record MUST NOT be JSON.
 ## Example
 
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
-at `Order` MUST accept, charge, map two `ShipItem`s, and succeed with two
-`Shipped` payloads.
+at `Order` MUST accept and charge, then wait on two `ShipItem` / `Carrier`
+work items. After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
+MUST succeed with `{ kind: "Summary", total: 2, shipments: [...] }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 

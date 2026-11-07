@@ -162,6 +162,8 @@ pub enum Statement {
     },
     #[serde(rename = "complete")]
     Complete { message: Json },
+    #[serde(rename = "print")]
+    Print { expression: Json },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

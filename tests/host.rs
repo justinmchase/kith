@@ -44,3 +44,30 @@ fn object_pattern_matches_ping_and_rejects_pong() {
     let missed = match_message(&pattern, &json!({"kind": "Pong", "n": 7})).expect("match");
     assert!(missed.is_none());
 }
+
+#[test]
+// req:workflows-005
+fn length_of_a_captured_array_is_the_fan_in_count() {
+    let pattern = json!({
+        "kind": "variable",
+        "name": "shipments",
+        "pattern": {"kind": "any"}
+    });
+    let message = json!([{"kind": "Shipped"}, {"kind": "Shipped"}]);
+    let bindings = match_message(&pattern, &message)
+        .expect("match")
+        .expect("array should match");
+    assert_eq!(bindings.get("shipments"), Some(&message));
+    assert_eq!(
+        evaluate(
+            &json!({
+                "kind": "invocation",
+                "expression": {"kind": "reference", "name": "length"},
+                "args": [{"kind": "reference", "name": "shipments"}]
+            }),
+            &bindings,
+        )
+        .expect("length"),
+        json!(2.0)
+    );
+}

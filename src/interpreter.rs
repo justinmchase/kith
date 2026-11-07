@@ -63,6 +63,7 @@ pub struct World {
     dispatcher: Dispatcher,
     routes: HashMap<(ActorId, u64), Route>,
     route_seq: u64,
+    prints: Vec<Json>,
 }
 
 impl World {
@@ -100,6 +101,7 @@ impl World {
             dispatcher: Dispatcher::new(),
             routes: HashMap::new(),
             route_seq: 0,
+            prints: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         Ok(world)
@@ -193,6 +195,14 @@ impl World {
         serde_json::to_value(self.root_fields()).unwrap_or(Json::Null)
     }
 
+    pub fn prints(&self) -> &[Json] {
+        &self.prints
+    }
+
+    pub fn send(&mut self, id: ActorId, message: Json) -> Result<(), Error> {
+        self.deliver(id, message, Route::Down)
+    }
+
     pub fn inject(&mut self, message: Json) -> Result<(), Error> {
         if self.instances[&self.root_id()].run.is_some() {
             let sends = self.start_run(self.root_id(), message)?;
@@ -283,6 +293,7 @@ impl World {
             "instances": instances,
             "dispatcher": self.dispatcher.snapshot(),
             "routes": routes,
+            "prints": self.prints,
         })
     }
 
@@ -333,6 +344,11 @@ impl World {
                 routes.insert((id, seq), route);
             }
         }
+        let prints = snapshot
+            .get("prints")
+            .and_then(Json::as_array)
+            .cloned()
+            .unwrap_or_default();
         Ok(Self {
             program,
             instances,
@@ -340,6 +356,7 @@ impl World {
             dispatcher,
             routes,
             route_seq,
+            prints,
         })
     }
 
@@ -834,6 +851,11 @@ impl World {
                     for child_id in selected {
                         sends.push((child_id, value.clone(), Route::Down));
                     }
+                }
+                Statement::Print { expression } => {
+                    let value = evaluate(expression, &bindings)?;
+                    eprint!("{}", encode(&value)?);
+                    self.prints.push(value);
                 }
                 Statement::Complete { message } => {
                     let value = evaluate(message, &bindings)?;

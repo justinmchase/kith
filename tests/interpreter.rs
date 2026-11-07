@@ -805,33 +805,79 @@ fn run_path_executes_dynamic_ir() {
     assert_eq!(world.output(world.root_id()).unwrap()["kind"], json!("Dyn"));
 }
 
+fn order_program() -> kith::ast::Program {
+    kith::parse::parse_source(include_str!("../examples/order.kith")).expect("parse order.kith")
+}
+
+fn paid_order() -> serde_json::Value {
+    json!({
+        "kind": "Order",
+        "orderId": "o-1",
+        "items": ["sku-a", "sku-b"],
+        "card": "ok"
+    })
+}
+
+fn confirm_deliveries(world: &mut World) {
+    let ships = world.children_of_kind(world.root_id(), "ShipItem");
+    assert_eq!(ships.len(), 2);
+    for ship in ships {
+        for carrier in world.children_of_kind(ship, "Carrier") {
+            world
+                .send(carrier, json!({"kind": "Delivered"}))
+                .expect("deliver");
+        }
+    }
+}
+
 #[test]
-// req:workflows-005
-fn order_workflow_fulfills_accepted_paid_items() {
-    let program = kith::parse::parse_source(include_str!("../examples/order.kith"))
-        .expect("parse order.kith");
-    let mut world = World::start(program).expect("start order");
-    world
-        .inject(json!({
-            "kind": "Order",
-            "orderId": "o-1",
-            "items": ["sku-a", "sku-b"],
-            "card": "ok"
-        }))
-        .unwrap();
+// req:workflows-005 req:components-007
+fn order_workflow_waits_for_delivery_then_summarizes() {
+    let mut world = World::start(order_program()).expect("start order");
+    world.inject(paid_order()).unwrap();
     world.run_until_idle().unwrap();
-    let output = world.output(world.root_id()).unwrap().as_array().unwrap();
-    assert_eq!(output.len(), 2);
-    assert_eq!(output[0]["kind"], json!("Shipped"));
-    assert_eq!(output[1]["kind"], json!("Shipped"));
+    assert!(!world.completed(world.root_id()));
+    assert_eq!(
+        world.progress(world.root_id()).unwrap()["total"],
+        json!(2)
+    );
+    assert_eq!(world.prints().len(), 2);
+    assert_eq!(world.prints()[0]["kind"], json!("PickupRequested"));
+
+    confirm_deliveries(&mut world);
+    world.run_until_idle().unwrap();
+    let output = world.output(world.root_id()).unwrap();
+    assert_eq!(output["kind"], json!("Summary"));
+    assert_eq!(output["total"], json!(2.0));
+    assert_eq!(output["shipments"].as_array().unwrap().len(), 2);
+    assert!(world
+        .prints()
+        .iter()
+        .any(|value| value["kind"] == json!("Tally") && value["total"] == json!(2.0)));
+}
+
+#[test]
+// req:workflows-005 req:workflows-006
+fn order_snapshot_restore_resumes_delivery() {
+    let program = order_program();
+    let mut world = World::start(program.clone()).expect("start order");
+    world.inject(paid_order()).unwrap();
+    world.run_until_idle().unwrap();
+    let snap = world.snapshot().expect("snapshot");
+    let mut restored = World::restore(program, &snap).expect("restore");
+    assert_eq!(restored.prints().len(), 2);
+    confirm_deliveries(&mut restored);
+    restored.run_until_idle().unwrap();
+    assert_eq!(
+        restored.output(restored.root_id()).unwrap()["kind"],
+        json!("Summary")
+    );
 }
 
 #[test]
 // req:workflows-005
 fn order_workflow_rejects_an_invalid_order() {
-    let program = kith::parse::parse_source(include_str!("../examples/order.kith"))
-        .expect("parse order.kith");
-    let mut world = World::start(program).expect("start order");
+    let mut world = World::start(order_program()).expect("start order");
     world.inject(json!({"kind": "Nope"})).unwrap();
     let err = world.run_until_idle().expect_err("invalid order");
     assert!(err.message.contains("invalid order"));

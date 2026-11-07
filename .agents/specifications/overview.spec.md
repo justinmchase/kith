@@ -54,9 +54,9 @@ primitives rather than defining their own.
   in-flight transitions as actors and is the parallelization mechanism.
 - **Patterns match messages.** A receive clause is a Uffda pattern. Checking a
   message against a transition means matching that pattern.
-- **Expressions are pure.** Uffda expressions compute values. Effects are
-  explicit: sending a message, changing machine state, spawning or joining
-  work.
+- **Expressions are pure.** Uffda expressions compute values (including
+  globals such as `length`). Effects are explicit: sending a message, printing,
+  changing machine state, spawning or joining work.
 - **One tree per exported scene.** A running program is the instance tree of
   its unique exported scene. The root is that scene's top instance, a
   component or a workflow. Each instance has at most one parent. The tree is

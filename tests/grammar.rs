@@ -172,5 +172,7 @@ fn order_source_parses_tasks_picks_and_map() {
         step.body,
         kith::ast::StepBody::Map { ref component, .. } if component == "ShipItem"
     )));
+    assert!(program.workflow("ShipItem").is_some());
+    assert!(program.component("Summarize").is_some());
     World::check(&program).expect("order checks");
 }

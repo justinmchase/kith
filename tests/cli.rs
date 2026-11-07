@@ -117,18 +117,10 @@ fn parse_does_not_resolve_imports_but_check_does() {
 
 #[test]
 // req:workflows-005
-fn run_order_workflow_ships_line_items() {
+fn check_order_workflow() {
     let order = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/order.kith");
-    let ran = run(&[
-        "run",
-        order.to_str().unwrap(),
-        "--message",
-        r#"{"kind":"Order","orderId":"o-1","items":["sku-a","sku-b"],"card":"ok"}"#,
-    ]);
-    assert!(ran.status.success(), "{}", stderr(&ran));
-    let output = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
-    assert_eq!(output.as_array().unwrap().len(), 2);
-    assert_eq!(output[0]["kind"], json!("Shipped"));
+    let checked = run(&["check", order.to_str().unwrap()]);
+    assert!(checked.status.success(), "{}", stderr(&checked));
 }
 
 fn stderr(output: &std::process::Output) -> String {
