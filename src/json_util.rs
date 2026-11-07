@@ -1,7 +1,7 @@
 use crate::error::Error;
 use serde_json::Value as Json;
 use uffda_runtime::json::{JsonValue, ObjectMap};
-use uffda_runtime::value::Value;
+use uffda_runtime::value::{AssociationKey, Value};
 
 pub fn to_uffda_json(value: &Json) -> Result<JsonValue, Error> {
     Ok(match value {
@@ -49,9 +49,14 @@ pub fn from_uffda_value(value: Value<'_>) -> Result<Json, Error> {
         Value::Object(object) => {
             let mut map = serde_json::Map::new();
             for (key, value) in object.borrow().entries() {
-                let name = key
-                    .to_utf8()
-                    .map_err(|error| Error::new(error.to_string()))?;
+                let name = match key {
+                    AssociationKey::String(text) => text
+                        .to_utf8()
+                        .map_err(|error| Error::new(error.to_string()))?,
+                    AssociationKey::Symbol(_) | AssociationKey::Value(_) => {
+                        return Err(Error::new("unsupported Uffda object key for Kith JSON"));
+                    }
+                };
                 map.insert(name, from_uffda_value(*value)?);
             }
             Ok(Json::Object(map))

@@ -1043,15 +1043,15 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "uffda-build"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf2ba85fa790319bba64f006a306650949dc550f47123e78d7f026f420f83ce9"
+checksum = "fd552ca052c35853fa6ed17a6ac0d552850d3aea96fc2e592e06e6059594cf1e"
 
 [[package]]
 name = "uffda-codec"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac2b7023b261245f4a441e3d21d053ba06d45a431913a798a2202c7812266353"
+checksum = "1dfcb85a9e591ab680b26f4319a6a84980853ab56968d038cae4690cd28cf5c3"
 dependencies = [
  "base64 0.22.1",
  "num-bigint",
@@ -1063,9 +1063,9 @@ dependencies = [
 
 [[package]]
 name = "uffda-heap"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7cc3f5533330ee57f28fe63fc560941417fb2bb421b0d0a4251c8a63084f141"
+checksum = "bea5c015c21f96ae4034f0d098d32db1c6d67f12bd24ccb0eb32fe9b7de3ed4c"
 dependencies = [
  "gc-arena",
  "uffda-heap-derive",
@@ -1073,9 +1073,9 @@ dependencies = [
 
 [[package]]
 name = "uffda-heap-derive"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80bededb24df5983879097e4cf237221f70ed90f994070042a2daa2360026f56"
+checksum = "fada3c7d89ac462a9cace370b8566dac5ef3424ede174e24f5a57ce2264c519e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1085,9 +1085,9 @@ dependencies = [
 
 [[package]]
 name = "uffda-runtime"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "074eb57ec395530c82d0c669a38a2d65d35d3d2307df106cbfadb727a6f52506"
+checksum = "5e76e764178ad2d54a45a231c14f960858b79578d7ee2c1fef4252ad32edc747"
 dependencies = [
  "base64 0.22.1",
  "bs58",

@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: justinmchase/uffda/.github/actions/uffda-setup@main
         with:
-          version: 0.10.7
+          version: 0.10.8
       - uses: dtolnay/rust-toolchain@stable
       - name: Test
         run: cargo test

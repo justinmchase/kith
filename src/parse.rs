@@ -54,7 +54,7 @@ fn load_language() -> Result<Language, String> {
     let mut imports = BTreeMap::new();
     imports.insert(
         "@justinmchase/uffda".into(),
-        "jsr:@justinmchase/uffda@^0.10.7".into(),
+        "jsr:@justinmchase/uffda@^0.10.8".into(),
     );
     resolver
         .set_import_map(imports)

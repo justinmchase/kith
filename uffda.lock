@@ -1,10 +1,10 @@
 {
   "specifiers": {
-    "jsr:@justinmchase/uffda@^0.10.7": "0.10.7"
+    "jsr:@justinmchase/uffda@^0.10.8": "0.10.8"
   },
   "jsr": {
-    "@justinmchase/uffda@0.10.7": {
-      "integrity": "301b34dbff2ab0442ec03088daa0d882633169719eab8062d98c7dd5b5c1e378"
+    "@justinmchase/uffda@0.10.8": {
+      "integrity": "dee1481831cba72717b6f9bb2ba242e924213576cdfaad6db0ff7d00fd95b77f"
     }
   }
 }
