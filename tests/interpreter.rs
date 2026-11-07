@@ -908,7 +908,7 @@ fn order_snapshot_restore_resumes_delivery() {
 }
 
 #[test]
-// req:workflows-005
+// req:workflows-005 req:components-008
 fn order_workflow_rejects_an_invalid_order() {
     let mut world = World::start(order_program()).expect("start order");
     world.inject(json!({"kind": "Nope"})).unwrap();

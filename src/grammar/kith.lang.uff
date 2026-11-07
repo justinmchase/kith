@@ -39,7 +39,7 @@ rule Field =
 ;
 
 rule Port =
-  not "field" not "start" not "state" not "step" not "join" not "print"
+  not "field" not "start" not "state" not "step" not "join" not "print" not "else"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -95,14 +95,20 @@ rule ComponentHandler =
   -> { kind: "handler", pattern: p, body: b }
 ;
 
+# Default clause, last in the state. Same tree as `on (any)`.
+rule ElseHandler =
+  "else" "{" b:ComponentStatement* "}"
+  -> [{ kind: "handler", pattern: { kind: "any" }, body: b }]
+;
+
 rule StartState =
-  "start" n:Identifier "{" h:ComponentHandler* "}"
-  -> { kind: "state", name: n, start: true, handlers: h }
+  "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+  -> { kind: "state", name: n, start: true, handlers: (flat [h (coalesce e [])]) }
 ;
 
 rule NamedState =
-  "state" n:Identifier "{" h:ComponentHandler* "}"
-  -> { kind: "state", name: n, start: false, handlers: h }
+  "state" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+  -> { kind: "state", name: n, start: false, handlers: (flat [h (coalesce e [])]) }
 ;
 
 rule State =

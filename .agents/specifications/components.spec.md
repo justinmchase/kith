@@ -126,6 +126,9 @@ export scene Main {
   so the handler body `{` is not a Then object. The pattern is a Uffda pattern,
   including object-key captures such as `{ n: number }`. Bindings from the
   match are in scope for the body.
+- `else { ... }` is the default transition. It MUST be last if present. It
+  is the same handler as `on (any)`: it matches any remaining message. `on
+  (any)` remains valid; `else` is the spelling for a fallthrough clause.
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 
@@ -150,7 +153,7 @@ receiver sends a message back.
 
 - When an instance takes a message, the runtime matches it against the `on`
   patterns of the current state, in declaration order, and takes the first
-  match.
+  match. `else` is matched last, as `any`.
 - A matching transition consumes the message: send up MUST NOT continue.
   Several children selected by one `send down` are independent sends.
 - An unmatched message that was travelling up MUST continue to the next

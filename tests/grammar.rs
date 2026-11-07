@@ -156,7 +156,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-005
+// req:grammar-001 req:workflows-005 req:components-008
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -176,5 +176,8 @@ fn order_source_parses_tasks_picks_and_map() {
     )));
     assert!(program.workflow("ShipItem").is_some());
     assert!(program.component("Summarize").is_some());
+    let validate = program.component("ValidateOrder").expect("ValidateOrder");
+    let last = validate.states[0].handlers.last().expect("else");
+    assert_eq!(last.pattern["kind"], "any");
     World::check(&program).expect("order checks");
 }

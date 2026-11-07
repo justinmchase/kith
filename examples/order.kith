@@ -11,7 +11,7 @@ component ValidateOrder {
     on ({ kind: "Order", orderId: any, items: any, card: any }) {
       complete { kind: "Accepted", orderId: orderId, items: items, card: card };
     }
-    on (any) {
+    else {
       complete { kind: "Rejected" };
     }
   }
