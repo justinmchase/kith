@@ -1,9 +1,9 @@
-use crate::ast::Program;
+use crate::ast::{Component, Program, Scene};
 use crate::error::Error;
 use crate::json_util::from_uffda_value;
 use serde_json::Value as Json;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use uffda_runtime::module::CompiledModuleGraph;
@@ -135,7 +135,66 @@ pub fn load_program(path: &Path) -> Result<Program, Error> {
     if looks_like_artifact(path) {
         load_artifact(path)
     } else {
-        parse_file(path)
+        resolve_program(path)
+    }
+}
+
+pub fn resolve_program(path: &Path) -> Result<Program, Error> {
+    let mut visited = HashSet::new();
+    load_module(path, &mut visited)
+}
+
+fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, Error> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !visited.insert(canonical.clone()) {
+        return Err(Error::new(format!("import cycle at {}", path.display())));
+    }
+    let mut program = parse_file(path)?;
+    let imports = program.imports.clone();
+    for import in imports {
+        if import.module_url.contains(':') && !import.module_url.starts_with('.') {
+            return Err(Error::new(format!(
+                "unsupported import specifier {}",
+                import.module_url
+            )));
+        }
+        let target = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&import.module_url);
+        let dep = load_module(&target, visited)?;
+        let exported: HashSet<String> = dep.exported_names().map(str::to_string).collect();
+        for name in &import.names {
+            if !exported.contains(name) {
+                return Err(Error::new(format!(
+                    "{name} is not exported by {}",
+                    import.module_url
+                )));
+            }
+            if let Some(component) = dep.component(name).cloned() {
+                merge_component(&mut program, component);
+            } else if let Some(scene) = dep.scene(name).cloned() {
+                merge_scene(&mut program, scene);
+            } else {
+                return Err(Error::new(format!(
+                    "{name} is exported by {} but is not a component or scene",
+                    import.module_url
+                )));
+            }
+        }
+    }
+    Ok(program)
+}
+
+fn merge_component(program: &mut Program, component: Component) {
+    if program.component(&component.name).is_none() {
+        program.components.push(component);
+    }
+}
+
+fn merge_scene(program: &mut Program, scene: Scene) {
+    if program.scene(&scene.name).is_none() {
+        program.scenes.push(scene);
     }
 }
 

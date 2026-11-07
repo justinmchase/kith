@@ -1,28 +1,34 @@
-use crate::ast::{Program, Statement};
+use crate::ast::{Instance, Program, Statement};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::error::Error;
 use crate::host::{evaluate, match_message};
 use serde_json::Value as Json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
     Inject,
     Down,
-    Bubble,
+    Up,
 }
 
-struct Instance {
+struct ChildRef {
+    id: ActorId,
+    key: String,
+    component: String,
+}
+
+struct InstanceState {
     kind: String,
     parent: Option<ActorId>,
-    children: HashMap<String, ActorId>,
+    children: Vec<ChildRef>,
     fields: HashMap<String, Json>,
     state: String,
 }
 
 pub struct World {
     program: Program,
-    instances: HashMap<ActorId, Instance>,
+    instances: HashMap<ActorId, InstanceState>,
     next_id: u64,
     dispatcher: Dispatcher,
     routes: HashMap<(ActorId, u64), Route>,
@@ -34,9 +40,7 @@ impl World {
         if program.kind != "program" {
             return Err(Error::new("expected a program tree"));
         }
-        if program.component(&program.root).is_none() {
-            return Err(Error::new(format!("unknown root {}", program.root)));
-        }
+        let scene = program.unique_exported_scene().map_err(Error::new)?;
         for component in &program.components {
             if component.start_state().is_none() {
                 return Err(Error::new(format!(
@@ -44,20 +48,14 @@ impl World {
                     component.name
                 )));
             }
-            for child in &component.children {
-                if program.component(&child.component).is_none() {
-                    return Err(Error::new(format!(
-                        "unknown child kind {}",
-                        child.component
-                    )));
-                }
-            }
         }
+        check_instance(program, &scene.root)?;
         Ok(())
     }
 
     pub fn start(program: Program) -> Result<Self, Error> {
         Self::check(&program)?;
+        let scene = program.unique_exported_scene().map_err(Error::new)?.clone();
         let mut world = Self {
             program,
             instances: HashMap::new(),
@@ -66,8 +64,7 @@ impl World {
             routes: HashMap::new(),
             route_seq: 0,
         };
-        let root = world.program.root.clone();
-        world.spawn(root, None)?;
+        world.spawn_instance(&scene.root, None)?;
         Ok(world)
     }
 
@@ -80,7 +77,12 @@ impl World {
     }
 
     pub fn child(&self, id: ActorId, slot: &str) -> Option<ActorId> {
-        self.instances.get(&id)?.children.get(slot).copied()
+        self.instances
+            .get(&id)?
+            .children
+            .iter()
+            .find(|child| child.key == slot)
+            .map(|child| child.id)
     }
 
     pub fn kind(&self, id: ActorId) -> Option<&str> {
@@ -119,7 +121,12 @@ impl World {
         }
     }
 
-    fn spawn(&mut self, kind: String, parent: Option<ActorId>) -> Result<ActorId, Error> {
+    fn spawn_instance(
+        &mut self,
+        node: &Instance,
+        parent: Option<ActorId>,
+    ) -> Result<ActorId, Error> {
+        let kind = node.component.clone();
         let component = self
             .program
             .component(&kind)
@@ -142,23 +149,28 @@ impl World {
         }
         self.instances.insert(
             id,
-            Instance {
-                kind: kind.clone(),
+            InstanceState {
+                kind,
                 parent,
-                children: HashMap::new(),
+                children: Vec::new(),
                 fields,
                 state: start.name.clone(),
             },
         );
-        let child_decls = component.children.clone();
-        for child in child_decls {
-            let child_id = self.spawn(child.component.clone(), Some(id))?;
-            self.instances
-                .get_mut(&id)
-                .expect("parent")
-                .children
-                .insert(child.name, child_id);
+        let mut children = Vec::new();
+        for child in &node.children {
+            let key = child
+                .key
+                .clone()
+                .ok_or_else(|| Error::new("scene child is missing a slot key"))?;
+            let child_id = self.spawn_instance(child, Some(id))?;
+            children.push(ChildRef {
+                id: child_id,
+                key,
+                component: child.component.clone(),
+            });
         }
+        self.instances.get_mut(&id).expect("parent").children = children;
         Ok(id)
     }
 
@@ -196,9 +208,9 @@ impl World {
             }
         }
         match route {
-            Route::Bubble => {
+            Route::Up => {
                 if let Some(parent) = self.instances[&id].parent {
-                    Ok(vec![(parent, message.clone(), Route::Bubble)])
+                    Ok(vec![(parent, message.clone(), Route::Up)])
                 } else {
                     Ok(vec![])
                 }
@@ -228,31 +240,44 @@ impl World {
                         .fields
                         .insert(field.clone(), value);
                 }
-                Statement::Bubble { message } => {
+                Statement::SendUp { message } => {
                     let value = evaluate(message, bindings)?;
                     let parent = self.instances[&id]
                         .parent
-                        .ok_or_else(|| Error::new("bubble from root"))?;
-                    sends.push((parent, value, Route::Bubble));
+                        .ok_or_else(|| Error::new("send up from root"))?;
+                    sends.push((parent, value, Route::Up));
                 }
-                Statement::Down { child, message } => {
+                Statement::SendDown { children, message } => {
                     let value = evaluate(message, bindings)?;
-                    let child_id = *self.instances[&id]
-                        .children
-                        .get(child)
-                        .ok_or_else(|| Error::new(format!("unknown child {child}")))?;
-                    sends.push((child_id, value, Route::Down));
-                }
-                Statement::DownAll { message } => {
-                    let value = evaluate(message, bindings)?;
-                    let children: Vec<_> = self.instances[&id].children.values().copied().collect();
-                    for child_id in children {
+                    let selected = self.select_children(id, children)?;
+                    if selected.is_empty() {
+                        return Err(Error::new("no child matched send down"));
+                    }
+                    for child_id in selected {
                         sends.push((child_id, value.clone(), Route::Down));
                     }
                 }
             }
         }
         Ok(sends)
+    }
+
+    fn select_children(&self, id: ActorId, pattern: &Json) -> Result<Vec<ActorId>, Error> {
+        let instance = self
+            .instances
+            .get(&id)
+            .ok_or_else(|| Error::new("unknown actor"))?;
+        let mut selected = Vec::new();
+        for child in &instance.children {
+            let record = serde_json::json!({
+                "key": child.key,
+                "component": child.component,
+            });
+            if routing_matches(pattern, &record)? {
+                selected.push(child.id);
+            }
+        }
+        Ok(selected)
     }
 
     fn deliver(&mut self, to: ActorId, value: Json, route: Route) -> Result<(), Error> {
@@ -275,4 +300,36 @@ impl World {
             Route::Inject
         }
     }
+}
+
+fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
+    if program.component(&node.component).is_none() {
+        return Err(Error::new(format!("unknown component {}", node.component)));
+    }
+    let mut child_keys = HashSet::new();
+    for child in &node.children {
+        let key = child
+            .key
+            .as_deref()
+            .ok_or_else(|| Error::new("scene child is missing a slot key"))?;
+        if !child_keys.insert(key.to_string()) {
+            return Err(Error::new(format!("duplicate slot key {key}")));
+        }
+        check_instance(program, child)?;
+    }
+    Ok(())
+}
+
+fn routing_matches(pattern: &Json, record: &Json) -> Result<bool, Error> {
+    if pattern.get("kind").and_then(Json::as_str) == Some("any") {
+        return Ok(true);
+    }
+    if pattern.get("kind").and_then(Json::as_str) == Some("resolve") {
+        let name = pattern
+            .get("name")
+            .and_then(Json::as_str)
+            .ok_or_else(|| Error::new("send down identifier is missing a name"))?;
+        return Ok(record.get("component").and_then(Json::as_str) == Some(name));
+    }
+    Ok(match_message(pattern, record)?.is_some())
 }

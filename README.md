@@ -5,11 +5,11 @@ components, message dispatch, and workflows.
 [Coleslaw](https://github.com/justinmchase/coleslaw) is a language on top of
 Kith; other Uffda languages may use it too.
 
-Kith is kith, not kin: composition (has-a), not inheritance (is-a). Components
-own children, talk only by messages, and change state only through matched
-transitions. The dispatcher runs components and in-flight transitions as
-actors. Workflows are first-class: child workflows, dynamic fan-out and join,
-streaming inputs, and clustered execution.
+Kith is kith, not kin: composition (has-a), not inheritance (is-a). A scene
+builds the instance tree; components talk only by messages and change state
+only through matched transitions. The dispatcher runs components and in-flight
+transitions as actors. Workflows are first-class: child workflows, dynamic
+fan-out and join, streaming inputs, and clustered execution.
 
 The contract lives in [`.agents/specifications/`](./.agents/specifications/README.md).
 This repository also ships a `kith` CLI that parses `.kith` source, checks it,
@@ -20,7 +20,7 @@ and runs component programs on `uffda-runtime`.
 ```text
 Uffda     grammars, patterns, expressions, matching
   ↓
-Kith      component, workflow, actor dispatch
+Kith      component, scene, workflow, actor dispatch
   ↓
 Coleslaw  business applications (aggregates, managers, …)
 ```

@@ -10,11 +10,13 @@ spec_ref: .agents/specifications/cli.spec.md#commands
 
 Preconditions:
 
-- `examples/ping.kith` is the normative Parent/Child program.
+- `examples/ping.kith` is the normative Parent/Child program with exported
+  scene `Main`.
 
 Expected behavior:
 
-- `kith parse` MUST print a `program` syntax tree and MUST NOT start actors.
+- `kith parse` MUST print a `program` syntax tree with scene `Main` and MUST
+  NOT start actors.
 - `kith check` MUST accept the example and MUST reject a component with no
   start state.
 - `kith compile` MUST write a program artifact.

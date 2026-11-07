@@ -1,23 +1,30 @@
+export Child;
+export Parent;
+export Main;
+
 component Child {
   start Idle {
-    on { kind: "Ping", n: number } {
-      bubble { kind: "Pong", n: n };
+    on ({ kind: "Ping", n: number }) {
+      send up { kind: "Pong", n: n };
     }
   }
 }
 
 component Parent {
-  field heard: (number) = 0;
-  child Child child;
+  field heard: number = 0;
 
   start Idle {
-    on { kind: "Ping", n: number } {
-      down child { kind: "Ping", n: n };
+    on ({ kind: "Ping", n: number }) {
+      send down ({ key: "child" }) { kind: "Ping", n: n };
     }
-    on { kind: "Pong", n: number } {
+    on ({ kind: "Pong", n: number }) {
       heard -> n;
     }
   }
 }
 
-root Parent;
+export scene Main {
+  Parent() {
+    child = Child()
+  }
+}

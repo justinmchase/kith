@@ -21,12 +21,12 @@ capitals.
   mailboxes, routing, actor turns, fan-out, join, and clustered placement.
 - **Grammar pipeline**: Kith's language, authored as `.uff`, compiled by the
   Uffda CLI to `.uff.ast` artifacts, and embedded in the `kith` binary.
-- **Program pipeline**: a `.kith` source file parsed by that grammar to a
-  syntax tree, checked, and interpreted by the Kith runtime.
+- **Program pipeline**: `.kith` modules parsed by that grammar, with relative
+  imports resolved, checked, and interpreted from the unique exported scene.
 
 ## Axioms
 
-- Uffda does not know what a component, workflow, actor, or mailbox is.
+- Uffda does not know what a component, scene, workflow, actor, or mailbox is.
 - Matching a message and evaluating an expression are Uffda's work. Scheduling
   those matches as turns of actors is Kith's work.
 - A Kith program is not a Uffda module declaration. Lowering `.kith` source
@@ -85,13 +85,13 @@ capitals.
 
 - `kith parse` loads the embedded Kith language, runs it as a Uffda language
   rule on the source text, and emits the syntax tree.
-- `kith run` walks that tree: it constructs instances, enqueues messages, and
+- `kith run` walks the unique exported scene: it constructs instances, enqueues messages, and
   for each turn calls Uffda to match `on` patterns and evaluate expressions in
   the body. Sends, spawns, and joins are recorded as Kith effects and handed
   to the dispatcher.
-- Import of one `.kith` file from another is Kith's module graph. Uffda's
-  resolver remains the resolver of the grammar (`*.uff` / `jsr:`), not of
-  application programs.
+- Import of one `.kith` file from another is Kith's module graph. Relative
+  specifiers are resolved by Kith. Uffda's resolver remains the resolver of
+  the grammar (`*.uff` / `jsr:`), not of application packages.
 
 ## Why this design
 
@@ -101,7 +101,7 @@ capitals.
   "did this message match" layer. Adding `Component` to that crate would couple
   Uffda's release train to clustering and mailboxes, and every Uffda language
   would inherit types it does not want.
-- **Effects after the match, not inside it.** If `bubble` were a native
+- **Effects after the match, not inside it.** If `send up` were a native
   expression, expressions would stop being pure and the dispatcher would be
   hidden in host calls. Walking the transition AST keeps matching and
   scheduling at the layers the [overview](./overview.spec.md#principles)

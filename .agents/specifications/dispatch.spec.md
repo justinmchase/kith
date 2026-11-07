@@ -105,8 +105,9 @@ capitals.
 
 ### Routing
 
-- The dispatcher performs bubble and down as [components](./components.spec.md#routing)
-  specifies. Routing chooses a mailbox; it does not run a transition.
+- The dispatcher performs send up and send down as
+  [components](./components.spec.md#routing) specifies. Routing chooses a
+  mailbox; it does not run a transition.
 - Routing to a destroyed instance MUST drop the message.
 
 ### Clustering

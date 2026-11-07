@@ -4,8 +4,28 @@ use serde_json::Value as Json;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Program {
     pub kind: String,
+    #[serde(default)]
+    pub imports: Vec<Import>,
+    #[serde(default)]
+    pub exports: Vec<Export>,
+    #[serde(default)]
     pub components: Vec<Component>,
-    pub root: String,
+    #[serde(default)]
+    pub scenes: Vec<Scene>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Import {
+    pub kind: String,
+    #[serde(rename = "moduleUrl")]
+    pub module_url: String,
+    pub names: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Export {
+    pub kind: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -14,8 +34,6 @@ pub struct Component {
     pub name: String,
     #[serde(default)]
     pub fields: Vec<Field>,
-    #[serde(default)]
-    pub children: Vec<Child>,
     pub states: Vec<State>,
 }
 
@@ -30,10 +48,20 @@ pub struct Field {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Child {
+pub struct Scene {
+    pub kind: String,
+    pub name: String,
+    pub root: Instance,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Instance {
     pub kind: String,
     pub component: String,
-    pub name: String,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub children: Vec<Instance>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -58,12 +86,10 @@ pub struct Handler {
 pub enum Statement {
     #[serde(rename = "assign")]
     Assign { field: String, expression: Json },
-    #[serde(rename = "bubble")]
-    Bubble { message: Json },
-    #[serde(rename = "down")]
-    Down { child: String, message: Json },
-    #[serde(rename = "downAll")]
-    DownAll { message: Json },
+    #[serde(rename = "sendUp")]
+    SendUp { message: Json },
+    #[serde(rename = "sendDown")]
+    SendDown { children: Json, message: Json },
 }
 
 impl Program {
@@ -71,6 +97,30 @@ impl Program {
         self.components
             .iter()
             .find(|component| component.name == name)
+    }
+
+    pub fn scene(&self, name: &str) -> Option<&Scene> {
+        self.scenes.iter().find(|scene| scene.name == name)
+    }
+
+    pub fn exported_names(&self) -> impl Iterator<Item = &str> {
+        self.exports.iter().map(|export| export.name.as_str())
+    }
+
+    pub fn exported_scenes(&self) -> Vec<&Scene> {
+        self.scenes
+            .iter()
+            .filter(|scene| self.exports.iter().any(|export| export.name == scene.name))
+            .collect()
+    }
+
+    pub fn unique_exported_scene(&self) -> Result<&Scene, String> {
+        let scenes = self.exported_scenes();
+        match scenes.as_slice() {
+            [scene] => Ok(scene),
+            [] => Err("program must export exactly one scene".into()),
+            _ => Err("program exports more than one scene".into()),
+        }
     }
 }
 
@@ -88,13 +138,17 @@ impl Component {
 pub fn ping_program() -> Program {
     serde_json::from_value(serde_json::json!({
         "kind": "program",
-        "root": "Parent",
+        "imports": [],
+        "exports": [
+            {"kind": "export", "name": "Child"},
+            {"kind": "export", "name": "Parent"},
+            {"kind": "export", "name": "Main"}
+        ],
         "components": [
             {
                 "kind": "component",
                 "name": "Child",
                 "fields": [],
-                "children": [],
                 "states": [{
                     "kind": "state",
                     "name": "Idle",
@@ -103,7 +157,7 @@ pub fn ping_program() -> Program {
                         "kind": "handler",
                         "pattern": ping_pattern("Ping"),
                         "body": [{
-                            "kind": "bubble",
+                            "kind": "sendUp",
                             "message": ping_object("Pong")
                         }]
                     }]
@@ -118,11 +172,6 @@ pub fn ping_program() -> Program {
                     "pattern": {"kind": "type", "type": "number"},
                     "init": {"kind": "number", "value": 0}
                 }],
-                "children": [{
-                    "kind": "child",
-                    "component": "Child",
-                    "name": "child"
-                }],
                 "states": [{
                     "kind": "state",
                     "name": "Idle",
@@ -132,8 +181,8 @@ pub fn ping_program() -> Program {
                             "kind": "handler",
                             "pattern": ping_pattern("Ping"),
                             "body": [{
-                                "kind": "down",
-                                "child": "child",
+                                "kind": "sendDown",
+                                "children": key_pattern("child"),
                                 "message": ping_object("Ping")
                             }]
                         },
@@ -149,12 +198,27 @@ pub fn ping_program() -> Program {
                     ]
                 }]
             }
-        ]
+        ],
+        "scenes": [{
+            "kind": "scene",
+            "name": "Main",
+            "root": {
+                "kind": "instance",
+                "component": "Parent",
+                "key": null,
+                "children": [{
+                    "kind": "instance",
+                    "component": "Child",
+                    "key": "child",
+                    "children": []
+                }]
+            }
+        }]
     }))
     .expect("ping program")
 }
 
-fn ping_pattern(kind: &str) -> serde_json::Value {
+pub fn ping_pattern(kind: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": "over",
         "keys": {
@@ -172,7 +236,33 @@ fn ping_pattern(kind: &str) -> serde_json::Value {
     })
 }
 
-fn ping_object(kind: &str) -> serde_json::Value {
+pub fn key_pattern(key: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "over",
+        "keys": {
+            "key": {
+                "kind": "variable",
+                "name": "key",
+                "pattern": {
+                    "kind": "equal",
+                    "value": {"kind": "value.literal", "value": key}
+                }
+            }
+        },
+        "rest": null
+    })
+}
+
+pub fn component_pattern(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "resolve",
+        "targetKind": "reference",
+        "name": name,
+        "args": []
+    })
+}
+
+pub fn ping_object(kind: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": "object",
         "keys": [

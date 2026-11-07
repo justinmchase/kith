@@ -1,0 +1,23 @@
+import "./child.kith" Child;
+
+export Parent;
+export Main;
+
+component Parent {
+  field heard: number = 0;
+
+  start Idle {
+    on ({ kind: "Ping", n: number }) {
+      send down ({ key: "child" }) { kind: "Ping", n: n };
+    }
+    on ({ kind: "Pong", n: number }) {
+      heard -> n;
+    }
+  }
+}
+
+export scene Main {
+  Parent() {
+    child = Child()
+  }
+}

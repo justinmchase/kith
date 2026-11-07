@@ -3,7 +3,7 @@
 This chapter defines workflows: first-class long-running instances, child
 workflows, dynamic fan-out and join, streaming inputs, and clustered execution.
 They share dispatch with components ([dispatch](./dispatch.spec.md)) and has-a
-composition with [components](./components.spec.md). Terms are defined in the
+composition with [scenes](./scenes.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
 
 ## Conventions
@@ -14,8 +14,8 @@ capitals.
 
 ## Definitions
 
-- **Workflow declaration**: the source that names a workflow, its fields, its
-  child slots, and its state machine.
+- **Workflow declaration**: the source that names a workflow, its fields, and
+  its state machine. Static children are constructed by a scene.
 - **Work item**: one element of a fan-out, each run as a child instance or a
   transition actor.
 - **Join set**: the in-flight work items a join is waiting on.
@@ -92,8 +92,6 @@ The following sketch establishes the shape; token spelling is not frozen.
 
 ```text
 workflow Import {
-  child ProcessItem item;
-
   start Ready {
     on (Start items) {
       fanout items -> item;
@@ -103,13 +101,20 @@ workflow Import {
     }
   }
 }
+
+export scene ImportRun {
+  Import() {
+    item = ProcessItem()
+  }
+}
 ```
 
 - `workflow Name { ... }` declares a kind of workflow.
-- `child Kind name` is a has-a slot. Fan-out MAY create many instances of that
-  kind, each an item in a join set.
-- `fanout collection -> child` spawns one work item per element, as children
-  of the declared kind, and records a join set.
+- Static children are wired in a [scene](./scenes.spec.md), not on the
+  workflow kind. Fan-out MAY create many instances of a wired kind, each an
+  item in a join set.
+- `fanout collection -> child` spawns one work item per element as children
+  of that kind, and records a join set.
 - Completions arrive as messages (`item.Done` in the sketch). A join
   transition reduces the join set and, when the join condition holds, continues
   the workflow.
