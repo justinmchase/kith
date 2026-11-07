@@ -66,9 +66,10 @@ capitals.
 
 - Grammar artifacts are Uffda ModuleDeclarations (`.uff.ast`). They are build
   inputs of the `kith` binary.
-- Program artifacts are Kith syntax trees (and later checked IR). They are
-  outputs of `kith compile`. Their format is Kith's. They MUST NOT be Uffda
-  module declarations.
+- Program artifacts are Kith syntax trees (and later checked IR) encoded as
+  Uffda data codec records with the **`.kith.ast`** extension. They are
+  outputs of `kith compile`. They MUST NOT be Uffda module declarations, and
+  they MUST NOT be JSON.
 
 ## Mechanism
 
@@ -84,7 +85,8 @@ capitals.
 ```
 
 - `kith parse` loads the embedded Kith language, runs it as a Uffda language
-  rule on the source text, and emits the syntax tree.
+  rule on the source text, and emits the syntax tree as one compact Uffda
+  data codec record.
 - `kith run` walks the unique exported scene: it constructs instances, enqueues messages, and
   for each turn calls Uffda to match `on` patterns and evaluate expressions in
   the body. Sends, spawns, and joins are recorded as Kith effects and handed
@@ -113,8 +115,8 @@ capitals.
 
 ## Open questions
 
-- **Program artifact format.** Codec vs JSON for checked `.kith` trees, and
-  whether they live under Uffda-style `outDir/ast/...` paths.
+- **Artifact layout.** Whether `.kith.ast` files live under Uffda-style
+  `outDir/ast/...` paths.
 - **`.kith` imports through Uffda's resolver.** Not required. If a later Uffda
   change maps extra extensions to artifacts, Kith MAY use it; it MUST NOT block
   on that.

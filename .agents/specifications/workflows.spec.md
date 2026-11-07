@@ -35,8 +35,8 @@ capitals.
 - Fan-out cardinality is known only at run time, including zero and one.
 - The graph is a value. A declared `workflow Name` is sugar for a named IR.
   `run path` executes whatever graph is in the working value at `path`.
-- A run MUST be serializable. Restoring a snapshot MUST resume the same step,
-  working value, join set, and mailboxes.
+- A run MUST be serializable as a Uffda data codec record. Restoring a
+  snapshot MUST resume the same step, working value, join set, and mailboxes.
 
 ## Constraints
 
@@ -123,9 +123,10 @@ graphs at run time MUST NOT require new source.
 
 ### Snapshot
 
-`World::snapshot` MUST emit JSON for every instance (component machine or
-workflow run), join sets, mailboxes, and ready queue. `World::restore` MUST
-accept that document plus the program and continue.
+`World::snapshot` MUST emit one Uffda data codec record for every instance
+(component machine or workflow run), join sets, mailboxes, and ready queue.
+`World::restore` MUST accept that record plus the program and continue. The
+record MUST NOT be JSON.
 
 ## Syntax tree
 

@@ -1,4 +1,5 @@
 use crate::ast::{Component, Program, Scene, Workflow};
+use crate::codec::decode;
 use crate::error::Error;
 use crate::json_util::from_uffda_value;
 use serde_json::Value as Json;
@@ -209,16 +210,16 @@ fn merge_scene(program: &mut Program, scene: Scene) {
 pub fn looks_like_artifact(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension == "json")
+        .is_some_and(|extension| extension == "ast")
         || path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".kith.json"))
+            .is_some_and(|name| name.ends_with(".kith.ast"))
 }
 
 pub fn load_artifact(path: &Path) -> Result<Program, Error> {
     let text = std::fs::read_to_string(path).map_err(|error| Error::new(error.to_string()))?;
-    let value: Json = serde_json::from_str(&text).map_err(|error| Error::new(error.to_string()))?;
+    let value = decode(&text)?;
     if let Some(program) = value.get("program") {
         serde_json::from_value(program.clone()).map_err(|error| Error::new(error.to_string()))
     } else {

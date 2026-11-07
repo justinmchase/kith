@@ -14,8 +14,9 @@ Preconditions:
 
 Expected behavior:
 
-- `World::snapshot` MUST produce JSON. `World::restore` with that JSON MUST
-  continue to the same succeed output as a run that was never snapshotted.
+- `World::snapshot` MUST produce a Uffda data codec record (not JSON).
+  `World::restore` with that record MUST continue to the same succeed output
+  as a run that was never snapshotted.
 
 Postconditions:
 

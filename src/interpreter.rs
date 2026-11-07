@@ -1,4 +1,5 @@
 use crate::ast::{FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
+use crate::codec::{decode, encode, json_u64};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::error::Error;
 use crate::host::{evaluate, match_message};
@@ -209,7 +210,11 @@ impl World {
         }
     }
 
-    pub fn snapshot(&self) -> Json {
+    pub fn snapshot(&self) -> Result<String, Error> {
+        encode(&self.snapshot_value())
+    }
+
+    fn snapshot_value(&self) -> Json {
         let instances: Vec<Json> = self
             .instances
             .iter()
@@ -274,13 +279,14 @@ impl World {
         })
     }
 
-    pub fn restore(program: Program, snapshot: Json) -> Result<Self, Error> {
+    pub fn restore(program: Program, snapshot: &str) -> Result<Self, Error> {
         Self::check(&program)?;
+        let snapshot = decode(snapshot)?;
         let next_id = snapshot
             .get("nextId")
-            .and_then(Json::as_u64)
+            .and_then(json_u64)
             .ok_or_else(|| Error::new("snapshot missing nextId"))?;
-        let route_seq = snapshot.get("routeSeq").and_then(Json::as_u64).unwrap_or(0);
+        let route_seq = snapshot.get("routeSeq").and_then(json_u64).unwrap_or(0);
         let dispatcher = Dispatcher::restore(
             snapshot
                 .get("dispatcher")
@@ -296,7 +302,7 @@ impl World {
             let id = ActorId(
                 entry
                     .get("id")
-                    .and_then(Json::as_u64)
+                    .and_then(json_u64)
                     .ok_or_else(|| Error::new("instance missing id"))?,
             );
             instances.insert(id, restore_instance(entry)?);
@@ -307,10 +313,10 @@ impl World {
                 let id = ActorId(
                     entry
                         .get("id")
-                        .and_then(Json::as_u64)
+                        .and_then(json_u64)
                         .ok_or_else(|| Error::new("route missing id"))?,
                 );
-                let seq = entry.get("seq").and_then(Json::as_u64).unwrap_or(0);
+                let seq = entry.get("seq").and_then(json_u64).unwrap_or(0);
                 let route = match entry.get("route").and_then(Json::as_str) {
                     Some("down") => Route::Down,
                     Some("up") => Route::Up,
@@ -337,7 +343,10 @@ impl World {
     ) -> Result<ActorId, Error> {
         let id = self.spawn_kind(&node.component, parent)?;
         if self.instances[&id].run.is_some() {
-            if let Some(run) = self.instances.get_mut(&id).and_then(|instance| instance.run.as_mut())
+            if let Some(run) = self
+                .instances
+                .get_mut(&id)
+                .and_then(|instance| instance.run.as_mut())
             {
                 run.prototypes = node.children.clone();
             }
@@ -441,7 +450,10 @@ impl World {
         id: ActorId,
         input: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        if let Some(run) = self.instances.get_mut(&id).and_then(|instance| instance.run.as_mut())
+        if let Some(run) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.run.as_mut())
         {
             run.input = input.clone();
             run.output = input;
@@ -472,7 +484,10 @@ impl World {
         step: &FlowStep,
         working: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        if let Some(run) = self.instances.get_mut(&id).and_then(|instance| instance.run.as_mut())
+        if let Some(run) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.run.as_mut())
         {
             run.step = step.name.clone();
             run.output = working.clone();
@@ -581,15 +596,12 @@ impl World {
     }
 
     fn spawn_work(&mut self, parent: ActorId, kind: &str) -> Result<ActorId, Error> {
-        let prototype = self.instances[&parent]
-            .run
-            .as_ref()
-            .and_then(|run| {
-                run.prototypes
-                    .iter()
-                    .find(|node| node.component == kind)
-                    .cloned()
-            });
+        let prototype = self.instances[&parent].run.as_ref().and_then(|run| {
+            run.prototypes
+                .iter()
+                .find(|node| node.component == kind)
+                .cloned()
+        });
         if prototype.is_none() {
             if let Some(declared) = self.program.kind(kind) {
                 if !declared.ports.is_empty() {
@@ -657,7 +669,10 @@ impl World {
         output: Json,
         next: Option<&Next>,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        if let Some(run) = self.instances.get_mut(&id).and_then(|instance| instance.run.as_mut())
+        if let Some(run) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.run.as_mut())
         {
             run.output = output.clone();
         }
@@ -671,11 +686,7 @@ impl World {
         }
     }
 
-    fn succeed(
-        &mut self,
-        id: ActorId,
-        output: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn succeed(&mut self, id: ActorId, output: Json) -> Result<Vec<(ActorId, Json, Route)>, Error> {
         {
             let instance = self.instances.get_mut(&id).expect("actor");
             instance.completed = true;
@@ -807,10 +818,7 @@ impl World {
                         .ok_or_else(|| Error::new(format!("unknown port {port}")))?;
                     sends.push((child.id, value, Route::Down));
                 }
-                Statement::SendDown {
-                    component,
-                    message,
-                } => {
+                Statement::SendDown { component, message } => {
                     let value = evaluate(message, &bindings)?;
                     let selected = self.select_children(id, component.as_deref());
                     if selected.is_empty() {
@@ -975,7 +983,11 @@ fn check_workflow(program: &Program, workflow: &Workflow) -> Result<(), Error> {
             workflow.name
         )));
     }
-    let names: HashSet<_> = workflow.steps.iter().map(|step| step.name.as_str()).collect();
+    let names: HashSet<_> = workflow
+        .steps
+        .iter()
+        .map(|step| step.name.as_str())
+        .collect();
     for step in &workflow.steps {
         match &step.body {
             StepBody::Task { component } | StepBody::Map { component, .. } => {
@@ -1025,9 +1037,9 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
         return Ok(());
     }
     let ports: Vec<(String, String)> = {
-        let kind = program.kind(&node.component).ok_or_else(|| {
-            Error::new(format!("unknown kind {}", node.component))
-        })?;
+        let kind = program
+            .kind(&node.component)
+            .ok_or_else(|| Error::new(format!("unknown kind {}", node.component)))?;
         if !kind.ports.is_empty() && node.children.is_empty() {
             // spawned bare by a map/task without prototype — checked at spawn/check_workflow
         }
@@ -1075,7 +1087,7 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
         .and_then(Json::as_str)
         .ok_or_else(|| Error::new("instance missing kind"))?
         .to_string();
-    let parent = entry.get("parent").and_then(Json::as_u64).map(ActorId);
+    let parent = entry.get("parent").and_then(json_u64).map(ActorId);
     let mut children = Vec::new();
     if let Some(list) = entry.get("children").and_then(Json::as_array) {
         for child in list {
@@ -1083,13 +1095,10 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
                 id: ActorId(
                     child
                         .get("id")
-                        .and_then(Json::as_u64)
+                        .and_then(json_u64)
                         .ok_or_else(|| Error::new("child missing id"))?,
                 ),
-                key: child
-                    .get("key")
-                    .and_then(Json::as_str)
-                    .map(str::to_string),
+                key: child.get("key").and_then(Json::as_str).map(str::to_string),
                 component: child
                     .get("component")
                     .and_then(Json::as_str)
@@ -1103,29 +1112,27 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
         .and_then(Json::as_object)
         .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
-    let join = entry.get("join").filter(|value| !value.is_null()).map(|value| {
-        let remaining = value
-            .get("remaining")
-            .and_then(Json::as_array)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(Json::as_u64)
-                    .map(ActorId)
-                    .collect()
-            })
-            .unwrap_or_default();
-        JoinSet {
-            remaining,
-            results: value
-                .get("results")
+    let join = entry
+        .get("join")
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            let remaining = value
+                .get("remaining")
                 .and_then(Json::as_array)
-                .cloned()
-                .unwrap_or_default(),
-            total: value.get("total").and_then(Json::as_u64).unwrap_or(0),
-            completed: value.get("completed").and_then(Json::as_u64).unwrap_or(0),
-            single: value.get("single").and_then(Json::as_bool).unwrap_or(false),
-        }
-    });
+                .map(|ids| ids.iter().filter_map(json_u64).map(ActorId).collect())
+                .unwrap_or_default();
+            JoinSet {
+                remaining,
+                results: value
+                    .get("results")
+                    .and_then(Json::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                total: value.get("total").and_then(json_u64).unwrap_or(0),
+                completed: value.get("completed").and_then(json_u64).unwrap_or(0),
+                single: value.get("single").and_then(Json::as_bool).unwrap_or(false),
+            }
+        });
     let run = match entry.get("run") {
         Some(value) if !value.is_null() => Some(restore_run(value)?),
         _ => None,
@@ -1144,7 +1151,10 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
             .get("completed")
             .and_then(Json::as_bool)
             .unwrap_or(false),
-        completion: entry.get("completion").cloned().filter(|value| !value.is_null()),
+        completion: entry
+            .get("completion")
+            .cloned()
+            .filter(|value| !value.is_null()),
         join,
         run,
     })
@@ -1159,7 +1169,10 @@ fn restore_run(value: &Json) -> Result<WorkflowRun, Error> {
     )
     .map_err(|error| Error::new(error.to_string()))?;
     let prototypes = serde_json::from_value(
-        value.get("prototypes").cloned().unwrap_or_else(|| json!([])),
+        value
+            .get("prototypes")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
     )
     .map_err(|error| Error::new(error.to_string()))?;
     Ok(WorkflowRun {

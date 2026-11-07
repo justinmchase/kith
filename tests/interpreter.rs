@@ -1,6 +1,6 @@
 use kith::ast::{
-    ping_program, ChoiceClause, Component, Export, Field, FlowStep, Handler, Instance, Next,
-    Port, Program, Scene, State, Statement, StepBody, Workflow,
+    ping_program, ChoiceClause, Component, Export, Field, FlowStep, Handler, Instance, Next, Port,
+    Program, Scene, State, Statement, StepBody, Workflow,
 };
 use kith::interpreter::World;
 use serde_json::json;
@@ -104,11 +104,7 @@ fn instance(component: &str, key: Option<&str>, children: Vec<Instance>) -> Inst
     }
 }
 
-fn scene_program(
-    workflows: Vec<Workflow>,
-    components: Vec<Component>,
-    root: Instance,
-) -> Program {
+fn scene_program(workflows: Vec<Workflow>, components: Vec<Component>, root: Instance) -> Program {
     let mut exports: Vec<Export> = workflows
         .iter()
         .map(|workflow| export(&workflow.name))
@@ -670,7 +666,12 @@ fn fanout_zero_one_and_many_join_all() {
         .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(
-        world.output(world.root_id()).unwrap().as_array().unwrap().len(),
+        world
+            .output(world.root_id())
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
 
@@ -680,7 +681,12 @@ fn fanout_zero_one_and_many_join_all() {
         .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(
-        world.output(world.root_id()).unwrap().as_array().unwrap().len(),
+        world
+            .output(world.root_id())
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
         3
     );
 }
@@ -736,8 +742,12 @@ fn snapshot_restore_continues_a_run() {
     let program = ping_program();
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
-    let snap = world.snapshot();
-    let mut restored = World::restore(program, snap).expect("restore");
+    let snap = world.snapshot().expect("snapshot");
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&snap).is_err(),
+        "snapshot must be a data codec record, not JSON"
+    );
+    let mut restored = World::restore(program, &snap).expect("restore");
     restored.run_until_idle().unwrap();
     assert_eq!(
         restored.output(restored.root_id()),
@@ -783,8 +793,5 @@ fn run_path_executes_dynamic_ir() {
         }))
         .unwrap();
     world.run_until_idle().unwrap();
-    assert_eq!(
-        world.output(world.root_id()).unwrap()["kind"],
-        json!("Dyn")
-    );
+    assert_eq!(world.output(world.root_id()).unwrap()["kind"], json!("Dyn"));
 }

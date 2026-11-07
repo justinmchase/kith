@@ -1,3 +1,4 @@
+use crate::codec::json_u64;
 use serde_json::{json, Value as Json};
 use std::collections::{HashMap, VecDeque};
 
@@ -90,7 +91,9 @@ impl Dispatcher {
                 mailbox.clear();
                 if let Some(values) = queue.as_array() {
                     for value in values {
-                        mailbox.push_back(Message { value: value.clone() });
+                        mailbox.push_back(Message {
+                            value: value.clone(),
+                        });
                     }
                 }
             }
@@ -98,7 +101,7 @@ impl Dispatcher {
         dispatcher.ready.clear();
         if let Some(ready) = value.get("ready").and_then(Json::as_array) {
             for id in ready {
-                let id = id.as_u64().ok_or("bad ready id")?;
+                let id = json_u64(id).ok_or("bad ready id")?;
                 dispatcher.ready.push_back(ActorId(id));
             }
         }

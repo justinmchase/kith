@@ -145,9 +145,10 @@ receiver sends a message back.
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
-accept the same shape constructed without parsing. Uffda pattern and expression
-subtrees keep Uffda's own AST kinds (`over`, `variable`, `invocation`,
-`number`, `resolve`, …).
+accept the same shape constructed without parsing. Serialized trees, program
+artifacts, and workflow snapshots MUST use the Uffda data codec, not JSON.
+Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
+`variable`, `invocation`, `number`, `resolve`, …).
 
 - `{ kind: "program", imports: [Import], exports: [Export], components: [Component], workflows: [Workflow], scenes: [Scene] }`
 - `{ kind: "import", moduleUrl: string, names: [string] }`

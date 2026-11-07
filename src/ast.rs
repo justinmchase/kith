@@ -138,7 +138,6 @@ pub struct State {
     pub handlers: Vec<Handler>,
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Handler {
     pub kind: String,
