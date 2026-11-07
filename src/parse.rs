@@ -1,4 +1,4 @@
-use crate::ast::{Component, Program, Scene};
+use crate::ast::{Component, Program, Scene, Workflow};
 use crate::error::Error;
 use crate::json_util::from_uffda_value;
 use serde_json::Value as Json;
@@ -173,11 +173,13 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
             }
             if let Some(component) = dep.component(name).cloned() {
                 merge_component(&mut program, component);
+            } else if let Some(workflow) = dep.workflow(name).cloned() {
+                merge_workflow(&mut program, workflow);
             } else if let Some(scene) = dep.scene(name).cloned() {
                 merge_scene(&mut program, scene);
             } else {
                 return Err(Error::new(format!(
-                    "{name} is exported by {} but is not a component or scene",
+                    "{name} is exported by {} but is not a component, workflow, or scene",
                     import.module_url
                 )));
             }
@@ -189,6 +191,12 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
 fn merge_component(program: &mut Program, component: Component) {
     if program.component(&component.name).is_none() {
         program.components.push(component);
+    }
+}
+
+fn merge_workflow(program: &mut Program, workflow: Workflow) {
+    if program.workflow(&workflow.name).is_none() {
+        program.workflows.push(workflow);
     }
 }
 

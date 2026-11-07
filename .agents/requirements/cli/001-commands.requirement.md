@@ -10,8 +10,8 @@ spec_ref: .agents/specifications/cli.spec.md#commands
 
 Preconditions:
 
-- `examples/ping.kith` is the normative Parent/Child program with exported
-  scene `Main`.
+- `examples/ping.kith` is the normative Ping/Child program with exported
+  scene `Main` whose root is workflow `Ping`.
 
 Expected behavior:
 
@@ -21,7 +21,7 @@ Expected behavior:
   start state.
 - `kith compile` MUST write a program artifact.
 - `kith run examples/ping.kith --message '{"kind":"Ping","n":7}'` MUST leave
-  `Parent.heard` at `7` and exit 0.
+  `Ping.heard` at `7` and exit 0.
 
 Postconditions:
 

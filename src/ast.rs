@@ -11,6 +11,8 @@ pub struct Program {
     #[serde(default)]
     pub components: Vec<Component>,
     #[serde(default)]
+    pub workflows: Vec<Workflow>,
+    #[serde(default)]
     pub scenes: Vec<Scene>,
 }
 
@@ -37,6 +39,17 @@ pub struct Component {
     #[serde(default)]
     pub ports: Vec<Port>,
     pub states: Vec<State>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Workflow {
+    pub kind: String,
+    pub name: String,
+    #[serde(default)]
+    pub fields: Vec<Field>,
+    #[serde(default)]
+    pub ports: Vec<Port>,
+    pub steps: Vec<Step>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -83,6 +96,26 @@ pub struct State {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Step {
+    pub kind: String,
+    pub name: String,
+    pub start: bool,
+    #[serde(default)]
+    pub enter: Vec<Statement>,
+    #[serde(default)]
+    pub handlers: Vec<Handler>,
+    #[serde(default)]
+    pub join: Option<Join>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Join {
+    pub kind: String,
+    #[serde(default)]
+    pub body: Vec<Statement>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Handler {
     pub kind: String,
     pub pattern: Json,
@@ -104,6 +137,25 @@ pub enum Statement {
         component: Option<String>,
         message: Json,
     },
+    #[serde(rename = "complete")]
+    Complete { message: Json },
+    #[serde(rename = "fanout")]
+    Fanout { collection: Json, component: String },
+    #[serde(rename = "goto")]
+    Goto { step: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KindSort {
+    Component,
+    Workflow,
+}
+
+pub struct Kind<'a> {
+    pub sort: KindSort,
+    pub name: &'a str,
+    pub fields: &'a [Field],
+    pub ports: &'a [Port],
 }
 
 impl Program {
@@ -111,6 +163,30 @@ impl Program {
         self.components
             .iter()
             .find(|component| component.name == name)
+    }
+
+    pub fn workflow(&self, name: &str) -> Option<&Workflow> {
+        self.workflows.iter().find(|workflow| workflow.name == name)
+    }
+
+    pub fn kind(&self, name: &str) -> Option<Kind<'_>> {
+        if let Some(component) = self.component(name) {
+            return Some(Kind {
+                sort: KindSort::Component,
+                name: component.name.as_str(),
+                fields: &component.fields,
+                ports: &component.ports,
+            });
+        }
+        if let Some(workflow) = self.workflow(name) {
+            return Some(Kind {
+                sort: KindSort::Workflow,
+                name: workflow.name.as_str(),
+                fields: &workflow.fields,
+                ports: &workflow.ports,
+            });
+        }
+        None
     }
 
     pub fn scene(&self, name: &str) -> Option<&Scene> {
@@ -153,13 +229,32 @@ impl Component {
     }
 }
 
+impl Workflow {
+    pub fn start_step(&self) -> Option<&Step> {
+        let starts: Vec<_> = self.steps.iter().filter(|step| step.start).collect();
+        if starts.len() == 1 {
+            Some(starts[0])
+        } else {
+            None
+        }
+    }
+
+    pub fn step(&self, name: &str) -> Option<&Step> {
+        self.steps.iter().find(|step| step.name == name)
+    }
+
+    pub fn port(&self, name: &str) -> Option<&Port> {
+        self.ports.iter().find(|port| port.name == name)
+    }
+}
+
 pub fn ping_program() -> Program {
     serde_json::from_value(serde_json::json!({
         "kind": "program",
         "imports": [],
         "exports": [
             {"kind": "export", "name": "Child"},
-            {"kind": "export", "name": "Parent"},
+            {"kind": "export", "name": "Ping"},
             {"kind": "export", "name": "Main"}
         ],
         "components": [
@@ -176,59 +271,61 @@ pub fn ping_program() -> Program {
                         "kind": "handler",
                         "pattern": ping_pattern("Ping"),
                         "body": [{
-                            "kind": "sendUp",
+                            "kind": "complete",
                             "message": ping_object("Pong")
                         }]
                     }]
                 }]
-            },
-            {
-                "kind": "component",
-                "name": "Parent",
-                "fields": [{
-                    "kind": "field",
-                    "name": "heard",
-                    "pattern": {"kind": "type", "type": "number"},
-                    "init": {"kind": "number", "value": 0}
-                }],
-                "ports": [{
-                    "kind": "port",
-                    "component": "Child",
-                    "name": "child"
-                }],
-                "states": [{
-                    "kind": "state",
-                    "name": "Idle",
-                    "start": true,
-                    "handlers": [
-                        {
-                            "kind": "handler",
-                            "pattern": ping_pattern("Ping"),
-                            "body": [{
-                                "kind": "sendTo",
-                                "port": "child",
-                                "message": ping_object("Ping")
-                            }]
-                        },
-                        {
-                            "kind": "handler",
-                            "pattern": ping_pattern("Pong"),
-                            "body": [{
-                                "kind": "assign",
-                                "field": "heard",
-                                "expression": {"kind": "reference", "name": "n"}
-                            }]
-                        }
-                    ]
-                }]
             }
         ],
+        "workflows": [{
+            "kind": "workflow",
+            "name": "Ping",
+            "fields": [{
+                "kind": "field",
+                "name": "heard",
+                "pattern": {"kind": "type", "type": "number"},
+                "init": {"kind": "number", "value": 0}
+            }],
+            "ports": [{
+                "kind": "port",
+                "component": "Child",
+                "name": "child"
+            }],
+            "steps": [{
+                "kind": "step",
+                "name": "Run",
+                "start": true,
+                "enter": [],
+                "join": null,
+                "handlers": [
+                    {
+                        "kind": "handler",
+                        "pattern": ping_pattern("Ping"),
+                        "body": [{
+                            "kind": "sendTo",
+                            "port": "child",
+                            "message": ping_object("Ping")
+                        }]
+                    },
+                    {
+                        "kind": "handler",
+                        "pattern": ping_pattern("Pong"),
+                        "body": [{
+                            "kind": "assign",
+                            "field": "heard",
+                            "expression": {"kind": "reference", "name": "n"}
+                        }]
+                    }
+                ]
+            }]
+        }],
         "scenes": [{
             "kind": "scene",
             "name": "Main",
             "root": {
                 "kind": "instance",
-                "component": "Parent",
+                "component": "Ping",
                 "key": null,
                 "children": [{
                     "kind": "instance",

@@ -24,9 +24,8 @@ primitives rather than redefining them.
   and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
-- [Workflows](./workflows.spec.md): first-class long-running work, child
-  workflows, dynamic fan-out and join, streaming inputs, and clustered
-  execution.
+- [Workflows](./workflows.spec.md): the run-root machine, steps, `complete`,
+  dynamic fan-out and join.
 - [Runtime](./runtime.spec.md): the split between Uffda's matcher and Kith's
   actor interpreter, and how the `kith` binary consumes crates.io.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.

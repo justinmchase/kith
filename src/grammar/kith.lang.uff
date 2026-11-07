@@ -29,7 +29,7 @@ rule Import =
 rule ExportName = n:Identifier -> { kind: "export", name: n };
 
 rule ExportList =
-  "export" not "scene" not "component" f:ExportName r:ExportName* ";"
+  "export" not "scene" not "component" not "workflow" f:ExportName r:ExportName* ";"
   -> (flat [[f] (flat r)])
 ;
 
@@ -39,7 +39,8 @@ rule Field =
 ;
 
 rule Port =
-  not "field" not "start" not "state" k:Identifier n:Identifier ";"
+  not "field" not "start" not "state" not "step" not "join"
+  k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
 
@@ -69,26 +70,58 @@ rule SendDown =
   )
 ;
 
-rule Statement =
+rule Complete =
+  "complete" e:Expression ";"
+  -> { kind: "complete", message: e }
+;
+
+rule Fanout =
+  "fanout" e:Expression "-" ">" k:Identifier ";"
+  -> { kind: "fanout", collection: e, component: k }
+;
+
+rule Goto =
+  "goto" n:Identifier ";"
+  -> { kind: "goto", step: n }
+;
+
+rule ComponentStatement =
   | Assign
   | SendTo
   | SendUp
   | SendDown
+  | Complete
+;
+
+rule WorkflowStatement =
+  | Fanout
+  | Goto
+  | ComponentStatement
 ;
 
 # Group the message pattern so the handler body `{` is not a Then object.
-rule Handler =
-  "on" "(" p:Pattern ")" "{" b:Statement* "}"
+rule ComponentHandler =
+  "on" "(" p:Pattern ")" "{" b:ComponentStatement* "}"
   -> { kind: "handler", pattern: p, body: b }
 ;
 
+rule WorkflowHandler =
+  "on" "(" p:Pattern ")" "{" b:WorkflowStatement* "}"
+  -> { kind: "handler", pattern: p, body: b }
+;
+
+rule JoinAll =
+  "join" "all" "{" b:WorkflowStatement* "}"
+  -> { kind: "all", body: b }
+;
+
 rule StartState =
-  "start" n:Identifier "{" h:Handler* "}"
+  "start" n:Identifier "{" h:ComponentHandler* "}"
   -> { kind: "state", name: n, start: true, handlers: h }
 ;
 
 rule NamedState =
-  "state" n:Identifier "{" h:Handler* "}"
+  "state" n:Identifier "{" h:ComponentHandler* "}"
   -> { kind: "state", name: n, start: false, handlers: h }
 ;
 
@@ -104,6 +137,52 @@ rule ComponentDeclaration =
     s:State+
   "}"
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
+;
+
+rule StartStep =
+  "start" n:Identifier "{"
+    e:WorkflowStatement*
+    h:WorkflowHandler*
+    j:JoinAll?
+  "}"
+  -> {
+    kind: "step",
+    name: n,
+    start: true,
+    enter: e,
+    handlers: h,
+    join: (coalesce j null)
+  }
+;
+
+rule NamedStep =
+  "step" n:Identifier "{"
+    e:WorkflowStatement*
+    h:WorkflowHandler*
+    j:JoinAll?
+  "}"
+  -> {
+    kind: "step",
+    name: n,
+    start: false,
+    enter: e,
+    handlers: h,
+    join: (coalesce j null)
+  }
+;
+
+rule WorkflowStep =
+  | StartStep
+  | NamedStep
+;
+
+rule WorkflowDeclaration =
+  "workflow" n:Identifier "{"
+    f:Field*
+    p:Port*
+    s:WorkflowStep+
+  "}"
+  -> { kind: "workflow", name: n, fields: f, ports: p, steps: s }
 ;
 
 rule NamedChild =
@@ -134,7 +213,7 @@ rule ChildConstruction =
 rule InstanceBody = "{" c:ChildConstruction* "}" -> c;
 
 rule Construction =
-  n:Identifier "(" ")" b:InstanceBody?
+  n:Identifier "(" ")" b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
@@ -163,12 +242,13 @@ rule ScenePart =
   | BareScene
 ;
 
-func ProgramFrom<i:any e:any c:any s:any> =
+func ProgramFrom<i:any e:any c:any w:any s:any> =
   {
     kind: "program",
     imports: i,
     exports: (flat [(flat e) (flat (pluck s "exports"))]),
     components: c,
+    workflows: w,
     scenes: (flat (pluck s "scenes"))
   }
 ;
@@ -177,9 +257,10 @@ rule Program =
   i:Import*
   e:ExportList*
   c:ComponentDeclaration*
+  w:WorkflowDeclaration*
   s:ScenePart*
   end
-  -> (ProgramFrom i e c s)
+  -> (ProgramFrom i e c w s)
 ;
 
 [Language { id: "kith", name: "Kith", extensions: [".kith"] }]

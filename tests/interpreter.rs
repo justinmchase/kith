@@ -1,6 +1,6 @@
 use kith::ast::{
-    ping_program, Component, Export, Field, Handler, Instance, Port, Program, Scene, State,
-    Statement,
+    ping_program, Component, Export, Field, Handler, Instance, Join, Port, Program, Scene, State,
+    Statement, Step, Workflow,
 };
 use kith::interpreter::World;
 use serde_json::json;
@@ -31,6 +31,23 @@ fn idle(name: &str, ports: Vec<Port>, handlers: Vec<Handler>) -> Component {
             name: "Idle".into(),
             start: true,
             handlers,
+        }],
+    }
+}
+
+fn flow(name: &str, ports: Vec<Port>, handlers: Vec<Handler>) -> Workflow {
+    Workflow {
+        kind: "workflow".into(),
+        name: name.into(),
+        fields: vec![],
+        ports,
+        steps: vec![Step {
+            kind: "step".into(),
+            name: "Run".into(),
+            start: true,
+            enter: vec![],
+            handlers,
+            join: None,
         }],
     }
 }
@@ -71,17 +88,19 @@ fn instance(component: &str, key: Option<&str>, children: Vec<Instance>) -> Inst
     }
 }
 
-fn scene_program(components: Vec<Component>, root: Instance) -> Program {
-    let mut exports: Vec<Export> = components
+fn scene_program(workflows: Vec<Workflow>, components: Vec<Component>, root: Instance) -> Program {
+    let mut exports: Vec<Export> = workflows
         .iter()
-        .map(|component| export(&component.name))
+        .map(|workflow| export(&workflow.name))
         .collect();
+    exports.extend(components.iter().map(|component| export(&component.name)));
     exports.push(export("Main"));
     Program {
         kind: "program".into(),
         imports: vec![],
         exports,
         components,
+        workflows,
         scenes: vec![Scene {
             kind: "scene".into(),
             name: "Main".into(),
@@ -119,11 +138,8 @@ fn object_kind(kind: &str) -> serde_json::Value {
 
 fn mixed_parent_program(handlers: Vec<Handler>) -> Program {
     scene_program(
-        vec![
-            counting("Child"),
-            counting("Other"),
-            idle("Parent", vec![port("Child", "child")], handlers),
-        ],
+        vec![flow("Parent", vec![port("Child", "child")], handlers)],
+        vec![counting("Child"), counting("Other")],
         instance(
             "Parent",
             None,
@@ -141,7 +157,7 @@ fn parent_owns_scene_constructed_children() {
     let mut world = World::start(ping_program()).expect("start");
     let child = world.child(world.root_id(), "child").expect("child port");
     assert_eq!(world.kind(child), Some("Child"));
-    assert_eq!(world.kind(world.root_id()), Some("Parent"));
+    assert_eq!(world.kind(world.root_id()), Some("Ping"));
     assert_eq!(world.state(child), Some("Idle"));
     world.inject(json!({"kind": "Ping", "n": 1})).unwrap();
     world.run_until_idle().unwrap();
@@ -202,11 +218,7 @@ fn start_requires_a_unique_exported_scene() {
     two.scenes.push(Scene {
         kind: "scene".into(),
         name: "Other".into(),
-        root: instance(
-            "Parent",
-            None,
-            vec![instance("Child", Some("child"), vec![])],
-        ),
+        root: instance("Ping", None, vec![instance("Child", Some("child"), vec![])]),
     });
     two.exports.push(export("Other"));
     let err = World::check(&two).expect_err("two scenes");
@@ -214,7 +226,7 @@ fn start_requires_a_unique_exported_scene() {
 }
 
 #[test]
-// req:components-002
+// req:components-002 req:workflows-001
 fn check_requires_exactly_one_start_state() {
     World::check(&ping_program()).expect("valid program");
     let mut none = ping_program();
@@ -222,14 +234,28 @@ fn check_requires_exactly_one_start_state() {
     assert!(World::check(&none).is_err());
 
     let mut two = ping_program();
-    two.components[1].states.push(State {
-        kind: "state".into(),
+    two.workflows[0].steps.push(Step {
+        kind: "step".into(),
         name: "Other".into(),
         start: true,
+        enter: vec![],
         handlers: vec![],
+        join: None,
     });
     assert!(World::check(&two).is_err());
     assert!(World::start(two).is_err());
+}
+
+#[test]
+// req:workflows-001
+fn check_rejects_component_scene_root() {
+    let program = scene_program(
+        vec![],
+        vec![idle("Box", vec![], vec![])],
+        instance("Box", None, vec![]),
+    );
+    let err = World::check(&program).expect_err("component root");
+    assert!(err.message.contains("scene root must be a workflow"));
 }
 
 #[test]
@@ -251,7 +277,7 @@ fn routing_is_explicit_and_does_not_capture() {
 #[test]
 // req:components-003
 fn send_to_and_send_down_kind_select_named_and_unnamed() {
-    let parent = idle(
+    let parent = flow(
         "Parent",
         vec![port("Child", "child")],
         vec![
@@ -290,7 +316,8 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
         ],
     );
     let program = scene_program(
-        vec![counting("Child"), counting("Other"), parent],
+        vec![parent],
+        vec![counting("Child"), counting("Other")],
         instance(
             "Parent",
             None,
@@ -348,7 +375,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
             }],
         }],
     );
-    let parent = idle(
+    let parent = flow(
         "Parent",
         vec![port("Child", "child")],
         vec![
@@ -387,7 +414,8 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
         ],
     );
     let program = scene_program(
-        vec![child, parent],
+        vec![parent],
+        vec![child],
         instance(
             "Parent",
             None,
@@ -419,8 +447,8 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
 #[test]
 // req:components-005
 fn first_matching_handler_consumes_the_message() {
-    let one = Component {
-        kind: "component".into(),
+    let one = Workflow {
+        kind: "workflow".into(),
         name: "One".into(),
         fields: vec![Field {
             kind: "field".into(),
@@ -429,10 +457,12 @@ fn first_matching_handler_consumes_the_message() {
             init: Some(json!({"kind": "number", "value": 0})),
         }],
         ports: vec![],
-        states: vec![State {
-            kind: "state".into(),
-            name: "Idle".into(),
+        steps: vec![Step {
+            kind: "step".into(),
+            name: "Run".into(),
             start: true,
+            enter: vec![],
+            join: None,
             handlers: vec![
                 Handler {
                     kind: "handler".into(),
@@ -453,7 +483,7 @@ fn first_matching_handler_consumes_the_message() {
             ],
         }],
     };
-    let program = scene_program(vec![one], instance("One", None, vec![]));
+    let program = scene_program(vec![one], vec![], instance("One", None, vec![]));
     let mut world = World::start(program).expect("start");
     world.inject(json!("go")).unwrap();
     world.run_until_idle().unwrap();
@@ -461,10 +491,339 @@ fn first_matching_handler_consumes_the_message() {
 }
 
 #[test]
-// req:components-006
+// req:components-006 req:workflows-005
 fn ping_example_sets_heard_to_seven() {
     let mut world = World::start(ping_program()).expect("start");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
+}
+
+#[test]
+// req:workflows-002
+fn goto_enters_the_next_step() {
+    let workflow = Workflow {
+        kind: "workflow".into(),
+        name: "Flow".into(),
+        fields: vec![Field {
+            kind: "field".into(),
+            name: "phase".into(),
+            pattern: None,
+            init: Some(json!({"kind": "number", "value": 0})),
+        }],
+        ports: vec![],
+        steps: vec![
+            Step {
+                kind: "step".into(),
+                name: "First".into(),
+                start: true,
+                enter: vec![],
+                join: None,
+                handlers: vec![Handler {
+                    kind: "handler".into(),
+                    pattern: json!({"kind": "any"}),
+                    body: vec![Statement::Goto {
+                        step: "Second".into(),
+                    }],
+                }],
+            },
+            Step {
+                kind: "step".into(),
+                name: "Second".into(),
+                start: false,
+                handlers: vec![],
+                join: None,
+                enter: vec![Statement::Assign {
+                    field: "phase".into(),
+                    expression: json!({"kind": "number", "value": 2}),
+                }],
+            },
+        ],
+    };
+    let program = scene_program(vec![workflow], vec![], instance("Flow", None, vec![]));
+    let mut world = World::start(program).expect("start");
+    world.inject(json!("go")).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Second"));
+    assert_eq!(world.field(world.root_id(), "phase"), Some(&json!(2.0)));
+}
+
+fn worker() -> Component {
+    Component {
+        kind: "component".into(),
+        name: "Worker".into(),
+        fields: vec![],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                pattern: json!({
+                    "kind": "over",
+                    "keys": {
+                        "kind": {
+                            "kind": "equal",
+                            "value": {"kind": "value.literal", "value": "Item"}
+                        },
+                        "item": {
+                            "kind": "variable",
+                            "name": "item",
+                            "pattern": {"kind": "any"}
+                        }
+                    },
+                    "rest": null
+                }),
+                body: vec![Statement::Complete {
+                    message: json!({
+                        "kind": "object",
+                        "keys": [
+                            {
+                                "kind": "objectKey",
+                                "name": "kind",
+                                "expression": {"kind": "string", "values": ["Done"]}
+                            },
+                            {
+                                "kind": "objectKey",
+                                "name": "item",
+                                "expression": {"kind": "reference", "name": "item"}
+                            }
+                        ]
+                    }),
+                }],
+            }],
+        }],
+    }
+}
+
+fn import_flow() -> Workflow {
+    Workflow {
+        kind: "workflow".into(),
+        name: "Import".into(),
+        fields: vec![],
+        ports: vec![],
+        steps: vec![
+            Step {
+                kind: "step".into(),
+                name: "Fetch".into(),
+                start: true,
+                enter: vec![],
+                handlers: vec![Handler {
+                    kind: "handler".into(),
+                    pattern: json!({
+                        "kind": "over",
+                        "keys": {
+                            "kind": {
+                                "kind": "equal",
+                                "value": {"kind": "value.literal", "value": "Start"}
+                            },
+                            "items": {
+                                "kind": "variable",
+                                "name": "items",
+                                "pattern": {"kind": "any"}
+                            }
+                        },
+                        "rest": null
+                    }),
+                    body: vec![Statement::Fanout {
+                        collection: json!({"kind": "reference", "name": "items"}),
+                        component: "Worker".into(),
+                    }],
+                }],
+                join: Some(Join {
+                    kind: "all".into(),
+                    body: vec![Statement::Goto {
+                        step: "Done".into(),
+                    }],
+                }),
+            },
+            Step {
+                kind: "step".into(),
+                name: "Done".into(),
+                start: false,
+                handlers: vec![],
+                join: None,
+                enter: vec![Statement::Complete {
+                    message: json!({
+                        "kind": "object",
+                        "keys": [
+                            {
+                                "kind": "objectKey",
+                                "name": "kind",
+                                "expression": {"kind": "string", "values": ["Imported"]}
+                            },
+                            {
+                                "kind": "objectKey",
+                                "name": "results",
+                                "expression": {"kind": "reference", "name": "results"}
+                            }
+                        ]
+                    }),
+                }],
+            },
+        ],
+    }
+}
+
+#[test]
+// req:workflows-003
+fn fanout_zero_one_and_many_join_all() {
+    let program = scene_program(
+        vec![import_flow()],
+        vec![worker()],
+        instance("Import", None, vec![]),
+    );
+
+    let mut world = World::start(program.clone()).expect("start");
+    world.inject(json!({"kind": "Start", "items": []})).unwrap();
+    world.run_until_idle().unwrap();
+    assert!(world.completed(world.root_id()));
+    assert_eq!(
+        world.completion(world.root_id()).unwrap()["results"],
+        json!([])
+    );
+
+    let mut world = World::start(program.clone()).expect("start");
+    world
+        .inject(json!({"kind": "Start", "items": ["a"]}))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(
+        world.completion(world.root_id()).unwrap()["results"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mut world = World::start(program).expect("start");
+    world
+        .inject(json!({"kind": "Start", "items": ["a", "b", "c"]}))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(
+        world.completion(world.root_id()).unwrap()["results"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+// req:workflows-003
+fn fanout_of_kind_with_ports_fails_check() {
+    let mut boxed = worker();
+    boxed.name = "Boxed".into();
+    boxed.ports.push(port("Worker", "inner"));
+    let mut flow = import_flow();
+    if let Statement::Fanout { component, .. } = &mut flow.steps[0].handlers[0].body[0] {
+        *component = "Boxed".into();
+    }
+    let program = scene_program(
+        vec![flow],
+        vec![worker(), boxed],
+        instance("Import", None, vec![]),
+    );
+    let err = World::check(&program).expect_err("ports");
+    assert!(err.message.contains("must not declare ports"));
+}
+
+#[test]
+// req:workflows-004
+fn child_workflow_completes_to_parent() {
+    let child = Workflow {
+        kind: "workflow".into(),
+        name: "ChildFlow".into(),
+        fields: vec![],
+        ports: vec![],
+        steps: vec![Step {
+            kind: "step".into(),
+            name: "Run".into(),
+            start: true,
+            enter: vec![],
+            join: None,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                pattern: json!({"kind": "any"}),
+                body: vec![Statement::Complete {
+                    message: object_kind("Done"),
+                }],
+            }],
+        }],
+    };
+    let parent = Workflow {
+        kind: "workflow".into(),
+        name: "ParentFlow".into(),
+        fields: vec![Field {
+            kind: "field".into(),
+            name: "ok".into(),
+            pattern: None,
+            init: Some(json!({"kind": "number", "value": 0})),
+        }],
+        ports: vec![port("ChildFlow", "child")],
+        steps: vec![Step {
+            kind: "step".into(),
+            name: "Run".into(),
+            start: true,
+            enter: vec![],
+            join: None,
+            handlers: vec![
+                Handler {
+                    kind: "handler".into(),
+                    pattern: kind_eq("Go"),
+                    body: vec![Statement::SendTo {
+                        port: "child".into(),
+                        message: string_msg(),
+                    }],
+                },
+                Handler {
+                    kind: "handler".into(),
+                    pattern: kind_eq("Done"),
+                    body: vec![Statement::Assign {
+                        field: "ok".into(),
+                        expression: json!({"kind": "number", "value": 1}),
+                    }],
+                },
+            ],
+        }],
+    };
+    let program = scene_program(
+        vec![parent, child],
+        vec![],
+        instance(
+            "ParentFlow",
+            None,
+            vec![instance("ChildFlow", Some("child"), vec![])],
+        ),
+    );
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "Go"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.field(world.root_id(), "ok"), Some(&json!(1.0)));
+}
+
+#[test]
+// req:workflows-001
+fn component_must_not_fanout() {
+    let bad = idle(
+        "Box",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            pattern: json!({"kind": "any"}),
+            body: vec![Statement::Fanout {
+                collection: json!({"kind": "reference", "name": "items"}),
+                component: "Worker".into(),
+            }],
+        }],
+    );
+    let program = scene_program(
+        vec![flow("Root", vec![], vec![])],
+        vec![bad, worker()],
+        instance("Root", None, vec![]),
+    );
+    let err = World::check(&program).expect_err("fanout");
+    assert!(err.message.contains("must not fanout"));
 }

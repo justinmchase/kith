@@ -30,6 +30,14 @@ verify it cite it with `req:{id}`.
 - [Evaluate expressions](./uffda-host/001-evaluate-add.requirement.md)
 - [Match patterns](./uffda-host/002-match-object.requirement.md)
 
+## Workflows
+
+- [Distinct primitive and scene root](./workflows/001-distinct-and-root.requirement.md)
+- [Goto steps](./workflows/002-goto-steps.requirement.md)
+- [Fan-out and join all](./workflows/003-fanout-join.requirement.md)
+- [Child workflow](./workflows/004-child-workflow.requirement.md)
+- [Ping workflow](./workflows/005-ping-workflow.requirement.md)
+
 ## Grammar
 
 - [Parse to syntax tree](./grammar/001-parse-ast.requirement.md)

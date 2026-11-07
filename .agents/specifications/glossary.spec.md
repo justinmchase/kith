@@ -14,7 +14,8 @@ capitals.
 
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
-  example `component`, `workflow`, `scene`, `send`, `to`).
+  example `component`, `workflow`, `scene`, `step`, `send`, `to`, `fanout`,
+  `join`, `goto`, `complete`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -27,11 +28,12 @@ capitals.
 - **Package**: modules published together under one name and version, imported
   as Uffda's packages are.
 - **Root**: the instance that has no parent. A running program has one root:
-  the top-level instance of its exported scene.
-- **Scene**: a named instance tree that constructs component kinds, fills
-  ports, and may add unnamed children.
-- **Port**: a typed named slot on a component for one child (`Kind name;`).
-  The scene fills it. `send to name` addresses that instance.
+  the top-level workflow of its exported scene.
+- **Scene**: a named instance tree that constructs workflow and component
+  kinds, fills ports, and may add unnamed children. The root MUST be a
+  workflow.
+- **Port**: a typed named slot on a component or workflow for one child
+  (`Kind name;`). The scene fills it. `send to name` addresses that instance.
 
 ## Uffda
 
@@ -92,15 +94,19 @@ capitals.
 
 ## Workflows
 
-- **Workflow**: a first-class long-running instance with a state machine,
-  identity independent of the process that currently runs it, optional children,
-  and progress.
+- **Workflow**: a first-class orchestrating instance with steps, optional
+  fields and ports, progress, and the same mailbox runtime as a component.
+  The unique exported scene's root is a workflow.
+- **Step**: a named phase of a workflow. It is declaration syntax, not a
+  distinct actor.
+- **Complete**: finishing an instance as a work item (`complete V`): mark
+  done for join accounting and send up `V`.
 - **Child workflow**: a workflow instance owned by another workflow or by a
   component. Ownership is has-a.
-- **Fan-out**: spawning zero or more child instances from a collection or
-  stream, dynamically, as part of a transition.
+- **Fan-out**: spawning zero or more child instances from a collection,
+  dynamically, as part of a transition (`fanout expr -> Kind`).
 - **Join**: waiting for fan-out children to complete, then enabling a
-  transition with their results.
+  later turn with their results (`join all`).
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

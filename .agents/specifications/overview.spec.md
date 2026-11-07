@@ -58,8 +58,8 @@ primitives rather than defining their own.
   explicit: sending a message, changing machine state, spawning or joining
   work.
 - **One tree per exported scene.** A running program is the instance tree of
-  its unique exported scene. Each instance has at most one parent. The tree is
-  has-a all the way down.
+  its unique exported scene. The root MUST be a workflow. Each instance has at
+  most one parent. The tree is has-a all the way down.
 - **Scheduling is a source of variation.** The order in which independent actors
   run is not part of a program's meaning. A checker MUST be able to vary that
   order. Everything else a machine does, given the same messages in the same

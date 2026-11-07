@@ -42,7 +42,7 @@ fn parse_check_compile_and_run_ping() {
     let bad = dir.join("bad.kith");
     std::fs::write(
         &bad,
-        "export Broken;\nexport Main;\ncomponent Broken {\n  state Idle {}\n}\nexport scene Main {\n  Broken()\n}\n",
+        "export Broken;\nexport Main;\nworkflow Broken {\n  step Idle {}\n}\nexport scene Main {\n  Broken()\n}\n",
     )
     .unwrap();
     let rejected = run(&["check", bad.to_str().unwrap()]);

@@ -1,10 +1,10 @@
 # Workflows
 
-This chapter defines workflows: first-class long-running instances, child
-workflows, dynamic fan-out and join, streaming inputs, and clustered execution.
-They share dispatch with components ([dispatch](./dispatch.spec.md)) and has-a
-composition with [scenes](./scenes.spec.md). Terms are defined in the
-[glossary](./glossary.spec.md).
+This chapter defines workflows: the structured machines that orchestrate
+components and child workflows. They share the instance runtime and
+[dispatch](./dispatch.spec.md) with [components](./components.spec.md), and
+static children are still wired by a [scene](./scenes.spec.md). Terms are
+defined in the [glossary](./glossary.spec.md).
 
 ## Conventions
 
@@ -14,165 +14,193 @@ capitals.
 
 ## Definitions
 
-- **Workflow declaration**: the source that names a workflow, its fields, and
-  its state machine. Static children are constructed by a scene.
-- **Work item**: one element of a fan-out, each run as a child instance or a
-  transition actor.
-- **Join set**: the in-flight work items a join is waiting on.
-- **Placement**: which process in the cluster currently runs a workflow
-  instance.
+- **Workflow declaration**: the source that names a workflow, its fields, its
+  ports, and its steps.
+- **Step**: a named phase of a workflow machine. It is syntax, not a third
+  kind of actor.
+- **Work item**: one child instance spawned by a fan-out.
+- **Join set**: the in-flight work items a `join all` is waiting on.
 
 ## Axioms
 
-- A workflow is a first-class instance: it has identity, a machine, a mailbox,
-  and optional children.
-- A workflow's identity does not depend on which process currently runs it.
-- Fan-out creates children or transition actors dynamically; join enables a
-  later transition with their outcomes.
-- Progress is a fact about the instance. Any caller that may send the workflow
-  a message MAY learn its progress.
-- Streaming inputs are messages. They MAY arrive after the workflow has
-  started, and they are matched in whatever state the machine is in when they
-  arrive.
+- A workflow is a first-class instance: identity, fields, ports, mailbox,
+  children, and a current step.
+- A workflow shares the component runtime. It is not a component with flags.
+- Steps dispatch by messages. A step's work items are component or workflow
+  instances, never a `step` actor.
+- Fan-out creates children at run time; join enables a later transition with
+  their completions. Join MUST NOT block a dispatcher thread.
+- Progress is a fact about the instance. A caller MAY read completed and total
+  counts without taking a turn.
 
 ## Constraints
 
 ### Distinct primitive
 
-- Workflow and component are different declarations. A workflow MUST NOT be
-  written as a component with extra flags, and a component MUST NOT be written
-  as a short-lived workflow.
+- `workflow` and `component` are different declarations.
+- A component MUST NOT declare `step`, `fanout`, `join`, or `goto`.
+- A workflow MUST NOT declare `state`. It MUST declare exactly one start step.
 - A workflow MAY be a child of a component or of another workflow. A component
   MAY be a child of a workflow. Ownership is still has-a.
+- The unique exported [scene](./scenes.spec.md)'s root MUST be a workflow.
+  `kith run` and `World::start` run that workflow.
 
 ### Fan-out and join
 
-- Fan-out MUST be able to spawn a number of work items that is known only at
-  run time, including zero and one.
-- Each work item MUST run as its own actor, so items MAY proceed in parallel.
-- Join MUST wait for a declared condition on the join set (every item, a
-  pattern of outcomes, or cancellation of the rest) and MUST then enqueue a
-  single outcome message on the workflow's component actor.
-- A workflow MUST NOT block a dispatcher thread while joining. Join is a
-  transition actor.
-
-### Streaming
-
-- A workflow MUST accept messages after it has started, not only a single
-  argument at creation.
-- Arrival order of a stream is a source of variation when the sender is
-  outside the workflow. Within one sender-to-workflow mailbox, order MUST be
-  preserved.
-
-### Clustered execution
-
-- A workflow MUST be able to run on any process of the cluster that the
-  runtime places it on.
-- Placement MUST NOT be part of the program's meaning. A transition MUST NOT
-  name a host, thread, or process.
-- After a move, the instance MUST resume with the same identity, the same
-  machine state, and the same undelivered mailbox messages, as if it had not
-  moved.
-- Two placements MUST NOT run turns of the same instance at the same time.
+- `fanout expr -> Kind` MUST spawn one work item per element of `expr`,
+  including zero and one. `expr` MUST evaluate to a list.
+- Each work item MUST be an instance of `Kind`, which MUST be a component or
+  workflow with no ports in this slice.
+- Each work item MUST receive `{ kind: "Item", item, index }` as a down send
+  and MUST run as its own actor.
+- `complete V` MUST mark the instance done for join accounting and MUST
+  `send up V`. Completing the scene root MUST mark it done and MUST NOT send
+  up.
+- `join all { ... }` MUST run as a later turn when the join set is empty,
+  with `{ kind: "Joined", results }` bindings. It MUST NOT block.
+- Which work item completes first MUST NOT be assumed. Results are collected
+  in completion order.
 
 ### Determinism
 
 - Given the same machine state and the same enabling message, a workflow
   transition MUST be deterministic in the same sense as a component
   transition.
-- Which work item of a join set completes first MUST NOT be assumed by the
-  program. A transition that needs a particular item MUST match it by
-  identity or pattern, not by arrival race.
 
 ## Mechanism
 
 ### Declaration
 
-The following sketch establishes the shape; token spelling is not frozen.
+```kith
+export Child;
+export Ping;
+export Main;
 
-```text
-workflow Import {
-  start Ready {
-    on (Start items) {
-      fanout items -> item;
-    }
-    on item.Done {
-      join;
+component Child {
+  start Idle {
+    on ({ kind: "Ping", n: number }) {
+      complete { kind: "Pong", n: n };
     }
   }
 }
 
-export scene ImportRun {
-  Import() {
-    item = ProcessItem()
+workflow Ping {
+  field heard: number = 0;
+  Child child;
+
+  start Run {
+    on ({ kind: "Ping", n: number }) {
+      send to child { kind: "Ping", n: n };
+    }
+    on ({ kind: "Pong", n: number }) {
+      heard -> n;
+    }
+  }
+}
+
+export scene Main {
+  Ping() {
+    child = Child();
   }
 }
 ```
 
-- `workflow Name { ... }` declares a kind of workflow.
-- Static children are wired in a [scene](./scenes.spec.md), not on the
-  workflow kind. Fan-out MAY create many instances of a wired kind, each an
-  item in a join set.
-- `fanout collection -> child` spawns one work item per element as children
-  of that kind, and records a join set.
-- Completions arrive as messages (`item.Done` in the sketch). A join
-  transition reduces the join set and, when the join condition holds, continues
-  the workflow.
+Fan-out:
+
+```kith
+component Worker {
+  start Idle {
+    on ({ kind: "Item", item: any, index: number }) {
+      complete { kind: "Done", item: item, index: index };
+    }
+  }
+}
+
+workflow Import {
+  start Fetch {
+    on ({ kind: "Start", items: any }) {
+      fanout items -> Worker;
+    }
+    join all {
+      goto Done;
+    }
+  }
+
+  step Done {
+    complete { kind: "Imported", results: results };
+  }
+}
+
+export scene Main {
+  Import();
+}
+```
+
+- `workflow Name { ... }` declares a kind. Instances are created by a scene
+  or by fan-out.
+- `Kind name;` is a port, filled by the scene, same as a component port. The
+  kind MAY be a component or a workflow.
+- `start Name { ... }` is the start step. Later steps use `step Name { ... }`.
+- Statements at the top of a step run when the step is entered (start or
+  `goto`). `on (pattern) { ... }` waits in that step. `join all { ... }` waits
+  for the step's join set.
+- `goto Name;` enters that step. `fanout expr -> Kind;` records a join set.
+- `complete V;` finishes the instance as a work item.
 
 ### Progress
 
-- Each fan-out records branches; each work item is a leaf until it fans out
-  further.
-- Progress MUST roll up completed and total counts along that tree.
-- A workflow MAY include progress content computed by expressions from its
-  fields. That content MUST be data a caller can read without taking a turn
-  that changes the machine.
+- An active join set MUST expose `{ completed, total }` without a turn.
+- Nested roll-up and progress content expressions are not required of this
+  slice.
 
 ### Child workflows
 
-- A child workflow is an ordinary child instance whose kind is a workflow.
-- Destroying a parent MUST cancel its child workflows. Cancellation MUST
-  propagate to their join sets.
-- A child workflow's completion is a message to its parent, like any other
-  child.
+- A child workflow is an ordinary child whose kind is a workflow.
+- Completing a child is `complete`, which sends up to the parent like any
+  other child.
 
-### Clustered execution
+## Syntax tree
 
-- The runtime MAY move a workflow between processes between turns.
-- A move MUST wait until the current turn of that instance is complete.
-- Durable facts of a workflow are at least: identity, kind, machine state,
-  mailbox, join sets, and child identities. How they are stored is the planned
-  `persistence` chapter.
-- Streaming senders address the workflow by identity, not by placement. The
-  cluster MUST route those messages to the current placement.
+- `{ kind: "program", ..., workflows: [Workflow] }`
+- `{ kind: "workflow", name: string, fields: [Field], ports: [Port], steps: [Step] }`
+- `{ kind: "step", name: string, start: boolean, enter: [Statement], handlers: [Handler], join: Join | null }`
+- `{ kind: "all", body: [Statement] }`
+- `{ kind: "fanout", collection: Expression, component: string }`
+- `{ kind: "goto", step: string }`
+- `{ kind: "complete", message: Expression }`
+
+Exactly one step MUST have `start: true`. `join` MUST be `null` when the step
+has no `join all`.
+
+## Example
+
+Injecting `{ kind: "Ping", n: 7 }` at the `Ping` root of scene `Main` MUST
+`send to child`, the child MUST `complete` `{ kind: "Pong", n: 7 }`, and
+`Ping.heard` MUST become `7`.
+
+Injecting `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST fan out two
+`Worker` instances, join both, `goto Done`, and complete with two results.
 
 ## Why this design
 
-- **A second primitive, not a component flag.** Components are a topology for
-  local concurrent behavior. Workflows are relocatable, joinable, long-running
-  work with progress. Collapsing them now would mix mailbox-as-UI-tree with
-  mailbox-as-orchestrator before either is built. They share dispatch so the
-  runtime stays one scheduler.
-- **Fan-out as spawn, join as message.** A blocking join would stall the
-  dispatcher. An implicit promise graph would hide actors. Spawn and complete
-  as messages keep checkability: the checker varies completion order at the
-  mailbox.
-- **Placement is not in the program.** If a transition could name a host,
-  clustered execution would leak into business and component code, and a
-  checker could not relocate work.
+- **A second primitive, not a component flag.** Components keep local
+  protocol. Workflows compose many of those machines. They share dispatch so
+  the runtime stays one scheduler.
+- **Step is syntax.** A third actor kind would split the dispatcher. Work
+  items stay component or workflow instances.
+- **Fan-out as spawn, join as a later turn.** A blocking join would stall the
+  dispatcher. Completions stay messages, so a checker can vary their order.
+- **The world runs a workflow.** The scene still builds the tree; the root of
+  that tree is the application flow.
 
 ## Open questions
 
-- **Join conditions.** All items, first success, first failure, N-of-M, and
-  how failures cancel the rest.
-- **Partial results.** Whether a join MAY yield a stream of per-item messages
-  as well as a final join message.
-- **Exactly-once turns** after a crash, versus at-least-once with idempotent
-  transitions.
-- **How a stream is declared** (a child slot that receives, a pattern of
-  messages, a Uffda async iterable).
-- **Who may query progress** without sending a message that the machine must
-  match.
-- **Timers** for workflow deadlines, in the planned `timers` chapter.
+- **Join conditions** other than `join all`: first success, first failure,
+  N-of-M, cancellation of the rest.
+- **Fan-out of kinds with ports** (a prototype subgraph per item).
+- **Exactly-once turns** after a crash.
+- **Timers** for workflow deadlines.
+- **Clustered execution**, still specified in spirit here and in
+  [dispatch](./dispatch.spec.md), is not required of this slice.
 - **Whether Coleslaw's planned workflow chapter** is only a restriction of
   this one. Deferred to Coleslaw.

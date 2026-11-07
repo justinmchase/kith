@@ -12,7 +12,7 @@ fn ping_source_parses_to_the_component_tree() {
     assert_eq!(program.kind, "program");
     let names: Vec<_> = program.exported_names().collect();
     assert!(names.contains(&"Child"));
-    assert!(names.contains(&"Parent"));
+    assert!(names.contains(&"Ping"));
     assert!(names.contains(&"Main"));
     let component_names: Vec<_> = program
         .components
@@ -20,15 +20,15 @@ fn ping_source_parses_to_the_component_tree() {
         .map(|component| component.name.as_str())
         .collect();
     assert!(component_names.contains(&"Child"));
-    assert!(component_names.contains(&"Parent"));
-    let parent = program.component("Parent").expect("Parent");
-    assert!(parent.fields.iter().any(|field| field.name == "heard"));
-    assert!(parent
+    assert!(program.workflow("Ping").is_some());
+    let ping = program.workflow("Ping").expect("Ping");
+    assert!(ping.fields.iter().any(|field| field.name == "heard"));
+    assert!(ping
         .ports
         .iter()
         .any(|port| port.name == "child" && port.component == "Child"));
     let scene = program.scene("Main").expect("Main");
-    assert_eq!(scene.root.component, "Parent");
+    assert_eq!(scene.root.component, "Ping");
     assert!(scene.root.key.is_none());
     assert!(scene
         .root
@@ -63,7 +63,7 @@ component Other {
   }
 }
 
-component Parent {
+workflow Parent {
   Child child;
 
   start Idle {
@@ -87,24 +87,22 @@ export scene Main {
 }
 "#;
     let program = parse_source(source).expect("parse mixed");
-    let parent = program.component("Parent").expect("Parent");
-    let ping = parent.states[0].handlers[0].body[0].clone();
-    let down = parent.states[0].handlers[1].body[0].clone();
-    let any = parent.states[0].handlers[2].body[0].clone();
+    let parent = program.workflow("Parent").expect("Parent");
+    let ping = parent.steps[0].handlers[0].body[0].clone();
+    let down = parent.steps[0].handlers[1].body[0].clone();
+    let any = parent.steps[0].handlers[2].body[0].clone();
     match ping {
         kith::ast::Statement::SendTo { ref port, .. } => assert_eq!(port, "child"),
         other => panic!("expected sendTo, got {other:?}"),
     }
     match down {
-        kith::ast::Statement::SendDown {
-            ref component, ..
-        } => assert_eq!(component.as_deref(), Some("Child")),
+        kith::ast::Statement::SendDown { ref component, .. } => {
+            assert_eq!(component.as_deref(), Some("Child"))
+        }
         other => panic!("expected sendDown Child, got {other:?}"),
     }
     match any {
-        kith::ast::Statement::SendDown {
-            ref component, ..
-        } => assert!(component.is_none()),
+        kith::ast::Statement::SendDown { ref component, .. } => assert!(component.is_none()),
         other => panic!("expected sendDown any, got {other:?}"),
     }
     let children = &program.scene("Main").expect("Main").root.children;
@@ -140,9 +138,27 @@ fn import_list_parses_and_relative_files_resolve() {
     .unwrap();
     std::fs::write(
         dir.join("main.kith"),
-        "import \"./child.kith\" Child;\nexport Main;\ncomponent Box {\n  start Idle {}\n}\nexport scene Main {\n  Box()\n}\n",
+        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start Idle {}\n}\nexport scene Main {\n  Box()\n}\n",
     )
     .unwrap();
     let err = resolve_program(&dir.join("main.kith")).expect_err("missing export");
     assert!(err.message.contains("not exported"));
+}
+
+#[test]
+// req:grammar-001 req:workflows-003
+fn import_source_parses_fanout_and_join() {
+    let source = include_str!("../examples/import.kith");
+    let program = parse_source(source).expect("parse import.kith");
+    let import = program.workflow("Import").expect("Import");
+    assert!(matches!(
+        import.steps[0].handlers[0].body[0],
+        kith::ast::Statement::Fanout { .. }
+    ));
+    assert_eq!(
+        import.steps[0].join.as_ref().map(|join| join.kind.as_str()),
+        Some("all")
+    );
+    assert!(!import.steps[1].start);
+    World::check(&program).expect("import checks");
 }

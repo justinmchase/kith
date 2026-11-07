@@ -1,20 +1,20 @@
 export Child;
-export Parent;
+export Ping;
 export Main;
 
 component Child {
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      send up { kind: "Pong", n: n };
+      complete { kind: "Pong", n: n };
     }
   }
 }
 
-component Parent {
+workflow Ping {
   field heard: number = 0;
   Child child;
 
-  start Idle {
+  start Run {
     on ({ kind: "Ping", n: number }) {
       send to child { kind: "Ping", n: n };
     }
@@ -25,7 +25,7 @@ component Parent {
 }
 
 export scene Main {
-  Parent() {
+  Ping() {
     child = Child();
   }
 }

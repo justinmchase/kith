@@ -45,11 +45,13 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes and the same sends.
-- A transition MAY send zero or more messages, change fields, and change the
-  machine's state. It MUST NOT wait by blocking the dispatcher. The first
-  executable slice MUST NOT spawn or destroy children; scene-constructed
+- A transition MAY send zero or more messages, change fields, complete, and
+  change the machine's state. It MUST NOT wait by blocking the dispatcher. The
+  first executable slice MUST NOT spawn or destroy children; scene-constructed
   children exist for the parent's lifetime. Dynamic spawn is a
-  [workflow](./workflows.spec.md) concern.
+  [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
+  `join`, `goto`, or `step`. A component MAY `complete V` so it can be a
+  fan-out work item.
 
 ### Routing
 
@@ -78,36 +80,15 @@ capitals.
 A component declaration names the kind, optional fields, optional ports, and
 the machine. A scene constructs instances and fills ports.
 
-```kith
-export Child;
-export Parent;
-export Main;
+The normative ping program is a [workflow](./workflows.spec.md#declaration)
+root with a `Child` component. Components stay local machines:
 
+```kith
 component Child {
   start Idle {
     on ({ kind: "Ping", n: number }) {
-      send up { kind: "Pong", n: n };
+      complete { kind: "Pong", n: n };
     }
-  }
-}
-
-component Parent {
-  field heard: number = 0;
-  Child child;
-
-  start Idle {
-    on ({ kind: "Ping", n: number }) {
-      send to child { kind: "Ping", n: n };
-    }
-    on ({ kind: "Pong", n: number }) {
-      heard -> n;
-    }
-  }
-}
-
-export scene Main {
-  Parent() {
-    child = Child();
   }
 }
 ```
@@ -132,6 +113,8 @@ export scene Main {
 - `send down Kind V` sends `V` to each direct child of that kind.
 - `send down any V` sends `V` to every direct child.
 - `send up V` sends `V` toward the parent.
+- `complete V` marks the instance done for a parent's join set and sends `V`
+  up. Completing the root marks it done and does not send up.
 
 A send enqueues work for the dispatcher. The sender MUST NOT observe a
 handler's result as a return value. If a later transition needs a result, the
@@ -166,7 +149,7 @@ accept the same shape constructed without parsing. Uffda pattern and expression
 subtrees keep Uffda's own AST kinds (`over`, `variable`, `invocation`,
 `number`, `resolve`, …).
 
-- `{ kind: "program", imports: [Import], exports: [Export], components: [Component], scenes: [Scene] }`
+- `{ kind: "program", imports: [Import], exports: [Export], components: [Component], workflows: [Workflow], scenes: [Scene] }`
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
 - `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
@@ -180,6 +163,7 @@ subtrees keep Uffda's own AST kinds (`over`, `variable`, `invocation`,
 - `{ kind: "sendUp", message: Expression }`
 - `{ kind: "sendTo", port: string, message: Expression }`
 - `{ kind: "sendDown", component: string | null, message: Expression }`
+- `{ kind: "complete", message: Expression }`
 
 Exactly one state in a component MUST have `start: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
@@ -189,9 +173,9 @@ MUST be `null` when the send is `send down any`.
 
 ## Example
 
-Injecting `{ kind: "Ping", n: 7 }` at the `Parent` root of scene `Main` MUST
-`send to child`, the child MUST send up `{ kind: "Pong", n: 7 }`, and
-`Parent.heard` MUST become `7`.
+Injecting `{ kind: "Ping", n: 7 }` at the `Ping` workflow root of scene `Main`
+MUST `send to child`, the child MUST `complete` `{ kind: "Pong", n: 7 }`, and
+`Ping.heard` MUST become `7`. See [workflows](./workflows.spec.md#example).
 
 ## Why this design
 
@@ -214,7 +198,6 @@ Injecting `{ kind: "Ping", n: 7 }` at the `Parent` root of scene `Main` MUST
 - **How higher languages specialize a component** (restriction of messages,
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
-- **Goto state.** Whether a transition MAY name the next state, or the machine
-  stays in the start state until a later slice. The first slice keeps the
-  current state unless a statement sets it; no `goto` syntax yet.
+- **Goto state.** Components still have no `goto`. Workflows use `goto` to
+  enter another step; see [workflows](./workflows.spec.md).
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.

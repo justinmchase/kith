@@ -32,8 +32,8 @@ capitals.
 
 ## Constraints
 
-- A scene MUST have exactly one top-level instance. That instance is the
-  program root when the scene is run.
+- A scene MUST have exactly one top-level instance. That instance MUST be a
+  workflow. It is the program root when the scene is run.
 - `name = Kind() { ... }` MUST fill port `name` with one instance of `Kind`.
 - `Kind() { ... }` with no `name =` MUST add an unnamed child of that kind.
 - A scene MUST NOT share an instance between two parents.
@@ -46,7 +46,7 @@ capitals.
   declare.
 - `kith run` and `World::start` MUST run the unique exported scene of the
   program. A program that exports no scene, or more than one scene, MUST be
-  rejected.
+  rejected. Check MUST fail if the scene root is not a workflow.
 
 ## Mechanism
 
@@ -54,7 +54,7 @@ capitals.
 
 ```kith
 export scene Main {
-  Parent() {
+  Ping() {
     child = Child();
     Logger();
   }
@@ -71,7 +71,8 @@ export scene Main {
   scene the program's run target when it is the unique exported scene.
 
 The normative ping program is in [components](./components.spec.md#declaration).
-Its scene is `Main`: a `Parent` root with port `child` filled by `Child`.
+Its scene is `Main`: a `Ping` workflow root with port `child` filled by
+`Child`.
 
 ### Import and export
 
@@ -85,7 +86,7 @@ Its scene is `Main`: a `Parent` root with port `child` filled by `Child`.
 
 ## Why this design
 
-- **Ports versus the graph.** `Child child;` on Parent is a Unity-style
+- **Ports versus the graph.** `Child child;` on Ping is a Unity-style
   serialized field: a typed collaborator the scene must fill. Unnamed
   `Logger()` children are extra hierarchy, reached by kind, not extra ports.
 - **Scene still builds the tree.** The kind names the ports; the scene says

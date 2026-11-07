@@ -1,0 +1,30 @@
+export Worker;
+export Import;
+export Main;
+
+component Worker {
+  start Idle {
+    on ({ kind: "Item", item: any, index: number }) {
+      complete { kind: "Done", item: item, index: index };
+    }
+  }
+}
+
+workflow Import {
+  start Fetch {
+    on ({ kind: "Start", items: any }) {
+      fanout items -> Worker;
+    }
+    join all {
+      goto Done;
+    }
+  }
+
+  step Done {
+    complete { kind: "Imported", results: results };
+  }
+}
+
+export scene Main {
+  Import();
+}
