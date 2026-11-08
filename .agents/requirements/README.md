@@ -17,6 +17,7 @@ verify it cite it with `req:{id}`.
 - [Else handler](./components/008-else.requirement.md)
 - [Goto state](./components/009-goto.requirement.md)
 - [Unnamed start and else complete](./components/010-start-else-complete.requirement.md)
+- [Mock ship callback](./components/011-mock-ship.requirement.md)
 
 ## Scenes
 
@@ -28,6 +29,7 @@ verify it cite it with `req:{id}`.
 
 - [Serial FIFO turns](./dispatch/001-serial-fifo.requirement.md)
 - [Self-send later turn](./dispatch/002-self-send-later.requirement.md)
+- [Delayed send](./dispatch/003-send-after.requirement.md)
 
 ## Uffda host
 

@@ -162,13 +162,24 @@ pub enum Statement {
     #[serde(rename = "assign")]
     Assign { field: String, expression: Json },
     #[serde(rename = "sendUp")]
-    SendUp { message: Json },
+    SendUp {
+        message: Json,
+        #[serde(default)]
+        after: Option<Json>,
+    },
     #[serde(rename = "sendTo")]
-    SendTo { port: String, message: Json },
+    SendTo {
+        port: String,
+        message: Json,
+        #[serde(default)]
+        after: Option<Json>,
+    },
     #[serde(rename = "sendDown")]
     SendDown {
         component: Option<String>,
         message: Json,
+        #[serde(default)]
+        after: Option<Json>,
     },
     #[serde(rename = "complete")]
     Complete { message: Json },

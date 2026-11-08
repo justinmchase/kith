@@ -27,6 +27,14 @@ struct JoinSet {
     reducer: Option<ActorId>,
 }
 
+#[derive(Clone)]
+struct Timer {
+    due: u64,
+    to: ActorId,
+    message: Json,
+    route: Route,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunStatus {
     Running,
@@ -63,6 +71,9 @@ pub struct World {
     routes: HashMap<(ActorId, u64), Route>,
     route_seq: u64,
     prints: Vec<Json>,
+    now: u64,
+    rng: u64,
+    timers: Vec<Timer>,
 }
 
 impl World {
@@ -102,6 +113,9 @@ impl World {
             routes: HashMap::new(),
             route_seq: 0,
             prints: Vec::new(),
+            now: 0,
+            rng: 1,
+            timers: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         Ok(world)
@@ -227,6 +241,28 @@ impl World {
         }
     }
 
+    pub fn run(&mut self) -> Result<(), Error> {
+        loop {
+            self.run_until_idle()?;
+            let Some(due) = self.timers.iter().map(|timer| timer.due).min() else {
+                return Ok(());
+            };
+            self.now = due;
+            let mut due_now = Vec::new();
+            self.timers.retain(|timer| {
+                if timer.due <= self.now {
+                    due_now.push(timer.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            for timer in due_now {
+                self.deliver(timer.to, timer.message, timer.route)?;
+            }
+        }
+    }
+
     pub fn snapshot(&self) -> Result<String, Error> {
         encode(&self.snapshot_value())
     }
@@ -289,10 +325,23 @@ impl World {
         json!({
             "nextId": self.next_id,
             "routeSeq": self.route_seq,
+            "now": self.now,
+            "rng": self.rng,
             "instances": instances,
             "dispatcher": self.dispatcher.snapshot(),
             "routes": routes,
             "prints": self.prints,
+            "timers": self.timers.iter().map(|timer| json!({
+                "due": timer.due,
+                "to": timer.to.0,
+                "message": timer.message,
+                "route": match timer.route {
+                    Route::Inject => "inject",
+                    Route::Down => "down",
+                    Route::Up => "up",
+                    Route::Join => "join",
+                }
+            })).collect::<Vec<_>>(),
         })
     }
 
@@ -348,6 +397,14 @@ impl World {
             .and_then(Json::as_array)
             .cloned()
             .unwrap_or_default();
+        let now = snapshot.get("now").and_then(json_u64).unwrap_or(0);
+        let rng = snapshot.get("rng").and_then(json_u64).unwrap_or(1);
+        let mut timers = Vec::new();
+        if let Some(list) = snapshot.get("timers").and_then(Json::as_array) {
+            for entry in list {
+                timers.push(restore_timer(entry)?);
+            }
+        }
         Ok(Self {
             program,
             instances,
@@ -356,6 +413,9 @@ impl World {
             routes,
             route_seq,
             prints,
+            now,
+            rng,
+            timers,
         })
     }
 
@@ -874,30 +934,56 @@ impl World {
                         .fields
                         .insert(field.clone(), value);
                 }
-                Statement::SendUp { message } => {
-                    let value = evaluate(message, &bindings)?;
+                Statement::SendUp { message, after } => {
                     let parent = self.instances[&id]
                         .parent
                         .ok_or_else(|| Error::new("send up from root"))?;
-                    sends.push((parent, value, Route::Up));
+                    self.enqueue_send(
+                        parent,
+                        message,
+                        after.as_ref(),
+                        Route::Up,
+                        &bindings,
+                        &mut sends,
+                    )?;
                 }
-                Statement::SendTo { port, message } => {
-                    let value = evaluate(message, &bindings)?;
+                Statement::SendTo {
+                    port,
+                    message,
+                    after,
+                } => {
                     let child = self.instances[&id]
                         .children
                         .iter()
                         .find(|child| child.key.as_deref() == Some(port.as_str()))
                         .ok_or_else(|| Error::new(format!("unknown port {port}")))?;
-                    sends.push((child.id, value, Route::Down));
+                    self.enqueue_send(
+                        child.id,
+                        message,
+                        after.as_ref(),
+                        Route::Down,
+                        &bindings,
+                        &mut sends,
+                    )?;
                 }
-                Statement::SendDown { component, message } => {
-                    let value = evaluate(message, &bindings)?;
+                Statement::SendDown {
+                    component,
+                    message,
+                    after,
+                } => {
                     let selected = self.select_children(id, component.as_deref());
                     if selected.is_empty() {
                         return Err(Error::new("no child matched send down"));
                     }
                     for child_id in selected {
-                        sends.push((child_id, value.clone(), Route::Down));
+                        self.enqueue_send(
+                            child_id,
+                            message,
+                            after.as_ref(),
+                            Route::Down,
+                            &bindings,
+                            &mut sends,
+                        )?;
                     }
                 }
                 Statement::Print { expression } => {
@@ -1003,6 +1089,50 @@ impl World {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    fn enqueue_send(
+        &mut self,
+        to: ActorId,
+        message: &Json,
+        after: Option<&Json>,
+        route: Route,
+        bindings: &HashMap<String, Json>,
+        sends: &mut Vec<(ActorId, Json, Route)>,
+    ) -> Result<(), Error> {
+        let value = evaluate(message, bindings)?;
+        if let Some(after) = after {
+            let delay = self.delay_ms(after, bindings)?;
+            self.timers.push(Timer {
+                due: self.now.saturating_add(delay),
+                to,
+                message: value,
+                route,
+            });
+            return Ok(());
+        }
+        sends.push((to, value, route));
+        Ok(())
+    }
+
+    fn delay_ms(
+        &mut self,
+        after: &Json,
+        bindings: &HashMap<String, Json>,
+    ) -> Result<u64, Error> {
+        if after.get("kind").and_then(Json::as_str) == Some("random") {
+            return Ok(self.random_delay());
+        }
+        let value = evaluate(after, bindings)?;
+        value
+            .as_f64()
+            .map(|ms| ms.max(0.0) as u64)
+            .ok_or_else(|| Error::new("send after expected a number of milliseconds"))
+    }
+
+    fn random_delay(&mut self) -> u64 {
+        self.rng = self.rng.wrapping_mul(1664525).wrapping_add(1013904223);
+        10 + (self.rng % 31)
     }
 
     fn deliver(&mut self, to: ActorId, value: Json, route: Route) -> Result<(), Error> {
@@ -1256,6 +1386,35 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+fn restore_route(value: Option<&str>) -> Route {
+    match value {
+        Some("down") => Route::Down,
+        Some("up") => Route::Up,
+        Some("join") => Route::Join,
+        _ => Route::Inject,
+    }
+}
+
+fn restore_timer(entry: &Json) -> Result<Timer, Error> {
+    Ok(Timer {
+        due: entry
+            .get("due")
+            .and_then(json_u64)
+            .ok_or_else(|| Error::new("timer missing due"))?,
+        to: ActorId(
+            entry
+                .get("to")
+                .and_then(json_u64)
+                .ok_or_else(|| Error::new("timer missing to"))?,
+        ),
+        message: entry
+            .get("message")
+            .cloned()
+            .ok_or_else(|| Error::new("timer missing message"))?,
+        route: restore_route(entry.get("route").and_then(Json::as_str)),
+    })
 }
 
 fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {

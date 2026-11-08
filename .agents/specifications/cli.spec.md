@@ -43,7 +43,8 @@ The executable name MUST be `kith`. The initial surface MUST be:
   print a data codec record of the root component's fields, or of the
   workflow succeed output when the root is a workflow. `print` values MUST
   go to stderr as data codec records so stdout stays the run result.
-  `--message` remains JSON for this slice.
+  `--message` remains JSON for this slice. `run` MUST drain mailboxes and
+  advance pending `send after` timers ([timers](./timers.spec.md)).
 
 ## Deferred commands
 

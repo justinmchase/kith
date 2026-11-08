@@ -148,6 +148,11 @@ export scene Main {
 - `send down Kind V` sends `V` to each direct child of that kind.
 - `send down any V` sends `V` to every direct child.
 - `send up V` sends `V` toward the parent.
+- `send after Delay Route V` is the same send, delivered later. See
+  [timers](./timers.spec.md). Order's `MockShip` uses
+  `send after random up { kind: "Delivered" }` so Carrier's `Shipping`
+  state is the callback wait. The host MAY still `World::send` a
+  `Delivered` into a Carrier.
 - `complete V` marks the instance done for a parent's join set and sends `V`
   up. Completing the root marks it done and does not send up. A `complete`
   object MAY use identifier shorthand: `{ kind: "Summarize" total }` is
@@ -202,9 +207,9 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "state", name: string, start: boolean, handlers: [Handler] }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
-- `{ kind: "sendUp", message: Expression }`
-- `{ kind: "sendTo", port: string, message: Expression }`
-- `{ kind: "sendDown", component: string | null, message: Expression }`
+- `{ kind: "sendUp", message: Expression, after: Expression | { kind: "random" } | null }`
+- `{ kind: "sendTo", port: string, message: Expression, after: Expression | { kind: "random" } | null }`
+- `{ kind: "sendDown", component: string | null, message: Expression, after: Expression | { kind: "random" } | null }`
 - `{ kind: "complete", message: Expression }`
 - `{ kind: "print", expression: Expression }`
 - `{ kind: "goto", state: string }`

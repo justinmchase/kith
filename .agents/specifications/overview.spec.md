@@ -50,8 +50,9 @@ primitives rather than defining their own.
   completing a step follows `then` (or a `pick` clause) with that step's
   output as the working value. Expressions compute values and have no effect.
 - **Dispatch is the runtime.** User code MUST NOT schedule actors, wait on
-  threads, or lock shared state. The dispatcher treats components and
-  in-flight transitions as actors and is the parallelization mechanism.
+  threads, or lock shared state. Delayed work is `send after`, not a sleep.
+  The dispatcher treats components and in-flight transitions as actors and is
+  the parallelization mechanism.
 - **Patterns match messages.** A receive clause is a Uffda pattern. Checking a
   message against a transition means matching that pattern.
 - **Expressions are pure.** Uffda expressions compute values (including

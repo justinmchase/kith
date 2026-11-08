@@ -15,11 +15,12 @@ Preconditions:
 Expected behavior:
 
 - Injecting a paid order with two items MUST accept and charge, then wait on
-  two `Carrier` work items. Each Carrier MUST `print` a pickup request.
-- `World::send` of `{ kind: "Delivered" }` to each Carrier MUST complete
-  those items. `Summarize` MUST fold each shipment and succeed with
+  two `Carrier` work items. Each Carrier MUST `print` a pickup request and
+  dispatch its `MockShip`. After `run_until_idle` the run MUST NOT succeed.
+- `World::run` MUST fire MockShip's delayed `Delivered` ups. `Summarize`
+  MUST fold each shipment and succeed with
   `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
-- Snapshot after pickup and restore MUST still accept those confirmations.
+- Snapshot after pickup and restore MUST still deliver those timers.
 - Injecting `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 
 Postconditions:

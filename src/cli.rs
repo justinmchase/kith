@@ -103,7 +103,7 @@ pub fn run_program(program: Program, message: Option<Json>) -> Result<String, Er
     let mut world = World::start(program)?;
     if let Some(message) = message {
         world.inject(message)?;
-        world.run_until_idle()?;
+        world.run()?;
     }
     encode(&world.result())
 }

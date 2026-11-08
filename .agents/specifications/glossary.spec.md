@@ -16,7 +16,7 @@ capitals.
 - A keyword that names one of these concepts MUST be the term itself (for
   example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `with`,
   `into`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
-  `complete`, `print`).
+  `complete`, `print`, `after`, `random`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -66,6 +66,10 @@ capitals.
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`).
 - **Down**: a route toward direct children of a kind (`send down`).
+- **After**: a delay on a send (`send after Delay`). The send is delivered
+  when the dispatcher clock reaches the due time. It is not a blocking wait.
+- **Random**: a host-chosen `after` delay (`send after random`). It is not a
+  Uffda expression.
 - **Consume**: a matched transition that handles a message so the message does
   not continue on its route.
 

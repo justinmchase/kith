@@ -360,6 +360,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                 body: vec![Statement::SendTo {
                     port: "child".into(),
                     message: string_msg(),
+                    after: None,
                 }],
             },
             Handler {
@@ -369,6 +370,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                 body: vec![Statement::SendDown {
                     component: Some("Child".into()),
                     message: string_msg(),
+                    after: None,
                 }],
             },
             Handler {
@@ -378,6 +380,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                 body: vec![Statement::SendDown {
                     component: Some("Other".into()),
                     message: string_msg(),
+                    after: None,
                 }],
             },
             Handler {
@@ -387,6 +390,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                 body: vec![Statement::SendDown {
                     component: None,
                     message: string_msg(),
+                    after: None,
                 }],
             },
         ],
@@ -453,6 +457,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
             pattern: kind_eq("Go"),
             body: vec![Statement::SendUp {
                 message: object_kind("Ghost"),
+                after: None,
             }],
         }],
     );
@@ -467,6 +472,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                 body: vec![Statement::SendTo {
                     port: "child".into(),
                     message: object_kind("Go"),
+                    after: None,
                 }],
             },
             Handler {
@@ -476,6 +482,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                 body: vec![Statement::SendTo {
                     port: "child".into(),
                     message: object_kind("Miss"),
+                    after: None,
                 }],
             },
             Handler {
@@ -485,6 +492,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                 body: vec![Statement::SendDown {
                     component: Some("Ghost".into()),
                     message: string_msg(),
+                    after: None,
                 }],
             },
             Handler {
@@ -494,6 +502,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                 body: vec![Statement::SendTo {
                     port: "missing".into(),
                     message: string_msg(),
+                    after: None,
                 }],
             },
         ],
@@ -920,32 +929,26 @@ fn paid_order() -> serde_json::Value {
     })
 }
 
-fn confirm_deliveries(world: &mut World) {
-    let carriers = world.children_of_kind(world.root_id(), "Carrier");
-    assert_eq!(carriers.len(), 2);
-    for carrier in carriers {
-        world
-            .send(carrier, json!({"kind": "Delivered"}))
-            .expect("deliver");
-    }
-}
-
 #[test]
-// req:workflows-005 req:workflows-008 req:components-007 req:components-009 req:components-010
+// req:workflows-005 req:workflows-008 req:components-007 req:components-009 req:components-010 req:components-011 req:dispatch-003
 fn order_workflow_waits_for_delivery_then_summarizes() {
     let mut world = World::start(order_program()).expect("start order");
     world.inject(paid_order()).unwrap();
     world.run_until_idle().unwrap();
     assert!(!world.completed(world.root_id()));
     assert_eq!(world.progress(world.root_id()).unwrap()["total"], json!(2));
-    assert_eq!(world.prints().len(), 2);
+    assert_eq!(world.prints().len(), 4);
     assert_eq!(world.prints()[0]["kind"], json!("PickupRequested"));
+    assert!(world
+        .prints()
+        .iter()
+        .any(|value| value["kind"] == json!("InTransit")));
     for carrier in world.children_of_kind(world.root_id(), "Carrier") {
         assert_eq!(world.state(carrier), Some("Shipping"));
+        assert_eq!(world.kind(world.child(carrier, "ship").unwrap()), Some("MockShip"));
     }
 
-    confirm_deliveries(&mut world);
-    world.run_until_idle().unwrap();
+    world.run().unwrap();
     let output = world.output(world.root_id()).unwrap();
     assert_eq!(output["kind"], json!("Summarize"));
     assert_eq!(output["orderId"], json!("o-1"));
@@ -958,7 +961,7 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
 }
 
 #[test]
-// req:workflows-005 req:workflows-006
+// req:workflows-005 req:workflows-006 req:dispatch-003
 fn order_snapshot_restore_resumes_delivery() {
     let program = order_program();
     let mut world = World::start(program.clone()).expect("start order");
@@ -966,12 +969,11 @@ fn order_snapshot_restore_resumes_delivery() {
     world.run_until_idle().unwrap();
     let snap = world.snapshot().expect("snapshot");
     let mut restored = World::restore(program, &snap).expect("restore");
-    assert_eq!(restored.prints().len(), 2);
+    assert_eq!(restored.prints().len(), 4);
     for carrier in restored.children_of_kind(restored.root_id(), "Carrier") {
         assert_eq!(restored.state(carrier), Some("Shipping"));
     }
-    confirm_deliveries(&mut restored);
-    restored.run_until_idle().unwrap();
+    restored.run().unwrap();
     let output = restored.output(restored.root_id()).unwrap();
     assert_eq!(output["kind"], json!("Summarize"));
     assert_eq!(output["orderId"], json!("o-1"));

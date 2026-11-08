@@ -150,11 +150,15 @@ it spawns a bare instance (no ports allowed).
 ### Waiting for an outside message
 
 A task or map item that does not `complete` leaves the run at that step. That
-is the callback pattern: Carrier takes `Item` in `Waiting`, `goto Shipping`,
-freeze with `World::snapshot`, later `World::restore` and `World::send` a
-`Delivered` confirmation into the waiting component.
-The workflow graph has no `on`; the message is matched by the work item. The
-join set advances when that item `complete`s.
+is the callback pattern. In Order, Carrier `send to ship` a `Dispatch` and
+`goto Shipping`. MockShip (a child, filled on the Carrier prototype) waits
+with `send after random up { kind: "Delivered" }`. Shipping matches that up
+message and `complete`s. The host MAY instead `World::send` `Delivered`
+into the Carrier. The workflow graph has no `on`; the work item matches.
+The join set advances when that item `complete`s.
+
+`World::run_until_idle` leaves those timers pending (Carriers still in
+`Shipping`). `World::run` / `kith run` advances the clock until they fire.
 
 ### Dynamic graphs
 
@@ -165,9 +169,9 @@ graphs at run time MUST NOT require new source.
 ### Snapshot
 
 `World::snapshot` MUST emit one Uffda data codec record for every instance
-(component machine or workflow run), join sets, mailboxes, and ready queue.
-`World::restore` MUST accept that record plus the program and continue. The
-record MUST NOT be JSON.
+(component machine or workflow run), join sets, mailboxes, ready queue,
+clock, RNG, and pending timers. `World::restore` MUST accept that record
+plus the program and continue. The record MUST NOT be JSON.
 
 ## Syntax tree
 
@@ -182,7 +186,7 @@ record MUST NOT be JSON.
 
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `Carrier` work items.
-After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
+After each MockShip `send after random up { kind: "Delivered" }`, `Summarize`
 MUST fold each `Shipped` payload into
 `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
 
@@ -208,8 +212,9 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
 
 ## Open questions
 
-- Parallel, Wait/timers, Retry/Catch, JSONPath InputPath / ResultPath beyond a
-  single object key.
+- Parallel, Wait-with-timeout, Retry/Catch, JSONPath InputPath / ResultPath
+  beyond a single object key. Delayed `send after` is in
+  [timers](./timers.spec.md).
 - Nested Map iterators that are full subgraphs, not a single kind.
 - Exactly-once after a crash versus at-least-once restore.
 - Bounded map concurrency so a pending fold queue cannot grow with n.

@@ -30,6 +30,8 @@ primitives rather than redefining them.
 - [Runtime](./runtime.spec.md): the split between Uffda's matcher and Kith's
   actor interpreter, and how the `kith` binary consumes crates.io.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
+- [Timers](./timers.spec.md): delayed sends (`send after`); time from a clock
+  the checker can replace.
 
 ## Planned chapters
 
@@ -38,8 +40,6 @@ shape.
 
 - `supervision`: what happens when an actor fails, and how a parent restarts or
   stops its children.
-- `timers`: deadlines and messages scheduled for later; time from a clock the
-  checker can replace.
 - `persistence`: what of a durable workflow or component is stored, and how a
   relocated actor resumes.
 - `machines`: shared state-machine rules if components and workflows should not

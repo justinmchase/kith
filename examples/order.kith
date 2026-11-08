@@ -1,5 +1,6 @@
 export ValidateOrder;
 export ChargeCard;
+export MockShip;
 export Carrier;
 export Summarize;
 export Order;
@@ -27,15 +28,26 @@ component ChargeCard {
   }
 }
 
+component MockShip {
+  start Idle {
+    on { kind: "Dispatch", item: any, index: number } {
+      print { kind: "InTransit", item: item, index: index };
+      send after random up { kind: "Delivered" };
+    }
+  }
+}
+
 component Carrier {
   field item: string = "";
   field index: number = 0;
+  MockShip ship;
 
   start Waiting {
     on { kind: "Item", item: any, index: number } {
       item -> item;
       index -> index;
       print { kind: "PickupRequested", item: item, index: index };
+      send to ship { kind: "Dispatch", item: item, index: index };
       goto Shipping;
     }
   }
@@ -77,5 +89,9 @@ workflow Order {
 }
 
 export scene Main {
-  Order();
+  Order() {
+    Carrier() {
+      ship = MockShip();
+    }
+  }
 }

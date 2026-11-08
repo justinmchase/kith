@@ -46,7 +46,7 @@ rule Field =
 
 rule Port =
   not "field" not "start" not "state" not "step" not "join" not "print" not "else" not "goto"
-  not "with" not "into" not "fanout"
+  not "with" not "into" not "fanout" not "after"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -56,17 +56,42 @@ rule Assign =
   -> { kind: "assign", field: n, expression: e }
 ;
 
+rule SendDelay =
+  | ("random" -> { kind: "random" })
+  | Expression
+;
+
 rule SendUp =
-  "send" "up" e:Expression ";"
-  -> { kind: "sendUp", message: e }
+  | (
+    "send" "after" d:SendDelay "up" e:Expression ";"
+    -> { kind: "sendUp", after: d, message: e }
+  )
+  | (
+    "send" "up" e:Expression ";"
+    -> { kind: "sendUp", message: e }
+  )
 ;
 
 rule SendTo =
-  "send" "to" n:Identifier e:Expression ";"
-  -> { kind: "sendTo", port: n, message: e }
+  | (
+    "send" "after" d:SendDelay "to" n:Identifier e:Expression ";"
+    -> { kind: "sendTo", after: d, port: n, message: e }
+  )
+  | (
+    "send" "to" n:Identifier e:Expression ";"
+    -> { kind: "sendTo", port: n, message: e }
+  )
 ;
 
 rule SendDown =
+  | (
+    "send" "after" d:SendDelay "down" "any" e:Expression ";"
+    -> { kind: "sendDown", after: d, component: null, message: e }
+  )
+  | (
+    "send" "after" d:SendDelay "down" n:Identifier e:Expression ";"
+    -> { kind: "sendDown", after: d, component: n, message: e }
+  )
   | (
     "send" "down" "any" e:Expression ";"
     -> { kind: "sendDown", component: null, message: e }
