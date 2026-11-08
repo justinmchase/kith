@@ -114,7 +114,7 @@ capitals.
   `then`.
 - **Reduce**: names the accumulator component for a map. That component
   holds the aggregate in its fields, takes each item, then `complete`s on
-  the done signal.
+  `else`.
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

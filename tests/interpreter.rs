@@ -714,14 +714,11 @@ fn count_reducer() -> Component {
             handlers: vec![
                 Handler {
                     kind: "handler".into(),
-                    item: Some(json!({
+                    item: None,
+                    pattern: json!({
                         "kind": "variable",
                         "name": "item",
                         "pattern": {"kind": "any"}
-                    })),
-                    pattern: json!({
-                        "kind": "equal",
-                        "value": {"kind": "value.literal", "value": "item"}
                     }),
                     body: vec![Statement::Assign {
                         field: "total".into(),

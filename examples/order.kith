@@ -51,7 +51,7 @@ component Summarize {
   field total: number = 0;
 
   start {
-    on "item" item: any {
+    on item: any {
       total -> (add total 1);
       print { kind: "Tally", total: total, status: item.kind };
     }

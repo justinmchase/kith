@@ -603,7 +603,7 @@ impl World {
         let total = remaining.len() as u64;
         self.arm_join(id, remaining, total, Some(reducer));
         if children.is_empty() {
-            return self.start_work(reducer, json!("done"));
+            return self.end_accumulator(reducer);
         }
         let mut sends = Vec::new();
         for (child, message) in children {
@@ -622,6 +622,10 @@ impl World {
         } else {
             Ok(vec![(child, message, Route::Down)])
         }
+    }
+
+    fn end_accumulator(&mut self, child: ActorId) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        Ok(vec![(child, Json::Null, Route::Join)])
     }
 
     fn spawn_work(&mut self, parent: ActorId, kind: &str) -> Result<ActorId, Error> {
@@ -799,6 +803,19 @@ impl World {
             .iter()
             .find(|state| state.name == state_name)
             .ok_or_else(|| Error::new("unknown state"))?;
+        if route == Route::Join {
+            let Some(handler) = state.handlers.iter().rev().find(|handler| {
+                handler.item.is_none()
+                    && handler.pattern.get("kind").and_then(Json::as_str) == Some("any")
+            }) else {
+                return unmatched(route, &kind_name, self.instances[&id].parent, message);
+            };
+            let mut bindings = HashMap::new();
+            for (name, value) in &fields {
+                bindings.insert(name.clone(), value.clone());
+            }
+            return self.run_statements(id, &handler.body, &bindings);
+        }
         for handler in &state.handlers {
             if let Some(mut bindings) = match_handler(handler, message)? {
                 for (name, value) in &fields {
@@ -922,14 +939,14 @@ impl World {
             join.completed += 1;
         }
         if let Some(reducer) = reducer {
-            let mut sends = self.start_work(reducer, json!(["item", payload]))?;
+            let mut sends = self.start_work(reducer, payload)?;
             let empty = self
                 .instances
                 .get(&parent)
                 .and_then(|instance| instance.join.as_ref())
                 .is_some_and(|join| join.remaining.is_empty());
             if empty {
-                sends.extend(self.start_work(reducer, json!("done"))?);
+                sends.extend(self.end_accumulator(reducer)?);
             }
             return Ok(sends);
         }

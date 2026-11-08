@@ -28,7 +28,7 @@ capitals.
   is the step output and the next step's input.
 - **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: one
   reducer instance holds the aggregate in its fields. Each completion is
-  one item; a done signal asks it to `complete`.
+  one item; end of the map takes `else` and `complete`.
 
 ## Axioms
 
@@ -52,8 +52,8 @@ capitals.
   scene prototype supplies that tree.
 - `complete V` on a work item MUST send `V` to the waiting workflow and count
   down the join set. For a map, `V` MUST be sent to the reducer as one item.
-  The reducer's `complete` after the done signal (including when the list is
-  empty) advances `then`. The join MUST NOT materialize an array of all
+  The reducer's `complete` after `else` (including when the list is empty)
+  advances `then`. The join MUST NOT materialize an array of all
   payloads as the step output.
 - Choice matches the working value against clause patterns in order. `else`
   MUST be last if present. No match MUST fail the run.
@@ -74,7 +74,7 @@ in its fields.
 component Summarize {
   field total: number = 0;
   start {
-    on "item" item: any {
+    on item: any {
       total -> (add total 1);
     }
     else complete { kind: "Summarize" total };
@@ -116,9 +116,10 @@ workflow Host {
   object. Spawn one `Kind` per element with `{ kind: "Item", item, index }`
   (Step Functions Map). `Acc` is the accumulator component: it holds
   aggregate state in its fields. Fan-out MUST NOT supply that state. Each
-  completion is sent as `"item"` plus the payload. After the last item (or
-  immediately when the list is empty) the runtime sends a done signal.
-  `Acc`'s `else` MUST `complete`; that payload is the map output.
+  completion is sent as the payload (`on item: any`). After the last item
+  (or immediately when the list is empty) the runtime ends the accumulator;
+  that takes `else`, not another item. `Acc`'s `else` MUST `complete`; that
+  payload is the map output.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).

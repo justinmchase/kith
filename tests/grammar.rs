@@ -155,11 +155,9 @@ fn import_source_parses_fanout_and_join() {
     let count = program.component("Count").expect("Count");
     assert!(count.fields.iter().any(|field| field.name == "total"));
     let fold = &count.states[0].handlers[0];
-    assert_eq!(fold.pattern["kind"], "equal");
-    assert_eq!(fold.pattern["value"]["value"], "item");
-    let item = fold.item.as_ref().expect("item pattern");
-    assert_eq!(item["kind"], "variable");
-    assert_eq!(item["name"], "item");
+    assert_eq!(fold.pattern["kind"], "variable");
+    assert_eq!(fold.pattern["name"], "item");
+    assert!(fold.item.is_none());
     let last = count.states[0].handlers.last().expect("else");
     assert_eq!(last.pattern["kind"], "any");
     World::check(&program).expect("import checks");
@@ -188,11 +186,9 @@ fn order_source_parses_tasks_picks_and_map() {
     assert!(summarize.fields.iter().any(|field| field.name == "total"));
     assert_eq!(summarize.states[0].name, "Start");
     let fold = &summarize.states[0].handlers[0];
-    assert_eq!(fold.pattern["kind"], "equal");
-    assert_eq!(fold.pattern["value"]["value"], "item");
-    let item = fold.item.as_ref().expect("item pattern");
-    assert_eq!(item["kind"], "variable");
-    assert_eq!(item["name"], "item");
+    assert_eq!(fold.pattern["kind"], "variable");
+    assert_eq!(fold.pattern["name"], "item");
+    assert!(fold.item.is_none());
     let done = summarize.states[0].handlers.last().expect("else");
     assert_eq!(done.pattern["kind"], "any");
     assert!(matches!(

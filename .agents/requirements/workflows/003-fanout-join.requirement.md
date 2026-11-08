@@ -12,14 +12,14 @@ Preconditions:
 
 - A workflow `start fanout items -> Worker reduce Count then succeed`,
   a port-less `Worker`, and a port-less `Count` with `field total: number = 0`
-  that counts `"item"` messages and `else complete total`.
+  that counts each completion with `on item: any` and `else complete total`.
 
 Expected behavior:
 
-- Zero items MUST still start Count (its field init is `0`) and send only
-  the done signal. Count MUST `complete` `0`.
+- Zero items MUST still start Count (its field init is `0`) and take
+  `else` only. Count MUST `complete` `0`.
 - One or more items MUST each receive `{ kind: "Item", item, index }`. Count
-  MUST receive one `"item"` per completion, then done. The map output MUST
+  MUST receive one payload per completion, then `else`. The map output MUST
   be the count of completions, not an array of payloads.
 - Fan-out of a kind that needs ports without a prototype MUST fail check.
 

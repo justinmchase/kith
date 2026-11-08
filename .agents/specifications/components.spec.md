@@ -128,10 +128,10 @@ export scene Main {
   `on (pattern) { ... }` groups a full Uffda pattern (Or / Then / Pipe) so `|`
   and juxtaposition cannot eat the handler body. Bindings from the match are
   in scope for the body.
-- `on Tag Item { ... }` matches two values. Item is a `name: pattern` capture,
-  an atom, or `(pattern)` so a following `{` stays the handler body. A map
-  reducer uses `on "item" item: any` for each completion; see
-  [reduce](./workflows.spec.md#declaration).
+- `on item: any { ... }` is a capture: the whole message is bound as `item`.
+  A map accumulator uses that for each completion; see
+  [reduce](./workflows.spec.md#declaration). `on Tag Item { ... }` still
+  matches two values when a tag and a payload are both present.
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `else`
   MAY be a single statement: `else complete { kind: "Summarize" total };`.
