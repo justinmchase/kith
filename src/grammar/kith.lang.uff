@@ -251,8 +251,8 @@ rule ChoiceClause =
 
 rule StepBody =
   | (
-    "fanout" p:Identifier "-" ">" k:Identifier "reduce" r:Identifier "from" e:Expression
-    -> { kind: "map", items: p, component: k, reduce: r, from: e }
+    "fanout" p:Identifier "-" ">" k:Identifier "reduce" r:Identifier
+    -> { kind: "map", items: p, component: k, reduce: r }
   )
   | ("run" p:Identifier -> { kind: "run", path: p })
   | ("pass" e:Expression -> { kind: "pass", value: e })

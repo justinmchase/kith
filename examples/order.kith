@@ -48,7 +48,7 @@ component Carrier {
 }
 
 component Summarize {
-  field total: number;
+  field total: number = 0;
 
   start {
     on "item" item: any {
@@ -70,7 +70,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> Carrier reduce Summarize from { total: 0 } then succeed;
+  Fulfill: fanout items -> Carrier reduce Summarize then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }

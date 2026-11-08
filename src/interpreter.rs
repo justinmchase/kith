@@ -538,8 +538,7 @@ impl World {
                 items,
                 component,
                 reduce,
-                init,
-            } => self.spawn_map(id, items, component, reduce, init, working),
+            } => self.spawn_map(id, items, component, reduce, working),
             StepBody::Run { path } => {
                 let plan = working
                     .get(path)
@@ -580,12 +579,9 @@ impl World {
         items_path: &str,
         component: &str,
         reduce: &str,
-        init: &Json,
         working: Json,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        let acc = evaluate(init, &bindings_from(&working))?;
         let reducer = self.spawn_work(id, reduce)?;
-        self.apply_from(reducer, acc)?;
         let items = working
             .get(items_path)
             .and_then(Json::as_array)
@@ -659,41 +655,6 @@ impl World {
                 component: kind.to_string(),
             });
         Ok(child)
-    }
-
-    fn apply_from(&mut self, id: ActorId, value: Json) -> Result<(), Error> {
-        let kind = self.instances[&id].kind.clone();
-        let Some(component) = self.program.component(&kind).cloned() else {
-            return Ok(());
-        };
-        match value {
-            Json::Object(map) => {
-                for (name, field_value) in map {
-                    if !self.instances[&id].fields.contains_key(&name) {
-                        return Err(Error::new(format!("unknown field {name} on {kind}")));
-                    }
-                    self.instances
-                        .get_mut(&id)
-                        .expect("actor")
-                        .fields
-                        .insert(name, field_value);
-                }
-            }
-            other => {
-                if component.fields.len() != 1 {
-                    return Err(Error::new(format!(
-                        "from for {kind} must be an object of fields"
-                    )));
-                }
-                let name = component.fields[0].name.clone();
-                self.instances
-                    .get_mut(&id)
-                    .expect("actor")
-                    .fields
-                    .insert(name, other);
-            }
-        }
-        Ok(())
     }
 
     fn arm_join(

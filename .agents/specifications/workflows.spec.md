@@ -66,13 +66,13 @@ capitals.
 The normative workflow is `examples/order.kith`: validate, choose, charge,
 choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
 the graph moves with `then` / `pick`. A map item MAY wait without completing
-until the host sends a later message into that work item. The reducer is one
-instance: `from` initializes its fields, each completion is `"item"` plus the
-payload, then a done signal takes `else`.
+until the host sends a later message into that work item. Fan-out names the
+work item and the accumulator component; that component holds the aggregate
+in its fields.
 
 ```kith
 component Summarize {
-  field total: number;
+  field total: number = 0;
   start {
     on "item" item: any {
       total -> (add total 1);
@@ -92,7 +92,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> Carrier reduce Summarize from { total: 0 } then succeed;
+  Fulfill: fanout items -> Carrier reduce Summarize then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -100,7 +100,7 @@ workflow Order {
 
 ```kith
 workflow Import {
-  start fanout items -> Worker reduce Count from 0 then succeed;
+  start fanout items -> Worker reduce Count then succeed;
 }
 
 workflow Host {
@@ -112,15 +112,13 @@ workflow Host {
   unnamed). `Name: Body then Target` is a later node.
 - **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
   (Step Functions Task).
-- **map** `fanout path -> Kind reduce Reducer from Init` — `path` is a key on
-  the working object. Spawn one `Kind` per element with
-  `{ kind: "Item", item, index }` (Step Functions Map). Fan-in is one
-  `Reducer` instance, not an array. `from` initializes that instance's
-  fields (`from { total: 0 }` sets `total`; a scalar `from` sets the only
-  field). Each completion is sent as `"item"` plus the payload. After the
-  last item (or immediately when the list is empty) the runtime sends a
-  done signal. The reducer's `else` MUST `complete`; that payload is the
-  map output.
+- **map** `fanout path -> Kind reduce Acc` — `path` is a key on the working
+  object. Spawn one `Kind` per element with `{ kind: "Item", item, index }`
+  (Step Functions Map). `Acc` is the accumulator component: it holds
+  aggregate state in its fields. Fan-out MUST NOT supply that state. Each
+  completion is sent as `"item"` plus the payload. After the last item (or
+  immediately when the list is empty) the runtime sends a done signal.
+  `Acc`'s `else` MUST `complete`; that payload is the map output.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
   Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
@@ -165,7 +163,7 @@ record MUST NOT be JSON.
 
 - `{ kind: "workflow", name, start, steps: [FlowStep] }`
 - `{ name, start: boolean, body: StepBody, next: Next | null }`
-- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce, from }`,
+- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce }`,
   `choice` `{ clauses: [{ pattern, step }] }`, `pass` `{ value }`,
   `run` `{ path }`, `succeed`, `fail` `{ error }`
 - `next.kind`: `goto` `{ step }`, `succeed`, `fail` `{ error }`
@@ -190,10 +188,12 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
   (`send to` / `send up`). Order is a graph (`then` / `pick` / `fanout`).
 - **The graph is data.** That is what makes dynamic steps, runtime-built
   workflows, and rehydration the same interpreter.
-- **Fan-in is a reduce, not a collect.** A results array is O(n) memory and
-  forces the next step to re-walk every payload. One reducer instance holds
-  a constant-size aggregate in its fields. Collecting into a list is still
-  possible: write a reducer that concatenates, and accept the cost.
+- **Fan-in is an accumulator component, not a collect.** A results array is
+  O(n) memory and forces the next step to re-walk every payload. The
+  accumulator holds a constant-size aggregate in its fields. Fan-out only
+  delivers items; it MUST NOT own that state. Collecting into a list is
+  still possible: write an accumulator that concatenates, and accept the
+  cost.
 
 ## Open questions
 

@@ -69,8 +69,6 @@ pub enum StepBody {
         items: String,
         component: String,
         reduce: String,
-        #[serde(rename = "from")]
-        init: Json,
     },
     #[serde(rename = "choice")]
     Choice { clauses: Vec<ChoiceClause> },

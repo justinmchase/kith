@@ -119,7 +119,7 @@ export scene Main {
   by a scene.
 - `field name: pattern = expression` is local state. The pattern MUST match
   the field's value after every transition. `= expression` MAY be omitted;
-  a missing init is uninitialized until a transition or a map `from` assigns it.
+  a missing init is uninitialized until a transition assigns it.
 - `Kind name;` is a port: one child of kind `Kind` bound as `name`.
 - `start State { ... }` is the start state. `start { ... }` is the same with
   implicit name `Start`. Ordinary states use `state Name { ... }`.

@@ -1,6 +1,6 @@
 ---
 id: workflows-003
-title: fanout 0, 1, or N workers reduce into an accumulator
+title: fanout 0, 1, or N workers join into an accumulator component
 spec_ref: .agents/specifications/workflows.spec.md#definitions; .agents/specifications/workflows.spec.md#declaration
 ---
 
@@ -10,14 +10,14 @@ spec_ref: .agents/specifications/workflows.spec.md#definitions; .agents/specific
 
 Preconditions:
 
-- A workflow `start fanout items -> Worker reduce Count from 0 then succeed`,
-  a port-less `Worker`, and a port-less `Count` with `field total: number`
+- A workflow `start fanout items -> Worker reduce Count then succeed`,
+  a port-less `Worker`, and a port-less `Count` with `field total: number = 0`
   that counts `"item"` messages and `else complete total`.
 
 Expected behavior:
 
-- Zero items MUST still start Count from `0` and send only the done signal.
-  Count MUST `complete` `0`.
+- Zero items MUST still start Count (its field init is `0`) and send only
+  the done signal. Count MUST `complete` `0`.
 - One or more items MUST each receive `{ kind: "Item", item, index }`. Count
   MUST receive one `"item"` per completion, then done. The map output MUST
   be the count of completions, not an array of payloads.

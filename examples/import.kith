@@ -12,7 +12,7 @@ component Worker {
 }
 
 component Count {
-  field total: number;
+  field total: number = 0;
 
   start {
     on "item" item: any {
@@ -23,7 +23,7 @@ component Count {
 }
 
 workflow Import {
-  start fanout items -> Worker reduce Count from 0 then succeed;
+  start fanout items -> Worker reduce Count then succeed;
 }
 
 export scene Main {

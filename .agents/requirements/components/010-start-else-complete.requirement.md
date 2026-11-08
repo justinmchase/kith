@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/components.spec.md#declaration; .agents/specifi
 
 Preconditions:
 
-- `Summarize` in `examples/order.kith` declares `field total: number;`,
+- `Summarize` in `examples/order.kith` declares `field total: number = 0;`,
   `start {`, `on "item" item: any`, and
   `else complete { kind: "Summarize" total };`.
 

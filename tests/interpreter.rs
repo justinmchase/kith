@@ -63,7 +63,6 @@ fn map_flow(name: &str, items: &str, component: &str, reduce: &str) -> Workflow 
                 items: items.into(),
                 component: component.into(),
                 reduce: reduce.into(),
-                init: json!({"kind": "number", "value": 0}),
             },
             next: Some(Next::Succeed {}),
         }],
@@ -705,7 +704,7 @@ fn count_reducer() -> Component {
             kind: "field".into(),
             name: "total".into(),
             pattern: Some(json!({"kind": "type", "type": "number"})),
-            init: None,
+            init: Some(json!({"kind": "number", "value": 0})),
         }],
         ports: vec![],
         states: vec![State {
