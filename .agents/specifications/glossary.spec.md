@@ -14,8 +14,8 @@ capitals.
 
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
-  example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `reduce`,
-  `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
+  example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `with`,
+  `into`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
   `complete`, `print`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
@@ -108,13 +108,13 @@ capitals.
   value. It is not an expression and MUST NOT complete the instance.
 - **Child workflow**: a workflow instance owned by another workflow or by a
   component. Ownership is has-a.
-- **Fan-out**: a map step (`fanout path -> Kind reduce Acc`) that spawns one
-  work item per list element.
+- **Fan-out**: a map step (`fanout Expression with Kind into Acc`) that
+  spawns one work item per list element.
 - **Join**: fan-in of those work items into one accumulator instance, then
   `then`.
-- **Reduce**: names the accumulator component for a map. That component
-  holds the aggregate in its fields, takes each item, then `complete`s on
-  `else`.
+- **Into**: names the accumulator component for a map (`into Acc`). That
+  component holds the aggregate in its fields, takes each item, then
+  `complete`s on `else`.
 - **Progress**: a tree of branches and leaves as work fans out and back in,
   rolled up into completed and total counts, plus any progress content the
   program reports.

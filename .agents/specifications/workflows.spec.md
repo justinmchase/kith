@@ -68,16 +68,17 @@ choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
 the graph moves with `then` / `pick`. A map item MAY wait without completing
 until the host sends a later message into that work item. Fan-out names the
 work item and the accumulator component; that component holds the aggregate
-in its fields.
+in its fields. A step MAY destructure the working value before the body.
 
 ```kith
 component Summarize {
+  field orderId: any;
   field total: number = 0;
   start {
     on item: any {
       total -> (add total 1);
     }
-    else complete { kind: "Summarize" total };
+    else complete { kind: "Summarize" orderId total };
   }
 }
 
@@ -92,7 +93,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: fanout items -> Carrier reduce Summarize then succeed;
+  Fulfill: { items orderId } -> fanout items with Carrier into Summarize(orderId) then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -100,7 +101,7 @@ workflow Order {
 
 ```kith
 workflow Import {
-  start fanout items -> Worker reduce Count then succeed;
+  start { items } -> fanout items with Worker into Count then succeed;
 }
 
 workflow Host {
@@ -110,22 +111,28 @@ workflow Host {
 
 - `start Body then Target` is the entry node (implicit name `Start` when
   unnamed). `Name: Body then Target` is a later node.
+- `Name: { keys } -> Body then Target` destructures the working value. Listed
+  keys bind; extra keys are ignored (`{ items orderId }` on a Paid message).
+  A missing key MUST fail the run. This is not a closed Uffda Over.
 - **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
   (Step Functions Task).
-- **map** `fanout path -> Kind reduce Acc` — `path` is a key on the working
-  object. Spawn one `Kind` per element with `{ kind: "Item", item, index }`
-  (Step Functions Map). `Acc` is the accumulator component: it holds
-  aggregate state in its fields. Fan-out MUST NOT supply that state. Each
-  completion is sent as the payload (`on item: any`). After the last item
-  (or immediately when the list is empty) the runtime ends the accumulator;
-  that takes `else`, not another item. `Acc`'s `else` MUST `complete`; that
-  payload is the map output.
+- **map** `fanout Expression with Kind into Acc(Init)` — Expression is the
+  list (Step Functions Map). Spawn one `Kind` per element with
+  `{ kind: "Item", item, index }`. `into Acc` is the accumulator component.
+  `Acc(orderId)` initializes fields from those arguments; field inits on
+  Acc still apply. Each completion is sent as the payload (`on item: any`).
+  After the last item (or immediately when the list is empty) the runtime
+  ends the accumulator; that takes `else`. `Acc`'s `else` MUST `complete`;
+  that payload is the map output.
 - **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
-  Choice. The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
+  Choice. Each clause names a later step. A clause MUST NOT inline a
+  fanout (or other body); it routes to a step that MAY be a fanout.
+  The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
 - **pass** `pass Expression` — replace the working value (Pass).
 - **run** `run path` — execute the workflow IR at that key (dynamic graph).
 - **succeed** / **fail Expression** — terminal (Succeed / Fail).
-- `then Name` | `then succeed` | `then fail E` is Next / End.
+- `then Name` | `then succeed` | `then fail E` is Next / End. `then succeed`
+  is one Next, not the only Next; `then Packed` continues the graph.
 
 Scene children under a workflow are **prototypes**, not live children. A task
 or map that names that kind clones the prototype tree (ports filled). Otherwise
@@ -163,8 +170,8 @@ record MUST NOT be JSON.
 ## Syntax tree
 
 - `{ kind: "workflow", name, start, steps: [FlowStep] }`
-- `{ name, start: boolean, body: StepBody, next: Next | null }`
-- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce }`,
+- `{ name, start: boolean, pattern: Pattern | null, body: StepBody, next: Next | null }`
+- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce, init }`,
   `choice` `{ clauses: [{ pattern, step }] }`, `pass` `{ value }`,
   `run` `{ path }`, `succeed`, `fail` `{ error }`
 - `next.kind`: `goto` `{ step }`, `succeed`, `fail` `{ error }`
@@ -174,7 +181,8 @@ record MUST NOT be JSON.
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `Carrier` work items.
 After each Carrier receives `{ kind: "Delivered" }`, `Summarize`
-MUST fold each `Shipped` payload into `{ kind: "Summarize", total: 2 }`.
+MUST fold each `Shipped` payload into
+`{ kind: "Summarize", orderId: "o-1", total: 2 }`.
 
 Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 

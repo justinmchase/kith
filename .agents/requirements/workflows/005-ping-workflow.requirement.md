@@ -18,7 +18,7 @@ Expected behavior:
   two `Carrier` work items. Each Carrier MUST `print` a pickup request.
 - `World::send` of `{ kind: "Delivered" }` to each Carrier MUST complete
   those items. `Summarize` MUST fold each shipment and succeed with
-  `{ kind: "Summarize", total: 2 }`.
+  `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
 - Snapshot after pickup and restore MUST still accept those confirmations.
 - Injecting `{ kind: "Nope" }` MUST fail the run with `invalid order`.
 

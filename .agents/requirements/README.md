@@ -43,6 +43,7 @@ verify it cite it with `req:{id}`.
 - [Order wait, confirm, summarize](./workflows/005-ping-workflow.requirement.md)
 - [Snapshot and restore](./workflows/006-snapshot-restore.requirement.md)
 - [Dynamic run](./workflows/007-dynamic-run.requirement.md)
+- [Step pattern and into init](./workflows/008-step-pattern-into.requirement.md)
 
 ## Grammar
 

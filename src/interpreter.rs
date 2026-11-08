@@ -515,14 +515,18 @@ impl World {
             run.step = step.name.clone();
             run.output = working.clone();
         }
+        let bindings = match &step.pattern {
+            Some(pattern) => bind_step(pattern, &working)?,
+            None => bindings_from(&working),
+        };
         match &step.body {
             StepBody::Succeed {} => self.succeed(id, working),
             StepBody::Fail { error } => {
-                let value = evaluate(error, &bindings_from(&working))?;
+                let value = evaluate(error, &bindings)?;
                 self.fail(id, value)
             }
             StepBody::Pass { value } => {
-                let output = evaluate(value, &bindings_from(&working))?;
+                let output = evaluate(value, &bindings)?;
                 self.advance(id, output, step.next.as_ref())
             }
             StepBody::Choice { clauses } => {
@@ -538,7 +542,8 @@ impl World {
                 items,
                 component,
                 reduce,
-            } => self.spawn_map(id, items, component, reduce, working),
+                init,
+            } => self.spawn_map(id, items, component, reduce, init.as_ref(), &bindings),
             StepBody::Run { path } => {
                 let plan = working
                     .get(path)
@@ -576,15 +581,20 @@ impl World {
     fn spawn_map(
         &mut self,
         id: ActorId,
-        items_path: &str,
+        items_expr: &Json,
         component: &str,
         reduce: &str,
-        working: Json,
+        init: Option<&Json>,
+        bindings: &HashMap<String, Json>,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
         let reducer = self.spawn_work(id, reduce)?;
-        let items = working
-            .get(items_path)
-            .and_then(Json::as_array)
+        if let Some(init) = init {
+            let value = evaluate(init, bindings)?;
+            self.apply_fields(reducer, value)?;
+        }
+        let items = evaluate(items_expr, bindings)?;
+        let items = items
+            .as_array()
             .ok_or_else(|| Error::new("fanout expects a list"))?
             .clone();
         let mut children = Vec::new();
@@ -659,6 +669,24 @@ impl World {
                 component: kind.to_string(),
             });
         Ok(child)
+    }
+
+    fn apply_fields(&mut self, id: ActorId, value: Json) -> Result<(), Error> {
+        let kind = self.instances[&id].kind.clone();
+        let Json::Object(map) = value else {
+            return Err(Error::new(format!("into {kind} expected an object of fields")));
+        };
+        for (name, field_value) in map {
+            if !self.instances[&id].fields.contains_key(&name) {
+                return Err(Error::new(format!("unknown field {name} on {kind}")));
+            }
+            self.instances
+                .get_mut(&id)
+                .expect("actor")
+                .fields
+                .insert(name, field_value);
+        }
+        Ok(())
     }
 
     fn arm_join(
@@ -999,6 +1027,46 @@ impl World {
     }
 }
 
+fn bind_step(pattern: &Json, working: &Json) -> Result<HashMap<String, Json>, Error> {
+    let Some(working) = working.as_object() else {
+        return Err(Error::new("step pattern expected an object"));
+    };
+    if pattern.get("kind").and_then(Json::as_str) == Some("object") {
+        let Some(keys) = pattern.get("keys").and_then(Json::as_array) else {
+            return Err(Error::new("step pattern missing keys"));
+        };
+        let mut bindings = HashMap::new();
+        for key in keys {
+            let Some(name) = key.get("name").and_then(Json::as_str) else {
+                return Err(Error::new("step pattern missing key name"));
+            };
+            let Some(value) = working.get(name).cloned() else {
+                return Err(Error::new(format!("step pattern missed {name}")));
+            };
+            bindings.insert(name.to_string(), value);
+        }
+        return Ok(bindings);
+    }
+    if pattern.get("kind").and_then(Json::as_str) == Some("over") {
+        let Some(keys) = pattern.get("keys").and_then(Json::as_object) else {
+            return Err(Error::new("step pattern missing keys"));
+        };
+        let mut bindings = HashMap::new();
+        for (key, subpattern) in keys {
+            let Some(value) = working.get(key) else {
+                return Err(Error::new(format!("step pattern missed {key}")));
+            };
+            let Some(bound) = match_message(subpattern, value)? else {
+                return Err(Error::new(format!("step pattern missed {key}")));
+            };
+            bindings.extend(bound);
+        }
+        return Ok(bindings);
+    }
+    match_message(pattern, &Json::Object(working.clone()))?
+        .ok_or_else(|| Error::new("step pattern missed"))
+}
+
 fn match_handler(
     handler: &crate::ast::Handler,
     message: &Json,
@@ -1040,6 +1108,7 @@ fn workflow_from_value(value: Json) -> Result<Workflow, Error> {
             steps: vec![FlowStep {
                 name: "Start".into(),
                 start: true,
+                pattern: None,
                 body: StepBody::Task { component },
                 next: Some(Next::Succeed {}),
             }],

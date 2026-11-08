@@ -147,6 +147,7 @@ fn import_source_parses_fanout_and_join() {
     let source = include_str!("../examples/import.kith");
     let program = parse_source(source).expect("parse import.kith");
     let import = program.workflow("Import").expect("Import");
+    assert!(import.steps[0].pattern.is_some());
     assert!(matches!(
         import.steps[0].body,
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
@@ -164,7 +165,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-005 req:components-008 req:components-009 req:components-010
+// req:grammar-001 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -177,13 +178,22 @@ fn order_source_parses_tasks_picks_and_map() {
         .steps
         .iter()
         .any(|step| matches!(step.body, kith::ast::StepBody::Choice { .. })));
-    assert!(order.steps.iter().any(|step| matches!(
-        step.body,
-        kith::ast::StepBody::Map { ref component, ref reduce, .. }
-            if component == "Carrier" && reduce == "Summarize"
-    )));
+    let fulfill = order
+        .steps
+        .iter()
+        .find(|step| step.name == "Fulfill")
+        .expect("Fulfill");
+    assert!(fulfill.pattern.is_some());
+    assert!(matches!(
+        &fulfill.body,
+        kith::ast::StepBody::Map { component, reduce, init, .. }
+            if component == "Carrier"
+                && reduce == "Summarize"
+                && init.is_some()
+    ));
     let summarize = program.component("Summarize").expect("Summarize");
     assert!(summarize.fields.iter().any(|field| field.name == "total"));
+    assert!(summarize.fields.iter().any(|field| field.name == "orderId"));
     assert_eq!(summarize.states[0].name, "Start");
     let fold = &summarize.states[0].handlers[0];
     assert_eq!(fold.pattern["kind"], "variable");

@@ -43,6 +43,7 @@ fn task_flow(name: &str, component: &str) -> Workflow {
         steps: vec![FlowStep {
             name: "Start".into(),
             start: true,
+            pattern: None,
             body: StepBody::Task {
                 component: component.into(),
             },
@@ -59,10 +60,12 @@ fn map_flow(name: &str, items: &str, component: &str, reduce: &str) -> Workflow 
         steps: vec![FlowStep {
             name: "Start".into(),
             start: true,
+            pattern: None,
             body: StepBody::Map {
-                items: items.into(),
+                items: json!({"kind": "reference", "name": items}),
                 component: component.into(),
                 reduce: reduce.into(),
+                init: None,
             },
             next: Some(Next::Succeed {}),
         }],
@@ -262,12 +265,14 @@ fn check_requires_exactly_one_start_state() {
             FlowStep {
                 name: "Start".into(),
                 start: true,
+                pattern: None,
                 body: StepBody::Succeed {},
                 next: None,
             },
             FlowStep {
                 name: "Other".into(),
                 start: true,
+                pattern: None,
                 body: StepBody::Succeed {},
                 next: None,
             },
@@ -590,6 +595,7 @@ fn then_and_pick_transition_with_working_value() {
             FlowStep {
                 name: "Start".into(),
                 start: true,
+                pattern: None,
                 body: StepBody::Pass {
                     value: json!({
                         "kind": "object",
@@ -607,6 +613,7 @@ fn then_and_pick_transition_with_working_value() {
             FlowStep {
                 name: "Decide".into(),
                 start: false,
+                pattern: None,
                 body: StepBody::Choice {
                     clauses: vec![
                         ChoiceClause {
@@ -624,6 +631,7 @@ fn then_and_pick_transition_with_working_value() {
             FlowStep {
                 name: "Yes".into(),
                 start: false,
+                pattern: None,
                 body: StepBody::Pass {
                     value: json!({"kind": "number", "value": 2}),
                 },
@@ -632,6 +640,7 @@ fn then_and_pick_transition_with_working_value() {
             FlowStep {
                 name: "No".into(),
                 start: false,
+                pattern: None,
                 body: StepBody::Fail {
                     error: json!({"kind": "string", "values": ["no"]}),
                 },
@@ -865,6 +874,7 @@ fn run_path_executes_dynamic_ir() {
         steps: vec![FlowStep {
             name: "Start".into(),
             start: true,
+            pattern: None,
             body: StepBody::Run {
                 path: "plan".into(),
             },
@@ -921,7 +931,7 @@ fn confirm_deliveries(world: &mut World) {
 }
 
 #[test]
-// req:workflows-005 req:components-007 req:components-009 req:components-010
+// req:workflows-005 req:workflows-008 req:components-007 req:components-009 req:components-010
 fn order_workflow_waits_for_delivery_then_summarizes() {
     let mut world = World::start(order_program()).expect("start order");
     world.inject(paid_order()).unwrap();
@@ -938,6 +948,7 @@ fn order_workflow_waits_for_delivery_then_summarizes() {
     world.run_until_idle().unwrap();
     let output = world.output(world.root_id()).unwrap();
     assert_eq!(output["kind"], json!("Summarize"));
+    assert_eq!(output["orderId"], json!("o-1"));
     assert_eq!(output["total"], json!(2.0));
     assert!(output.get("shipments").is_none());
     assert!(world
@@ -961,10 +972,9 @@ fn order_snapshot_restore_resumes_delivery() {
     }
     confirm_deliveries(&mut restored);
     restored.run_until_idle().unwrap();
-    assert_eq!(
-        restored.output(restored.root_id()).unwrap()["kind"],
-        json!("Summarize")
-    );
+    let output = restored.output(restored.root_id()).unwrap();
+    assert_eq!(output["kind"], json!("Summarize"));
+    assert_eq!(output["orderId"], json!("o-1"));
 }
 
 #[test]

@@ -46,6 +46,7 @@ rule Field =
 
 rule Port =
   not "field" not "start" not "state" not "step" not "join" not "print" not "else" not "goto"
+  not "with" not "into" not "fanout"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -249,10 +250,22 @@ rule ChoiceClause =
   )
 ;
 
+rule MapInit =
+  "(" keys:CompleteObjectEntries? ")"
+  -> { kind: "object", keys: (coalesce keys []) }
+;
+
+# `{ items orderId }` binds those keys and ignores extras. Not a Uffda Over
+# (Over is closed and wants commas). Same shorthand as CompleteObject.
+rule StepHead =
+  | (p:CompleteObject "-" ">" -> p)
+  | (ok -> null)
+;
+
 rule StepBody =
   | (
-    "fanout" p:Identifier "-" ">" k:Identifier "reduce" r:Identifier
-    -> { kind: "map", items: p, component: k, reduce: r }
+    "fanout" e:Expression "with" k:Identifier "into" r:Identifier i:MapInit?
+    -> { kind: "map", items: e, component: k, reduce: r, init: i }
   )
   | ("run" p:Identifier -> { kind: "run", path: p })
   | ("pass" e:Expression -> { kind: "pass", value: e })
@@ -264,28 +277,31 @@ rule StepBody =
 
 rule FlowStep =
   | (
-    "start" n:Identifier ":" b:StepBody t:FlowThen? ";"
+    "start" n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
     -> {
       name: n,
       start: true,
+      pattern: h,
       body: b,
       next: (coalesce t { kind: "succeed" })
     }
   )
   | (
-    "start" b:StepBody t:FlowThen? ";"
+    "start" h:StepHead b:StepBody t:FlowThen? ";"
     -> {
       name: "Start",
       start: true,
+      pattern: h,
       body: b,
       next: (coalesce t { kind: "succeed" })
     }
   )
   | (
-    n:Identifier ":" b:StepBody t:FlowThen? ";"
+    n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
     -> {
       name: n,
       start: false,
+      pattern: h,
       body: b,
       next: (coalesce t { kind: "succeed" })
     }

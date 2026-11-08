@@ -54,6 +54,8 @@ pub struct FlowStep {
     pub name: String,
     #[serde(default)]
     pub start: bool,
+    #[serde(default)]
+    pub pattern: Option<Json>,
     pub body: StepBody,
     #[serde(default)]
     pub next: Option<Next>,
@@ -66,9 +68,11 @@ pub enum StepBody {
     Task { component: String },
     #[serde(rename = "map")]
     Map {
-        items: String,
+        items: Json,
         component: String,
         reduce: String,
+        #[serde(default)]
+        init: Option<Json>,
     },
     #[serde(rename = "choice")]
     Choice { clauses: Vec<ChoiceClause> },
