@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/workflows.spec.md#definitions; .agents/specific
 
 Preconditions:
 
-- A workflow `start { items } -> fanout items with Worker into Count then succeed`,
+- A workflow `start { items: any } -> fanout items with Worker into Count then succeed`,
   a port-less `Worker`, and a port-less `Count` with `field total: number = 0`
   that counts each completion with `on item: any` and `else complete total`.
 

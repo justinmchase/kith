@@ -147,7 +147,9 @@ fn import_source_parses_fanout_and_join() {
     let source = include_str!("../examples/import.kith");
     let program = parse_source(source).expect("parse import.kith");
     let import = program.workflow("Import").expect("Import");
-    assert!(import.steps[0].pattern.is_some());
+    let pattern = import.steps[0].pattern.as_ref().expect("Start pattern");
+    assert_eq!(pattern["kind"], "over");
+    assert!(pattern["keys"].get("items").is_some());
     assert!(matches!(
         import.steps[0].body,
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
@@ -183,7 +185,10 @@ fn order_source_parses_tasks_picks_and_map() {
         .iter()
         .find(|step| step.name == "Fulfill")
         .expect("Fulfill");
-    assert!(fulfill.pattern.is_some());
+    let pattern = fulfill.pattern.as_ref().expect("Fulfill pattern");
+    assert_eq!(pattern["kind"], "over");
+    assert!(pattern["keys"].get("items").is_some());
+    assert!(pattern["keys"].get("orderId").is_some());
     assert!(matches!(
         &fulfill.body,
         kith::ast::StepBody::Map { component, reduce, init, .. }

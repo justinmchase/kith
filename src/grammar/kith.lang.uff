@@ -255,10 +255,11 @@ rule MapInit =
   -> { kind: "object", keys: (coalesce keys []) }
 ;
 
-# `{ items orderId }` binds those keys and ignores extras. Not a Uffda Over
-# (Over is closed and wants commas). Same shorthand as CompleteObject.
+# Same Prefix as `on`: an Over `{ items: any, orderId: any }`, a grouped
+# `(Pattern)`, or a capture. `->` is Kith's edge, so the pattern is not a
+# top-level Then (that would eat `->` / `{`).
 rule StepHead =
-  | (p:CompleteObject "-" ">" -> p)
+  | (p:OnPattern "-" ">" -> p)
   | (ok -> null)
 ;
 

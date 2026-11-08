@@ -71,7 +71,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: { items orderId } -> fanout items with Carrier into Summarize(orderId) then succeed;
+  Fulfill: { items: any, orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }

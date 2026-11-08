@@ -93,7 +93,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: { items orderId } -> fanout items with Carrier into Summarize(orderId) then succeed;
+  Fulfill: { items: any, orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -101,7 +101,7 @@ workflow Order {
 
 ```kith
 workflow Import {
-  start { items } -> fanout items with Worker into Count then succeed;
+  start { items: any } -> fanout items with Worker into Count then succeed;
 }
 
 workflow Host {
@@ -111,9 +111,11 @@ workflow Host {
 
 - `start Body then Target` is the entry node (implicit name `Start` when
   unnamed). `Name: Body then Target` is a later node.
-- `Name: { keys } -> Body then Target` destructures the working value. Listed
-  keys bind; extra keys are ignored (`{ items orderId }` on a Paid message).
-  A missing key MUST fail the run. This is not a closed Uffda Over.
+- `Name: Pattern -> Body then Target` matches Pattern against the working
+  value (same Prefix as `on`: an Over, a grouped `(P)`, or a capture).
+  `{ items: any, orderId: any }` is a Uffda Over: those keys bind, nested
+  patterns destructure, extra keys are ignored unless rest requires them.
+  No match MUST fail the run.
 - **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
   (Step Functions Task).
 - **map** `fanout Expression with Kind into Acc(Init)` — Expression is the

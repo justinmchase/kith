@@ -1028,43 +1028,7 @@ impl World {
 }
 
 fn bind_step(pattern: &Json, working: &Json) -> Result<HashMap<String, Json>, Error> {
-    let Some(working) = working.as_object() else {
-        return Err(Error::new("step pattern expected an object"));
-    };
-    if pattern.get("kind").and_then(Json::as_str) == Some("object") {
-        let Some(keys) = pattern.get("keys").and_then(Json::as_array) else {
-            return Err(Error::new("step pattern missing keys"));
-        };
-        let mut bindings = HashMap::new();
-        for key in keys {
-            let Some(name) = key.get("name").and_then(Json::as_str) else {
-                return Err(Error::new("step pattern missing key name"));
-            };
-            let Some(value) = working.get(name).cloned() else {
-                return Err(Error::new(format!("step pattern missed {name}")));
-            };
-            bindings.insert(name.to_string(), value);
-        }
-        return Ok(bindings);
-    }
-    if pattern.get("kind").and_then(Json::as_str) == Some("over") {
-        let Some(keys) = pattern.get("keys").and_then(Json::as_object) else {
-            return Err(Error::new("step pattern missing keys"));
-        };
-        let mut bindings = HashMap::new();
-        for (key, subpattern) in keys {
-            let Some(value) = working.get(key) else {
-                return Err(Error::new(format!("step pattern missed {key}")));
-            };
-            let Some(bound) = match_message(subpattern, value)? else {
-                return Err(Error::new(format!("step pattern missed {key}")));
-            };
-            bindings.extend(bound);
-        }
-        return Ok(bindings);
-    }
-    match_message(pattern, &Json::Object(working.clone()))?
-        .ok_or_else(|| Error::new("step pattern missed"))
+    match_message(pattern, working)?.ok_or_else(|| Error::new("step pattern missed"))
 }
 
 fn match_handler(
