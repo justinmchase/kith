@@ -198,8 +198,8 @@ pub enum Statement {
     },
     #[serde(rename = "complete")]
     Complete { message: Json },
-    #[serde(rename = "print")]
-    Print { expression: Json },
+    #[serde(rename = "expr")]
+    Expr { expression: Json },
     #[serde(rename = "goto")]
     Goto { state: String },
 }

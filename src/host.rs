@@ -108,7 +108,10 @@ fn then_arity(pattern: &Json) -> Option<usize> {
     if pattern.get("kind").and_then(Json::as_str) != Some("then") {
         return None;
     }
-    pattern.get("patterns").and_then(Json::as_array).map(Vec::len)
+    pattern
+        .get("patterns")
+        .and_then(Json::as_array)
+        .map(Vec::len)
 }
 
 fn json_to_value<'gc>(mc: &uffda_heap::Mutation<'gc>, value: &Json) -> Result<Value<'gc>, Error> {

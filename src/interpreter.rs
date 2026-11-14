@@ -35,6 +35,26 @@ struct Timer {
     to: ActorId,
     message: Json,
     route: Route,
+    join: Option<u64>,
+    slot: Option<usize>,
+}
+
+struct PendingJoin {
+    remaining: usize,
+    slots: Vec<Option<Json>>,
+    to: ActorId,
+    route: Route,
+}
+
+enum Slot {
+    Ready(Json),
+    Async { delay_ms: u64, value: Json },
+}
+
+enum Callee {
+    Io,
+    Async,
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +96,8 @@ pub struct World {
     now: u64,
     rng: u64,
     timers: Vec<Timer>,
+    joins: HashMap<u64, PendingJoin>,
+    next_join: u64,
 }
 
 impl World {
@@ -98,6 +120,7 @@ impl World {
             check_gotos(component)?;
             check_terminals(component)?;
             check_routes(component)?;
+            check_effects(component)?;
         }
         for workflow in &program.workflows {
             check_workflow(program, workflow)?;
@@ -120,6 +143,8 @@ impl World {
             now: 0,
             rng: 1,
             timers: Vec::new(),
+            joins: HashMap::new(),
+            next_join: 1,
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -271,7 +296,13 @@ impl World {
             }
         });
         for timer in due_now {
-            self.deliver(timer.to, timer.message, timer.route)?;
+            if let (Some(join_id), Some(slot)) = (timer.join, timer.slot) {
+                if let Some(message) = self.fill_join(join_id, slot, timer.message)? {
+                    self.deliver(timer.to, message, timer.route)?;
+                }
+            } else {
+                self.deliver(timer.to, timer.message, timer.route)?;
+            }
         }
         Ok(true)
     }
@@ -339,11 +370,21 @@ impl World {
             "dispatcher": self.dispatcher.snapshot(),
             "routes": routes,
             "prints": self.prints,
+            "nextJoin": self.next_join,
+            "joins": self.joins.iter().map(|(id, join)| json!({
+                "id": id,
+                "remaining": join.remaining,
+                "slots": join.slots,
+                "to": join.to.0,
+                "route": snapshot_route(join.route),
+            })).collect::<Vec<_>>(),
             "timers": self.timers.iter().map(|timer| json!({
                 "due": timer.due,
                 "to": timer.to.0,
                 "message": timer.message,
-                "route": snapshot_route(timer.route)
+                "route": snapshot_route(timer.route),
+                "join": timer.join,
+                "slot": timer.slot,
             })).collect::<Vec<_>>(),
         })
     }
@@ -397,10 +438,21 @@ impl World {
             .unwrap_or_default();
         let now = snapshot.get("now").and_then(json_u64).unwrap_or(0);
         let rng = snapshot.get("rng").and_then(json_u64).unwrap_or(1);
+        let next_join = snapshot.get("nextJoin").and_then(json_u64).unwrap_or(1);
         let mut timers = Vec::new();
         if let Some(list) = snapshot.get("timers").and_then(Json::as_array) {
             for entry in list {
                 timers.push(restore_timer(entry)?);
+            }
+        }
+        let mut joins = HashMap::new();
+        if let Some(list) = snapshot.get("joins").and_then(Json::as_array) {
+            for entry in list {
+                let id = entry
+                    .get("id")
+                    .and_then(json_u64)
+                    .ok_or_else(|| Error::new("join missing id"))?;
+                joins.insert(id, restore_join(entry)?);
             }
         }
         Ok(Self {
@@ -414,6 +466,8 @@ impl World {
             now,
             rng,
             timers,
+            joins,
+            next_join,
         })
     }
 
@@ -956,6 +1010,7 @@ impl World {
             for (name, value) in &fields {
                 bindings.insert(name.clone(), value.clone());
             }
+            bind_world(&mut bindings);
             return self.run_statements(id, &handler.body, &bindings);
         }
         for handler in &state.handlers {
@@ -966,6 +1021,7 @@ impl World {
                 for (name, value) in &fields {
                     bindings.entry(name.clone()).or_insert(value.clone());
                 }
+                bind_world(&mut bindings);
                 return self.run_statements(id, &handler.body, &bindings);
             }
         }
@@ -1049,10 +1105,8 @@ impl World {
                         &mut sends,
                     )?;
                 }
-                Statement::Print { expression } => {
-                    let value = self.eval(expression, &bindings)?;
-                    eprint!("{}", encode(&value)?);
-                    self.prints.push(value);
+                Statement::Expr { expression } => {
+                    let _ = self.eval(expression, &bindings)?;
                 }
                 Statement::Goto { state } => {
                     let kind = self.instances[&id].kind.clone();
@@ -1165,22 +1219,117 @@ impl World {
         bindings: &HashMap<String, Json>,
         sends: &mut Vec<(ActorId, Json, Route)>,
     ) -> Result<(), Error> {
-        let value = self.eval(message, bindings)?;
-        if let Some(after) = after {
-            let delay = self.delay_ms(after, bindings)?;
-            self.timers.push(Timer {
-                due: self.now.saturating_add(delay),
-                to,
-                message: value,
-                route,
-            });
+        let items = send_items(message);
+        let mut slots = Vec::with_capacity(items.len());
+        let mut any_async = false;
+        for item in items {
+            match self.eval_slot(item, bindings)? {
+                Slot::Ready(value) => slots.push(Slot::Ready(value)),
+                Slot::Async { delay_ms, value } => {
+                    any_async = true;
+                    slots.push(Slot::Async { delay_ms, value });
+                }
+            }
+        }
+        if any_async && after.is_some() {
+            return Err(Error::new("send after cannot take an async argument"));
+        }
+        if !any_async {
+            let value = assemble_slots(slots);
+            if let Some(after) = after {
+                let delay = self.delay_ms(after, bindings)?;
+                self.timers.push(Timer {
+                    due: self.now.saturating_add(delay),
+                    to,
+                    message: value,
+                    route,
+                    join: None,
+                    slot: None,
+                });
+                return Ok(());
+            }
+            sends.push((to, value, route));
             return Ok(());
         }
-        sends.push((to, value, route));
+        self.enqueue_join(to, route, slots)
+    }
+
+    fn enqueue_join(&mut self, to: ActorId, route: Route, slots: Vec<Slot>) -> Result<(), Error> {
+        let join_id = self.next_join;
+        self.next_join += 1;
+        let mut filled = Vec::with_capacity(slots.len());
+        let mut remaining = 0;
+        let mut timers = Vec::new();
+        for (index, slot) in slots.into_iter().enumerate() {
+            match slot {
+                Slot::Ready(value) => filled.push(Some(value)),
+                Slot::Async { delay_ms, value } => {
+                    remaining += 1;
+                    filled.push(None);
+                    timers.push(Timer {
+                        due: self.now.saturating_add(delay_ms),
+                        to,
+                        message: value,
+                        route,
+                        join: Some(join_id),
+                        slot: Some(index),
+                    });
+                }
+            }
+        }
+        self.joins.insert(
+            join_id,
+            PendingJoin {
+                remaining,
+                slots: filled,
+                to,
+                route,
+            },
+        );
+        self.timers.extend(timers);
         Ok(())
     }
 
+    fn fill_join(&mut self, join_id: u64, slot: usize, value: Json) -> Result<Option<Json>, Error> {
+        let Some(join) = self.joins.get_mut(&join_id) else {
+            return Err(Error::new("unknown async join"));
+        };
+        if slot >= join.slots.len() {
+            return Err(Error::new("async join slot"));
+        }
+        if join.slots[slot].is_some() {
+            return Err(Error::new("async join slot already filled"));
+        }
+        join.slots[slot] = Some(value);
+        join.remaining = join.remaining.saturating_sub(1);
+        if join.remaining != 0 {
+            return Ok(None);
+        }
+        let join = self.joins.remove(&join_id).expect("join");
+        let values: Vec<Json> = join
+            .slots
+            .into_iter()
+            .map(|slot| slot.expect("filled join"))
+            .collect();
+        Ok(Some(if values.len() == 1 {
+            values.into_iter().next().expect("one")
+        } else {
+            Json::Array(values)
+        }))
+    }
+
     fn eval(&mut self, expression: &Json, bindings: &HashMap<String, Json>) -> Result<Json, Error> {
+        match self.eval_slot(expression, bindings)? {
+            Slot::Ready(value) => Ok(value),
+            Slot::Async { .. } => Err(Error::new("async callee is only legal as a send payload")),
+        }
+    }
+
+    fn eval_slot(
+        &mut self,
+        expression: &Json,
+        bindings: &HashMap<String, Json>,
+    ) -> Result<Slot, Error> {
         if expression.get("kind").and_then(Json::as_str) == Some("sequence") {
             let items = expression
                 .get("items")
@@ -1190,14 +1339,75 @@ impl World {
             for item in items {
                 values.push(self.eval(item, bindings)?);
             }
-            return Ok(Json::Array(values));
+            return Ok(Slot::Ready(Json::Array(values)));
         }
-        if let Some((lo, hi)) = rand_args(expression) {
-            let lo = self.eval(lo, bindings)?;
-            let hi = self.eval(hi, bindings)?;
-            return self.rand_between(&lo, &hi);
+        if let Some(name) = invocation_name(expression) {
+            let args = invocation_args(expression);
+            match name {
+                "rand" => {
+                    let (lo, hi) = rand_args(expression)
+                        .ok_or_else(|| Error::new("rand expected two arguments"))?;
+                    let lo = self.eval(lo, bindings)?;
+                    let hi = self.eval(hi, bindings)?;
+                    return Ok(Slot::Ready(self.rand_between(&lo, &hi)?));
+                }
+                "write" | "writeLine" | "print" => {
+                    let value = self.eval_write(name, args, bindings)?;
+                    return Ok(Slot::Ready(value));
+                }
+                "http_get" => {
+                    let url = args
+                        .first()
+                        .ok_or_else(|| Error::new("http_get expected a url"))?;
+                    let url = self.eval(url, bindings)?;
+                    return Ok(Slot::Async {
+                        delay_ms: 1000,
+                        value: json!({ "status": 200, "url": url }),
+                    });
+                }
+                _ => {}
+            }
         }
-        evaluate(expression, bindings)
+        Ok(Slot::Ready(evaluate(expression, bindings)?))
+    }
+
+    fn eval_write(
+        &mut self,
+        name: &str,
+        args: &[Json],
+        bindings: &HashMap<String, Json>,
+    ) -> Result<Json, Error> {
+        let payload = if name == "print" {
+            self.eval_payload(args, bindings)?
+        } else {
+            let stream = args
+                .first()
+                .ok_or_else(|| Error::new(format!("{name} expected a stream")))?;
+            let stream = self.eval(stream, bindings)?;
+            check_stream(&stream, name)?;
+            self.eval_payload(args.get(1..).unwrap_or(&[]), bindings)?
+        };
+        eprint!("{}", encode(&payload)?);
+        self.prints.push(payload);
+        Ok(Json::Null)
+    }
+
+    fn eval_payload(
+        &mut self,
+        args: &[Json],
+        bindings: &HashMap<String, Json>,
+    ) -> Result<Json, Error> {
+        match args {
+            [] => Ok(Json::Null),
+            [one] => self.eval(one, bindings),
+            many => {
+                let mut values = Vec::with_capacity(many.len());
+                for arg in many {
+                    values.push(self.eval(arg, bindings)?);
+                }
+                Ok(Json::Array(values))
+            }
+        }
     }
 
     fn rand_between(&mut self, lo: &Json, hi: &Json) -> Result<Json, Error> {
@@ -1271,21 +1481,215 @@ fn route_matches_one(name: &str, route: Route) -> bool {
 }
 
 fn rand_args(expression: &Json) -> Option<(&Json, &Json)> {
-    if expression.get("kind").and_then(Json::as_str) != Some("invocation") {
+    if invocation_name(expression) != Some("rand") {
         return None;
     }
-    let name = expression
-        .get("expression")
-        .and_then(|value| value.get("name"))
-        .and_then(Json::as_str)?;
-    if name != "rand" {
-        return None;
-    }
-    let args = expression.get("args").and_then(Json::as_array)?;
-    match args.as_slice() {
+    match invocation_args(expression) {
         [lo, hi] => Some((lo, hi)),
         _ => None,
     }
+}
+
+fn invocation_name(expression: &Json) -> Option<&str> {
+    if expression.get("kind").and_then(Json::as_str) != Some("invocation") {
+        return None;
+    }
+    expression
+        .get("expression")
+        .and_then(|value| value.get("name"))
+        .and_then(Json::as_str)
+}
+
+fn invocation_args(expression: &Json) -> &[Json] {
+    expression
+        .get("args")
+        .and_then(Json::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn send_items(message: &Json) -> Vec<&Json> {
+    if message.get("kind").and_then(Json::as_str) == Some("sequence") {
+        message
+            .get("items")
+            .and_then(Json::as_array)
+            .map(|items| items.iter().collect())
+            .unwrap_or_default()
+    } else {
+        vec![message]
+    }
+}
+
+fn assemble_slots(slots: Vec<Slot>) -> Json {
+    let mut values = Vec::with_capacity(slots.len());
+    for slot in slots {
+        match slot {
+            Slot::Ready(value) => values.push(value),
+            Slot::Async { .. } => unreachable!("assemble_slots of ready slots"),
+        }
+    }
+    if values.len() == 1 {
+        values.pop().expect("one")
+    } else {
+        Json::Array(values)
+    }
+}
+
+fn stream(name: &str) -> Json {
+    json!({ "kind": "stream", "name": name })
+}
+
+fn bind_world(bindings: &mut HashMap<String, Json>) {
+    for name in ["stdin", "stdout", "stderr"] {
+        bindings
+            .entry(name.to_string())
+            .or_insert_with(|| stream(name));
+    }
+}
+
+fn check_stream(value: &Json, name: &str) -> Result<(), Error> {
+    if value.get("kind").and_then(Json::as_str) != Some("stream") {
+        return Err(Error::new(format!("{name} expected a stream")));
+    }
+    match value.get("name").and_then(Json::as_str) {
+        Some("stdout") | Some("stderr") => Ok(()),
+        Some("stdin") => Err(Error::new(format!("{name} cannot write stdin"))),
+        _ => Err(Error::new(format!("{name} expected stdout or stderr"))),
+    }
+}
+
+fn callee_of(name: &str) -> Callee {
+    match name {
+        "write" | "writeLine" | "print" => Callee::Io,
+        "http_get" => Callee::Async,
+        _ => Callee::Other,
+    }
+}
+
+fn walk_callees(expression: &Json, visit: &mut impl FnMut(&str)) {
+    if let Some(name) = invocation_name(expression) {
+        visit(name);
+    }
+    match expression {
+        Json::Object(map) => {
+            for value in map.values() {
+                walk_callees(value, visit);
+            }
+        }
+        Json::Array(items) => {
+            for value in items {
+                walk_callees(value, visit);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_sync(expression: &Json, component: &str) -> Result<(), Error> {
+    let mut error = None;
+    walk_callees(expression, &mut |name| {
+        if error.is_some() {
+            return;
+        }
+        match callee_of(name) {
+            Callee::Io => {
+                error = Some(format!(
+                    "same-turn I/O cannot appear in a value in {component}"
+                ));
+            }
+            Callee::Async => {
+                error = Some(format!(
+                    "async callee is only legal as a send payload in {component}"
+                ));
+            }
+            Callee::Other => {}
+        }
+    });
+    match error {
+        Some(message) => Err(Error::new(message)),
+        None => Ok(()),
+    }
+}
+
+fn check_send_arg(expression: &Json, after: bool, component: &str) -> Result<(), Error> {
+    if let Some(name) = invocation_name(expression) {
+        match callee_of(name) {
+            Callee::Async => {
+                if after {
+                    return Err(Error::new(format!(
+                        "send after cannot take an async argument in {component}"
+                    )));
+                }
+                for arg in invocation_args(expression) {
+                    check_sync(arg, component)?;
+                }
+                return Ok(());
+            }
+            Callee::Io => {
+                return Err(Error::new(format!(
+                    "same-turn I/O is not a send payload in {component}"
+                )));
+            }
+            Callee::Other => {}
+        }
+    }
+    check_sync(expression, component)
+}
+
+fn check_expr_stmt(expression: &Json, component: &str) -> Result<(), Error> {
+    if let Some(name) = invocation_name(expression) {
+        match callee_of(name) {
+            Callee::Io => {
+                for arg in invocation_args(expression) {
+                    check_sync(arg, component)?;
+                }
+                return Ok(());
+            }
+            Callee::Async => {
+                return Err(Error::new(format!(
+                    "async callee is only legal as a send payload in {component}"
+                )));
+            }
+            Callee::Other => {}
+        }
+    }
+    check_sync(expression, component)
+}
+
+fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
+    for field in &component.fields {
+        if let Some(init) = &field.init {
+            check_sync(init, &component.name)?;
+        }
+    }
+    for state in &component.states {
+        for handler in &state.handlers {
+            for statement in &handler.body {
+                match statement {
+                    Statement::Assign { expression, .. } => {
+                        check_sync(expression, &component.name)?;
+                    }
+                    Statement::Expr { expression } => {
+                        check_expr_stmt(expression, &component.name)?;
+                    }
+                    Statement::Complete { message } => {
+                        check_sync(message, &component.name)?;
+                    }
+                    Statement::Send { message, after }
+                    | Statement::SendUp { message, after }
+                    | Statement::SendTo { message, after, .. }
+                    | Statement::SendDown { message, after, .. } => {
+                        let delayed = after.is_some();
+                        for item in send_items(message) {
+                            check_send_arg(item, delayed, &component.name)?;
+                        }
+                    }
+                    Statement::Goto { .. } => {}
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn bind_step(pattern: &Json, working: &Json) -> Result<HashMap<String, Json>, Error> {
@@ -1615,6 +2019,42 @@ fn restore_timer(entry: &Json) -> Result<Timer, Error> {
             .get("message")
             .cloned()
             .ok_or_else(|| Error::new("timer missing message"))?,
+        route: restore_route(entry.get("route").and_then(Json::as_str)),
+        join: entry.get("join").and_then(json_u64),
+        slot: entry
+            .get("slot")
+            .and_then(json_u64)
+            .map(|slot| slot as usize),
+    })
+}
+
+fn restore_join(entry: &Json) -> Result<PendingJoin, Error> {
+    let remaining = entry
+        .get("remaining")
+        .and_then(json_u64)
+        .ok_or_else(|| Error::new("join missing remaining"))? as usize;
+    let slots = entry
+        .get("slots")
+        .and_then(Json::as_array)
+        .ok_or_else(|| Error::new("join missing slots"))?
+        .iter()
+        .map(|slot| {
+            if slot.is_null() {
+                None
+            } else {
+                Some(slot.clone())
+            }
+        })
+        .collect();
+    Ok(PendingJoin {
+        remaining,
+        slots,
+        to: ActorId(
+            entry
+                .get("to")
+                .and_then(json_u64)
+                .ok_or_else(|| Error::new("join missing to"))?,
+        ),
         route: restore_route(entry.get("route").and_then(Json::as_str)),
     })
 }

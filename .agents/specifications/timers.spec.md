@@ -34,6 +34,9 @@ capitals.
 
 - `send after Delay Route V` MUST evaluate `V` and `Delay` on the sending
   turn and MUST NOT deliver `V` until the clock reaches the due time.
+  An async send argument (`http_get`) MUST NOT be combined with
+  `send after`: that argument has no value this turn. The host parks its
+  own due time. Snapshot MUST include in-flight async joins.
 - `Delay` is a Uffda expression that produces a number of **seconds**.
   `(rand Lo Hi)` is a Kith host callable: inclusive if both bounds are
   integers, otherwise a number in `[Lo, Hi]`. It is not a Uffda global.

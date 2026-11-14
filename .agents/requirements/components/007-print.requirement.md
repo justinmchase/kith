@@ -1,22 +1,24 @@
 ---
 id: components-007
-title: print records a diagnostic value without completing the instance
-spec_ref: .agents/specifications/components.spec.md#sending
+title: writeLine to stdout records a diagnostic value without completing the instance
+spec_ref: .agents/specifications/components.spec.md#handler-expressions
 ---
 
-# Print
+# writeLine diagnostic
 
 ## Requirement
 
 Preconditions:
 
-- A component transition includes `print Expression`.
+- A component transition includes `(writeLine stdout Expression)` or
+  `(print Expression)`.
 
 Expected behavior:
 
 - Evaluating the transition MUST record the value on the world. The instance
-  MUST NOT complete because of the print.
-- Order's Carrier pickup MUST print `{ kind: "PickupRequested", ... }` twice
+  MUST NOT complete because of the write.
+- `(print V)` MUST be the same as `(writeLine stdout V)`.
+- Order's Carrier pickup MUST write `{ kind: "PickupRequested", ... }` twice
   before any delivery confirmation.
 
 Postconditions:

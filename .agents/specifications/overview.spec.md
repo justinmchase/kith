@@ -48,16 +48,20 @@ primitives rather than defining their own.
 - **Machines and flows.** Component behavior is a state machine: a matched
   message may send, assign, and `complete`. Workflow behavior is a flow graph:
   completing a step follows `then` (or a `pick` clause) with that step's
-  output as the working value. Expressions compute values and have no effect.
+  output as the working value. Actor `send` / `goto` / `complete` / `->` are
+  statements. Host I/O is Uffda invocation syntax, not a second set of
+  keywords.
 - **Dispatch is the runtime.** User code MUST NOT schedule actors, wait on
   threads, or lock shared state. Delayed work is `send after`, not a sleep.
   The dispatcher treats components and in-flight transitions as actors and is
   the parallelization mechanism.
 - **Patterns match messages.** A receive clause is a Uffda pattern. Checking a
   message against a transition means matching that pattern.
-- **Expressions are pure.** Uffda expressions compute values (including
-  globals such as `length`). Effects are explicit: sending a message, printing,
-  changing machine state, spawning or joining work.
+- **Expressions compute values.** Uffda globals (`length`, `add`) and
+  expressions in assign, field init, and nested arguments are pure. Host
+  stdlib invocations (`(writeLine stdout x)`, `(http_get url)`) have effects;
+  they are still expressions, not keywords. Actor effects remain statements:
+  sending a message, changing machine state, spawning or joining work.
 - **One tree per exported scene.** A running program is the instance tree of
   its unique exported scene. The root is that scene's top instance, a
   component or a workflow. Each instance has at most one parent. The tree is

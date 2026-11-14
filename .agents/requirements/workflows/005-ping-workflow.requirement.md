@@ -15,8 +15,9 @@ Preconditions:
 Expected behavior:
 
 - Injecting a paid order with two items MUST accept and charge, then wait on
-  two `Carrier` work items. Each Carrier MUST `print` a pickup request and
-  dispatch its `MockShip`. After `run_until_idle` the run MUST NOT succeed.
+  two `Carrier` work items. Each Carrier MUST `(writeLine stdout { kind:
+  "PickupRequested" … })` and dispatch its `MockShip`. After
+  `run_until_idle` the run MUST NOT succeed.
 - `World::run` MUST fire MockShip's delayed `Delivered` ups. `Summarize`
   MUST fold each shipment and succeed with
   `{ kind: "Summarize", orderId: "o-1", total: 2 }`.

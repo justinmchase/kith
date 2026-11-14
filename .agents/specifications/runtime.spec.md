@@ -32,8 +32,9 @@ capitals.
 - A Kith program is not a Uffda module declaration. Lowering `.kith` source
   with Uffda's `UffdaRuntimeCompiler` is not how programs run.
 - Host-language native functions inside expressions MUST NOT be how sends,
-  spawns, or joins happen. Those are transition effects the Kith runtime
-  performs after a match, so expressions stay pure.
+  spawns, or `goto` happen. Those are transition statements the Kith runtime
+  performs after a match. Host I/O is an intercepted invocation, not a
+  Kith keyword.
 
 ## Constraints
 
@@ -89,8 +90,8 @@ capitals.
   data codec record.
 - `kith run` walks the unique exported scene: it constructs instances, enqueues messages, and
   for each turn calls Uffda to match `on` patterns and evaluate expressions in
-  the body. Sends, spawns, and joins are recorded as Kith effects and handed
-  to the dispatcher.
+  the body. Sends, spawns, joins, and same-turn stream writes are recorded as
+  Kith effects and handed to the dispatcher or the bound stream.
 - Import of one `.kith` file from another is Kith's module graph. Relative
   specifiers are resolved by Kith. Uffda's resolver remains the resolver of
   the grammar (`*.uff` / `jsr:`), not of application packages.
@@ -103,11 +104,11 @@ capitals.
   "did this message match" layer. Adding `Component` to that crate would couple
   Uffda's release train to clustering and mailboxes, and every Uffda language
   would inherit types it does not want.
-- **Effects after the match, not inside it.** If `send up` were a native
-  expression, expressions would stop being pure and the dispatcher would be
-  hidden in host calls. Walking the transition AST keeps matching and
-  scheduling at the layers the [overview](./overview.spec.md#principles)
-  names.
+- **Statements for the machine, invocations for the host.** If `send up` were
+  a native expression, the dispatcher would be hidden in host calls. Walking
+  the transition AST keeps matching and scheduling at the layers the
+  [overview](./overview.spec.md#principles) names. Host I/O is still an
+  expression: `(writeLine stdout x)` is a callee, not a keyword.
 - **Own CLI, library Uffda.** Uffda's CLI `compile` lowers Uffda modules
   only; `parse --lang` selects Uffda, pattern, or expression, not an arbitrary
   project language. A `kith` binary that links `uffda-runtime` is the
@@ -115,48 +116,109 @@ capitals.
 
 ### Host callables
 
-Uffda expressions are pure. Kith MAY intercept a named invocation while
-evaluating an expression AST. The first of those is `(rand Lo Hi)`: a number
-in that range from World RNG, inclusive when both bounds are integers. It is
-not a Uffda global. Snapshot MUST include the RNG so restore is determined.
+Kith MAY intercept a named invocation while evaluating an expression AST.
+The callee decides whether the result is this turn or a later message.
 
-A host callable MUST return a value on the same turn. It MUST NOT perform
-I/O, wait, or send messages. Those are [host I/O](#host-io).
+**Same-turn.** `(rand Lo Hi)` is a number in that range from World RNG,
+inclusive when both bounds are integers. Snapshot MUST include the RNG so
+restore is determined. `(write stream V…)`, `(writeLine stream V…)`, and
+`(print V…)` write to a stream capability and return `undefined` this
+turn. `(print V…)` is `(writeLine stdout V…)`. World binds `stdin`,
+`stdout`, and `stderr` in handler scope. They are not Uffda globals. An
+unknown callee MUST fail evaluation.
+
+**Later-turn.** `(http_get url)` has no value this turn. It is legal only
+as a send argument: `send self (http_get url)` starts the request and
+delivers the result as that message when the host is done. Several async
+arguments in one send wait for all (argument order, not completion order)
+and deliver one array. `send after` is evaluate now, deliver later;
+async I/O is deliver when the host is done. Combining `send after` with an
+async argument MUST fail. Check MUST reject an async callee in assign,
+field init, an expression statement, or nested argument position.
+
+A same-turn callable MUST NOT block the dispatcher. A later-turn callable
+MUST NOT return on this turn and MUST NOT attach a `{ P -> }` continuation.
 
 ### Host I/O
 
-A host effect that takes time is a later message. It is not a blocked turn
-and not an expression. There is no `async` in a handler. `(fetch url)`
-MUST NOT be an expression.
+A host effect that takes time is a later message. It is not a blocked turn.
+There is no `async` keyword and no match block on a call. `goto` after
+`send self (http_get url)` is this turn. The result is matched with `on`
+in the state that `goto` entered.
 
-The capability is a child kind, the same shape as MockShip. In the program
-a mock takes a request **down** and `send after`s a response **up**. A real
-host driver for that kind MUST deliver the result on the same route: as
-`send up` from that instance. The parent waits in another state and matches
-`on up`.
+```kith
+on down "Go" url:any {
+  send self (http_get url);
+  goto Fetching;
+}
 
-1. A turn `send to`s a request to the child. That turn ends.
+state Fetching {
+  on { status: 200 url: any } {
+    send up "ok";
+    goto Idle;
+  }
+  else {
+    send up "unknown";
+    goto Idle;
+  }
+}
+```
+
+Two URLs that must both be 200 are one send of two async args, not two
+sends (two messages would strand the second if the first `goto`s away):
+
+```kith
+on down "Go" url1:any url2:any {
+  send self (http_get url1) (http_get url2);
+  goto Fetching;
+}
+
+state Fetching {
+  on a:any b:any {
+    send up "ok";
+    goto Idle;
+  }
+}
+```
+
+The mock `(http_get url)` delivers `{ status: 200, url }` after one
+virtual second. A real host driver MAY replace that delay with a socket;
+the program shape is the send and the `on`. N URLs known in source are N
+arguments. N unknown until runtime remains workflow `fanout` plus a
+reducer.
+
+A child capability (the same shape as MockShip) MAY still take a request
+**down** and `send after` a response **up**. A real host driver for that
+kind MUST deliver on that same up route. The parent waits in another
+state and matches `on up`.
+
+1. A turn `send`s an async payload, or `send to`s a request to a child.
+   That turn ends (`goto` is this turn).
 2. The dispatcher is not blocked.
-3. The mock parks a timer, or the host performs HTTP / disk / a device off
-   the dispatcher.
-4. A later `send up` carries the result.
-5. The parent matches `on up` and may `send up` again or `complete`.
+3. The host parks a timer, or performs HTTP / disk / a device off the
+   dispatcher.
+4. A later message carries the result (the send's route, or `send up`
+   from the child).
+5. The waiting state matches `on` and may `send up` again or `complete`.
 
-A host driver MUST NOT run Kith `on` handlers for that instance. It is not
-a Uffda `HostCallable` (those return on the same turn). How the operator
-binds `Http` to curl versus the mock is a later slice. The program shape
-is the tree, the messages, and `on down` / `on up`.
+A host driver MUST NOT run Kith `on` handlers for a child instance it
+replaces. Same-turn stream writes are not Uffda `HostCallable` returns
+that wait; they return `undefined` now. How the operator binds a child
+`Http` kind to curl versus the mock is a later slice.
 
 The normative program is `examples/http.kith`: a HealthCheck that probes
 through Checking, Waiting, and Validating, then waits 5 seconds before the
-next Tick. It prints `"Healthy"` when the last three statuses are 200,
-`"Unhealthy"` when none of them are 200, and `"Indeterminate"` otherwise.
+next Tick. It `(writeLine stdout …)`s `"Healthy"` when the last three
+statuses are 200, `"Unhealthy"` when none of them are 200, and
+`"Indeterminate"` otherwise. The scene-filled `Http` child remains the
+capability mock for that example; `(http_get url)` is the stdlib spelling
+for the same later-message shape without a child.
 
 ```kith
 component Http {
   start {
     on down "GET" url:any {
-      print "Requested" url;
+      (writeLine stdout "Requested" url);
       send after (rand 1 3) up "Response" 200 "ok";
     }
   }
@@ -203,17 +265,17 @@ component HealthCheck {
   }
   state Validating {
     on self "Check" a:200 b:200 c:200 {
-      print "Healthy";
+      (writeLine stdout "Healthy");
       send after 5 self "Tick";
       goto Checking;
     }
     on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
-      print "Unhealthy";
+      (writeLine stdout "Unhealthy");
       send after 5 self "Tick";
       goto Checking;
     }
     else {
-      print "Indeterminate";
+      (writeLine stdout "Indeterminate");
       send after 5 self "Tick";
       goto Checking;
     }
@@ -232,7 +294,7 @@ requires a named start (`start Idle`).
 HealthCheck is the run root. Construction init `send self`s the first Tick;
 the operator MUST NOT inject Tick. Checking sends Go and `goto Waiting`.
 Waiting shifts the window, `send self` Check, then `goto Validating`.
-Validating prints, `send after 5 self` Tick, then `goto Checking` so the
+Validating writes a line, `send after 5 self` Tick, then `goto Checking` so the
 next Tick is taken in Checking. Arming Tick from Checking would deliver
 it while Waiting if the GET takes longer than the delay. `send after` is
 not a wait: the turn continues and the send is due later. `goto` is last.

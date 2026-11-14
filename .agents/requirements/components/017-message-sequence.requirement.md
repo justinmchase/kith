@@ -10,8 +10,8 @@ spec_ref: .agents/specifications/components.spec.md#sending; .agents/specificati
 
 Preconditions:
 
-- A component may `send`, `complete`, or `print` one or more values after
-  the route. A handler `on` lists Uffda prefixes up to the body `{`.
+- A component may `send` or `complete` one or more values after the route.
+  A handler `on` lists Uffda prefixes up to the body `{`.
 
 Expected behavior:
 
@@ -26,7 +26,7 @@ Expected behavior:
   to that object. `on { kind: "GET" url: any }` MUST match an object
   without commas between entries.
 - A Then of N prefixes MUST NOT match an array of a different length.
-- `complete` and `print` MUST take the same value list as `send`.
+- `complete` MUST take the same value list as `send`.
 
 Postconditions:
 
