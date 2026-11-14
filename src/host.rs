@@ -1,35 +1,43 @@
+use crate::doc::{self, Doc};
 use crate::error::Error;
-use crate::json_util::{from_uffda_value, to_uffda_json};
 use serde_json::Value as Json;
 use std::collections::HashMap;
 use std::rc::Rc;
+use uffda_heap::{Arena, Rootable};
+use uffda_runtime::codec::data::{DataDocument, DataLimits};
 use uffda_runtime::environment::Environment;
 use uffda_runtime::evaluate::Evaluation;
 use uffda_runtime::expression::Expression;
 use uffda_runtime::json;
-use uffda_runtime::pattern::{MatchKind, Pattern};
-use uffda_runtime::runtime::{InputMode, Runtime};
-use uffda_runtime::value::Value;
+use uffda_runtime::pattern::{MatchKind, Pattern, PatternMatch};
+use uffda_runtime::runtime::RuleExecution;
 
+/// The Kith grammar embeds Uffda expression syntax as JSON. This parses that
+/// tree into the native expression AST.
 pub fn parse_expression(ast: &Json) -> Result<Expression, Error> {
     json::from_str(&ast.to_string()).map_err(|error| Error::new(error.to_string()))
 }
 
+/// The Kith grammar embeds Uffda pattern syntax as JSON. This parses that
+/// tree into the native pattern AST.
 pub fn parse_pattern(ast: &Json) -> Result<Pattern, Error> {
     json::from_str(&ast.to_string()).map_err(|error| Error::new(error.to_string()))
 }
 
+/// External edge: existing callers pass JSON bindings. The evaluation itself
+/// runs on data-codec documents.
 pub fn evaluate(expression: &Json, bindings: &HashMap<String, Json>) -> Result<Json, Error> {
+    let bindings = json_bindings(bindings)?;
+    doc::to_json(&evaluate_document(expression, &bindings)?)
+}
+
+pub fn evaluate_document(expression: &Json, bindings: &HashMap<String, Doc>) -> Result<Doc, Error> {
     let expression = parse_expression(expression)?;
     let captured = bindings.clone();
     let mut evaluation = Evaluation::with_environment(expression, |mc| {
         let values = captured
             .iter()
-            .filter_map(|(name, value)| {
-                json_to_value(mc, value)
-                    .ok()
-                    .map(|value| (Rc::<str>::from(name.as_str()), value))
-            })
+            .map(|(name, value)| (Rc::<str>::from(name.as_str()), value.materialize(mc)))
             .collect();
         Environment::new(mc, None, values)
     });
@@ -37,35 +45,66 @@ pub fn evaluate(expression: &Json, bindings: &HashMap<String, Json>) -> Result<J
         .finish()
         .map_err(|error| Error::new(error.to_string()))?;
     evaluation
-        .read(&result, from_uffda_value)
+        .read(&result, |value| {
+            DataDocument::from_value(value, DataLimits::default())
+                .map_err(|error| Error::new(error.to_string()))
+        })
         .map_err(|error| Error::new(error.to_string()))?
 }
 
+/// External edge: existing callers pass a JSON message. Matching runs on a
+/// data-codec document.
 pub fn match_message(
     pattern: &Json,
     message: &Json,
 ) -> Result<Option<HashMap<String, Json>>, Error> {
-    let mode = match then_arity(pattern) {
-        Some(arity) => {
-            let Some(values) = message.as_array() else {
+    let matched = match_document(pattern, &doc::from_json(message)?)?;
+    match matched {
+        None => Ok(None),
+        Some(bindings) => Ok(Some(json_map(bindings)?)),
+    }
+}
+
+pub fn match_document(
+    pattern: &Json,
+    message: &Doc,
+) -> Result<Option<HashMap<String, Doc>>, Error> {
+    let pattern = parse_pattern(pattern)?;
+    let iterable = match &pattern {
+        Pattern::Then { patterns } => {
+            let Some(values) = doc::items(message) else {
                 return Ok(None);
             };
-            if values.len() != arity {
+            if values.len() != patterns.len() {
                 return Ok(None);
             }
-            InputMode::Iterable
+            true
         }
-        None => InputMode::Scalar,
+        _ => false,
     };
-    let pattern = parse_pattern(pattern)?;
     let names = binding_names(&pattern);
-    let input = to_uffda_json(message)?;
-    let mut runtime = Runtime::for_pattern(pattern, input, mode)
-        .map_err(|error| Error::new(error.to_string()))?;
-    runtime
-        .run()
-        .map_err(|error| Error::new(error.to_string()))?;
-    runtime.read(|execution| {
+    let message = message.clone();
+    let mut arena: Arena<Rootable![RuleExecution<'_>]> = Arena::new(|mc| {
+        let input = if iterable {
+            doc::items(&message)
+                .unwrap_or_default()
+                .iter()
+                .map(|item| item.materialize(mc))
+                .collect()
+        } else {
+            vec![message.materialize(mc)]
+        };
+        RuleExecution::for_pattern(mc, pattern, input)
+    });
+    loop {
+        let done = arena
+            .mutate_root(|mc, execution| execution.step(mc))
+            .map_err(|error| Error::new(error.to_string()))?;
+        if done {
+            break;
+        }
+    }
+    arena.mutate(|_, execution| {
         let matched = execution
             .result()
             .ok_or_else(|| Error::new("missing match"))?;
@@ -74,8 +113,12 @@ pub fn match_message(
         }
         let mut bindings = HashMap::new();
         for name in names {
-            if let Some(value) = matched.environment.get(&name) {
-                bindings.insert(name, from_uffda_value(value)?);
+            if let Some(value) = binding_value(&matched, &name) {
+                bindings.insert(
+                    name,
+                    DataDocument::from_value(value, DataLimits::default())
+                        .map_err(|error| Error::new(error.to_string()))?,
+                );
             }
         }
         Ok(Some(bindings))
@@ -84,15 +127,26 @@ pub fn match_message(
 
 /// Match a stored field as one scalar value. Uffda Maybe (`number?`) that
 /// skips a present non-null value is not a match: optional means null or T.
+/// External edge: existing callers pass JSON.
 pub fn match_field(pattern: &Json, value: &Json) -> Result<bool, Error> {
+    match_field_document(pattern, &doc::from_json(value)?)
+}
+
+pub fn match_field_document(pattern: &Json, value: &Doc) -> Result<bool, Error> {
     let pattern = parse_pattern(pattern)?;
-    let input = to_uffda_json(value)?;
-    let mut runtime = Runtime::for_pattern(pattern, input, InputMode::Scalar)
-        .map_err(|error| Error::new(error.to_string()))?;
-    runtime
-        .run()
-        .map_err(|error| Error::new(error.to_string()))?;
-    runtime.read(|execution| {
+    let value = value.clone();
+    let mut arena: Arena<Rootable![RuleExecution<'_>]> =
+        Arena::new(|mc| RuleExecution::for_pattern(mc, pattern, vec![value.materialize(mc)]));
+    loop {
+        let done = arena
+            .mutate_root(|mc, execution| execution.step(mc))
+            .map_err(|error| Error::new(error.to_string()))?;
+        if done {
+            break;
+        }
+    }
+    let is_null = doc::is_null(&value);
+    arena.mutate(|_, execution| {
         let matched = execution
             .result()
             .ok_or_else(|| Error::new("missing match"))?;
@@ -100,51 +154,36 @@ pub fn match_field(pattern: &Json, value: &Json) -> Result<bool, Error> {
             return Ok(false);
         }
         let consumed = matched.end > matched.start;
-        Ok(consumed || value.is_null())
+        Ok(consumed || is_null)
     })
 }
 
-fn then_arity(pattern: &Json) -> Option<usize> {
-    if pattern.get("kind").and_then(Json::as_str) != Some("then") {
-        return None;
+fn json_bindings(bindings: &HashMap<String, Json>) -> Result<HashMap<String, Doc>, Error> {
+    bindings
+        .iter()
+        .map(|(name, value)| Ok((name.clone(), doc::from_json(value)?)))
+        .collect()
+}
+
+fn json_map(bindings: HashMap<String, Doc>) -> Result<HashMap<String, Json>, Error> {
+    bindings
+        .into_iter()
+        .map(|(name, value)| Ok((name, doc::to_json(&value)?)))
+        .collect()
+}
+
+fn binding_value<'a>(
+    matched: &PatternMatch<'a>,
+    name: &str,
+) -> Option<uffda_runtime::value::Value<'a>> {
+    if let Some(value) = matched.environment.get(name) {
+        return Some(value);
     }
-    pattern
-        .get("patterns")
-        .and_then(Json::as_array)
-        .map(Vec::len)
-}
-
-fn json_to_value<'gc>(mc: &uffda_heap::Mutation<'gc>, value: &Json) -> Result<Value<'gc>, Error> {
-    Ok(match value {
-        Json::Null => Value::Null,
-        Json::Bool(value) => Value::Boolean(*value),
-        Json::Number(value) => Value::Number(value.as_f64().ok_or_else(|| Error::new("number"))?),
-        Json::String(value) => Value::string(mc, value.as_str()),
-        Json::Array(values) => Value::array(
-            mc,
-            values
-                .iter()
-                .map(|value| json_to_value(mc, value))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        Json::Object(_) if crate::builtin::bytes_of(value).is_some() => Value::Bytes(
-            uffda_heap::Gc::new(mc, crate::builtin::bytes_of(value).expect("bytes")),
-        ),
-        Json::Object(_) if crate::builtin::instant_millis(value).is_some() => {
-            let millis = crate::builtin::instant_millis(value).expect("instant");
-            let date =
-                time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
-                    .map_err(|_| Error::new("invalid instant"))?;
-            Value::date(mc, date)
-        }
-        Json::Object(values) => Value::object(
-            mc,
-            values
-                .iter()
-                .map(|(key, value)| Ok((key.as_str().into(), json_to_value(mc, value)?)))
-                .collect::<Result<Vec<_>, Error>>()?,
-        ),
-    })
+    matched
+        .children
+        .as_slice()
+        .iter()
+        .find_map(|child| binding_value(child, name))
 }
 
 fn binding_names(pattern: &Pattern) -> Vec<String> {

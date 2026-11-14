@@ -46,15 +46,13 @@ pub fn from_uffda_value(value: Value<'_>) -> Result<Json, Error> {
                 .map(from_uffda_value)
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        Value::Bytes(bytes) => Ok(crate::builtin::bytes_json(bytes.as_ref())),
-        Value::Date(date) => {
-            let nanos = date.0.unix_timestamp_nanos();
-            if nanos % 1_000_000 != 0 {
-                return Err(Error::new("instant is not millisecond UTC"));
-            }
-            let millis =
-                i64::try_from(nanos / 1_000_000).map_err(|_| Error::new("instant overflow"))?;
-            Ok(crate::builtin::instant_json(millis))
+        Value::Bytes(_) | Value::Date(_) => {
+            let document = uffda_runtime::codec::data::DataDocument::from_value(
+                value,
+                uffda_runtime::codec::data::DataLimits::default(),
+            )
+            .map_err(|error| Error::new(error.to_string()))?;
+            crate::doc::to_json(&document)
         }
         Value::Object(object) => {
             let mut map = serde_json::Map::new();

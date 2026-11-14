@@ -1,6 +1,6 @@
 ---
 id: builtins-001
-title: kith: imports bind a registered declaration and are not fetched
+title: "kith: imports bind a registered declaration and are not fetched"
 spec_ref: .agents/specifications/builtins.spec.md#registration; .agents/specifications/scenes.spec.md#import-and-export
 ---
 

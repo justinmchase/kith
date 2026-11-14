@@ -1,6 +1,6 @@
 ---
 id: builtins-004
-title: kith:time is pure, and Clock is the only wall read
+title: "kith:time is pure, and Clock is the only wall read"
 spec_ref: .agents/specifications/builtins.spec.md#time; .agents/specifications/timers.spec.md#definitions
 ---
 

@@ -6,11 +6,10 @@ mod data;
 mod rules;
 mod stream;
 mod time;
-mod value;
 
 use crate::ast::{Component, Program, State};
+use crate::doc::{self, Doc};
 use crate::error::Error;
-use serde_json::{json, Value as Json};
 use std::collections::HashMap;
 use uffda_runtime::codec::data::DataDocument;
 use uffda_runtime::resolver::{decode_declaration, Resolver};
@@ -18,10 +17,7 @@ use url::Url;
 
 pub use rules::{match_with_rules, uses_rule};
 pub use stream::Pipe;
-pub use time::{instant_text, parse_instant, process_zone, wall_millis, zone_value};
-pub use value::{
-    bytes_json, bytes_of, encode_base64url, instant_json, instant_millis, is_bytes, is_instant,
-};
+pub use time::{instant_doc, instant_text, parse_instant, process_zone, wall_millis, zone_value};
 
 const DATA: &str = r#"{
   "imports": [],
@@ -43,8 +39,8 @@ const DATA: &str = r#"{
   ],
   "rules": [
     {"name":"Bytes","parameters":[],"pattern":{"kind":"any"}},
-    {"name":"Blob","parameters":[],"pattern":{"kind":"over","keys":{"type":{"kind":"type","type":"String"},"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]}}}},
-    {"name":"Buffer","parameters":[],"pattern":{"kind":"over","keys":{"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]},"start":{"kind":"type","type":"Number"},"end":{"kind":"type","type":"Number"}}}}
+    {"name":"Blob","parameters":[],"pattern":{"kind":"over","keys":{"type":{"kind":"type","type":"string"},"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]}}}},
+    {"name":"Buffer","parameters":[],"pattern":{"kind":"over","keys":{"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]},"start":{"kind":"type","type":"number"},"end":{"kind":"type","type":"number"}}}}
   ],
   "funcs": [
     {"name":"bytes","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
@@ -92,9 +88,9 @@ const TIME: &str = r#"{
     {"kind":"func","name":"offset_seconds"}
   ],
   "rules": [
-    {"name":"Instant","parameters":[],"pattern":{"kind":"type","type":"Date"}},
-    {"name":"DateTime","parameters":[],"pattern":{"kind":"over","keys":{"year":{"kind":"type","type":"Number"},"month":{"kind":"type","type":"Number"},"day":{"kind":"type","type":"Number"},"hour":{"kind":"type","type":"Number"},"minute":{"kind":"type","type":"Number"},"second":{"kind":"type","type":"Number"},"millisecond":{"kind":"type","type":"Number"}}}},
-    {"name":"Zone","parameters":[],"pattern":{"kind":"or","patterns":[{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"utc"}}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"fixed"}},"seconds":{"kind":"type","type":"Number"}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"iana"}},"id":{"kind":"type","type":"String"}}}]}}
+    {"name":"Instant","parameters":[],"pattern":{"kind":"type","type":"date"}},
+    {"name":"DateTime","parameters":[],"pattern":{"kind":"over","keys":{"year":{"kind":"type","type":"number"},"month":{"kind":"type","type":"number"},"day":{"kind":"type","type":"number"},"hour":{"kind":"type","type":"number"},"minute":{"kind":"type","type":"number"},"second":{"kind":"type","type":"number"},"millisecond":{"kind":"type","type":"number"}}}},
+    {"name":"Zone","parameters":[],"pattern":{"kind":"or","patterns":[{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"utc"}}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"fixed"}},"seconds":{"kind":"type","type":"number"}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"iana"}},"id":{"kind":"type","type":"string"}}}]}}
   ],
   "funcs": [
     {"name":"instant","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
@@ -159,7 +155,7 @@ pub fn bind(program: &mut Program, specifier: &str, names: &[String]) -> Result<
     Ok(())
 }
 
-pub fn call(name: &str, args: &[Json]) -> Result<Json, Error> {
+pub fn call(name: &str, args: &[Doc]) -> Result<Doc, Error> {
     if let Some(value) = data::call(name, args)? {
         return Ok(value);
     }
@@ -177,21 +173,20 @@ pub fn initial_driver(kind: &str) -> Option<Driver> {
     }
 }
 
-pub fn drive_pipe(pipe: Pipe, message: &Json) -> (Pipe, Vec<Json>) {
-    let (pipe, replies) = stream::step(pipe, message);
-    (pipe, replies)
+pub fn drive_pipe(pipe: Pipe, message: &Doc) -> (Pipe, Vec<Doc>) {
+    stream::step(pipe, message)
 }
 
-pub fn driver_json(driver: &Driver) -> Json {
+pub fn driver_document(driver: &Driver) -> Doc {
     match driver {
-        Driver::Pipe(pipe) => stream::to_json(pipe),
-        Driver::Clock => json!({"kind": "clock"}),
+        Driver::Pipe(pipe) => stream::to_document(pipe),
+        Driver::Clock => doc::object([("kind", doc::string("clock"))]),
     }
 }
 
-pub fn driver_from(value: &Json) -> Option<Driver> {
-    match value.get("kind").and_then(Json::as_str) {
-        Some("pipe") => stream::from_json(value).map(Driver::Pipe),
+pub fn driver_from(value: &Doc) -> Option<Driver> {
+    match doc::as_str(&doc::get(value, "kind")?).as_deref() {
+        Some("pipe") => stream::from_document(value).map(Driver::Pipe),
         Some("clock") => Some(Driver::Clock),
         _ => None,
     }

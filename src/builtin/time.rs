@@ -1,64 +1,59 @@
-use super::value::{instant_json, instant_millis, whole_number};
+use crate::doc::{self, Doc};
 use crate::error::Error;
-use serde_json::{json, Value as Json};
 use time::OffsetDateTime;
 use uffda_runtime::codec::data::{DataDocument, DataLimits, DataNode};
 
-pub fn call(name: &str, args: &[Json]) -> Result<Option<Json>, Error> {
+pub fn call(name: &str, args: &[Doc]) -> Result<Option<Doc>, Error> {
     let value = match name {
         "instant" => {
             expect_arity(name, args, 1)?;
-            let text = args[0]
-                .as_str()
-                .ok_or_else(|| Error::new("instant expected RFC3339 text"))?;
-            instant_json(parse_instant(text)?)
+            let text =
+                doc::as_str(&args[0]).ok_or_else(|| Error::new("instant expected RFC3339 text"))?;
+            instant_doc(parse_instant(&text)?)
         }
         "instant_text" => {
             expect_arity(name, args, 1)?;
-            json!(instant_text(expect_instant("instant_text", &args[0])?)?)
+            doc::string(instant_text(expect_instant("instant_text", &args[0])?)?)
         }
         "zone" => {
             expect_arity(name, args, 1)?;
-            let id = args[0]
-                .as_str()
-                .ok_or_else(|| Error::new("zone expected a zone id"))?;
-            zone_value(id)?
+            let id = doc::as_str(&args[0]).ok_or_else(|| Error::new("zone expected a zone id"))?;
+            zone_value(&id)?
         }
         "date_time" => {
             expect_arity(name, args, 2)?;
             let instant = expect_instant("date_time", &args[0])?;
             let zone = expect_zone("date_time", &args[1])?;
-            date_time_json(&date_time(instant, &zone)?)
+            date_time_doc(&date_time(instant, &zone)?)
         }
         "instant_at" => {
             expect_arity(name, args, 2)?;
             let date = expect_date_time(&args[0])?;
             let zone = expect_zone("instant_at", &args[1])?;
-            instant_json(instant_at(&date, &zone)?)
+            instant_doc(instant_at(&date, &zone)?)
         }
         "add_seconds" => {
             expect_arity(name, args, 2)?;
             let instant = expect_instant("add_seconds", &args[0])?;
-            let seconds = args[1]
-                .as_f64()
+            let seconds = doc::as_number(&args[1])
                 .filter(|number| number.is_finite())
                 .ok_or_else(|| Error::new("add_seconds expected a number"))?;
             let next = instant
                 .checked_add(seconds_to_millis(seconds)?)
                 .ok_or_else(|| Error::new("add_seconds overflow"))?;
-            instant_json(next)
+            instant_doc(next)
         }
         "diff_seconds" => {
             expect_arity(name, args, 2)?;
             let later = expect_instant("diff_seconds", &args[0])?;
             let earlier = expect_instant("diff_seconds", &args[1])?;
-            json!((later - earlier) as f64 / 1000.0)
+            doc::number((later - earlier) as f64 / 1000.0)
         }
         "offset_seconds" => {
             expect_arity(name, args, 2)?;
             let zone = expect_zone("offset_seconds", &args[0])?;
             let instant = expect_instant("offset_seconds", &args[1])?;
-            json!(offset_seconds(&zone, instant)? as f64)
+            doc::number(offset_seconds(&zone, instant)? as f64)
         }
         _ => return Ok(None),
     };
@@ -83,12 +78,18 @@ pub struct DateTime {
     pub millisecond: u32,
 }
 
-pub fn utc_zone() -> Json {
-    json!({ "kind": "utc" })
+pub fn utc_zone() -> Doc {
+    doc::object([("kind", doc::string("utc"))])
 }
 
-pub fn zone_value(id: &str) -> Result<Json, Error> {
-    Ok(zone_json(&parse_zone(id)?))
+pub fn zone_value(id: &str) -> Result<Doc, Error> {
+    Ok(zone_doc(&parse_zone(id)?))
+}
+
+pub fn instant_doc(millis: i64) -> Doc {
+    let date = OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    doc::date(date)
 }
 
 pub fn parse_zone(id: &str) -> Result<Zone, Error> {
@@ -104,18 +105,20 @@ pub fn parse_zone(id: &str) -> Result<Zone, Error> {
     Err(Error::new("invalid zone"))
 }
 
-pub fn zone_of(value: &Json) -> Option<Zone> {
-    let object = value.as_object()?;
-    match object.get("kind")?.as_str()? {
+pub fn zone_of(value: &Doc) -> Option<Zone> {
+    match doc::as_str(&doc::get(value, "kind")?)?.as_str() {
         "utc" => Some(Zone::Utc),
         "fixed" => {
-            let seconds = whole_number(object.get("seconds")?)?;
+            let seconds = doc::as_i64(&doc::get(value, "seconds")?)?;
             Some(Zone::Fixed { seconds })
         }
         "iana" => {
-            let id = object.get("id")?.as_str()?;
-            if matches!(id, "America/New_York" | "Europe/London" | "Asia/Tokyo") {
-                Some(Zone::Iana { id: id.to_string() })
+            let id = doc::as_str(&doc::get(value, "id")?)?;
+            if matches!(
+                id.as_str(),
+                "America/New_York" | "Europe/London" | "Asia/Tokyo"
+            ) {
+                Some(Zone::Iana { id })
             } else {
                 None
             }
@@ -124,15 +127,14 @@ pub fn zone_of(value: &Json) -> Option<Zone> {
     }
 }
 
-pub fn date_time_of(value: &Json) -> Option<DateTime> {
-    let object = value.as_object()?;
-    let year = i32::try_from(whole_number(object.get("year")?)?).ok()?;
-    let month = u32::try_from(whole_number(object.get("month")?)?).ok()?;
-    let day = u32::try_from(whole_number(object.get("day")?)?).ok()?;
-    let hour = u32::try_from(whole_number(object.get("hour")?)?).ok()?;
-    let minute = u32::try_from(whole_number(object.get("minute")?)?).ok()?;
-    let second = u32::try_from(whole_number(object.get("second")?)?).ok()?;
-    let millisecond = u32::try_from(whole_number(object.get("millisecond")?)?).ok()?;
+pub fn date_time_of(value: &Doc) -> Option<DateTime> {
+    let year = i32::try_from(doc::as_i64(&doc::get(value, "year")?)?).ok()?;
+    let month = u32::try_from(doc::as_i64(&doc::get(value, "month")?)?).ok()?;
+    let day = u32::try_from(doc::as_i64(&doc::get(value, "day")?)?).ok()?;
+    let hour = u32::try_from(doc::as_i64(&doc::get(value, "hour")?)?).ok()?;
+    let minute = u32::try_from(doc::as_i64(&doc::get(value, "minute")?)?).ok()?;
+    let second = u32::try_from(doc::as_i64(&doc::get(value, "second")?)?).ok()?;
+    let millisecond = u32::try_from(doc::as_i64(&doc::get(value, "millisecond")?)?).ok()?;
     let date = DateTime {
         year,
         month,
@@ -145,7 +147,7 @@ pub fn date_time_of(value: &Json) -> Option<DateTime> {
     valid_date(&date).then_some(date)
 }
 
-pub fn process_zone() -> Json {
+pub fn process_zone() -> Doc {
     match std::env::var("TZ") {
         Ok(value) => zone_value(&value).unwrap_or_else(|_| utc_zone()),
         Err(_) => utc_zone(),
@@ -362,24 +364,27 @@ fn fixed_offset(text: &str) -> Option<i64> {
     Some(if bytes[0] == b'-' { -seconds } else { seconds })
 }
 
-fn zone_json(zone: &Zone) -> Json {
+fn zone_doc(zone: &Zone) -> Doc {
     match zone {
         Zone::Utc => utc_zone(),
-        Zone::Fixed { seconds } => json!({ "kind": "fixed", "seconds": *seconds }),
-        Zone::Iana { id } => json!({ "kind": "iana", "id": id }),
+        Zone::Fixed { seconds } => doc::object([
+            ("kind", doc::string("fixed")),
+            ("seconds", doc::number(*seconds as f64)),
+        ]),
+        Zone::Iana { id } => doc::object([("kind", doc::string("iana")), ("id", doc::string(id))]),
     }
 }
 
-fn date_time_json(date: &DateTime) -> Json {
-    json!({
-        "year": date.year,
-        "month": date.month,
-        "day": date.day,
-        "hour": date.hour,
-        "minute": date.minute,
-        "second": date.second,
-        "millisecond": date.millisecond,
-    })
+fn date_time_doc(date: &DateTime) -> Doc {
+    doc::object([
+        ("year", doc::number(f64::from(date.year))),
+        ("month", doc::number(f64::from(date.month))),
+        ("day", doc::number(f64::from(date.day))),
+        ("hour", doc::number(f64::from(date.hour))),
+        ("minute", doc::number(f64::from(date.minute))),
+        ("second", doc::number(f64::from(date.second))),
+        ("millisecond", doc::number(f64::from(date.millisecond))),
+    ])
 }
 
 fn valid_date(date: &DateTime) -> bool {
@@ -475,7 +480,7 @@ fn last_sunday(year: i32, month: u32) -> u32 {
     last - weekday_sunday0(year, month, last)
 }
 
-fn expect_arity(name: &str, args: &[Json], arity: usize) -> Result<(), Error> {
+fn expect_arity(name: &str, args: &[Doc], arity: usize) -> Result<(), Error> {
     if args.len() == arity {
         Ok(())
     } else {
@@ -483,15 +488,21 @@ fn expect_arity(name: &str, args: &[Json], arity: usize) -> Result<(), Error> {
     }
 }
 
-fn expect_instant(name: &str, value: &Json) -> Result<i64, Error> {
-    instant_millis(value).ok_or_else(|| Error::new(format!("{name} expected an instant")))
+fn expect_instant(name: &str, value: &Doc) -> Result<i64, Error> {
+    let date =
+        doc::as_date(value).ok_or_else(|| Error::new(format!("{name} expected an instant")))?;
+    let nanos = date.unix_timestamp_nanos();
+    if nanos % 1_000_000 != 0 {
+        return Err(Error::new(format!("{name} expected an instant")));
+    }
+    i64::try_from(nanos / 1_000_000).map_err(|_| Error::new(format!("{name} expected an instant")))
 }
 
-fn expect_zone(name: &str, value: &Json) -> Result<Zone, Error> {
+fn expect_zone(name: &str, value: &Doc) -> Result<Zone, Error> {
     zone_of(value).ok_or_else(|| Error::new(format!("{name} expected a zone")))
 }
 
-fn expect_date_time(value: &Json) -> Result<DateTime, Error> {
+fn expect_date_time(value: &Doc) -> Result<DateTime, Error> {
     date_time_of(value).ok_or_else(|| Error::new("instant_at expected a date"))
 }
 
@@ -553,15 +564,25 @@ mod tests {
         assert_eq!(seconds_to_millis(1.5).unwrap(), 1500);
         assert_eq!(seconds_to_millis(1.0005).unwrap(), 1001);
         assert_eq!(seconds_to_millis(-1.0005).unwrap(), -1001);
-        assert!(date_time_of(&json!({
-            "year": 2023, "month": 2, "day": 29,
-            "hour": 0, "minute": 0, "second": 0, "millisecond": 0
-        }))
+        assert!(date_time_of(&doc::object([
+            ("year", doc::number(2023.0)),
+            ("month", doc::number(2.0)),
+            ("day", doc::number(29.0)),
+            ("hour", doc::number(0.0)),
+            ("minute", doc::number(0.0)),
+            ("second", doc::number(0.0)),
+            ("millisecond", doc::number(0.0)),
+        ]))
         .is_none());
-        assert!(date_time_of(&json!({
-            "year": 2024, "month": 2, "day": 29,
-            "hour": 0, "minute": 0, "second": 0, "millisecond": 0
-        }))
+        assert!(date_time_of(&doc::object([
+            ("year", doc::number(2024.0)),
+            ("month", doc::number(2.0)),
+            ("day", doc::number(29.0)),
+            ("hour", doc::number(0.0)),
+            ("minute", doc::number(0.0)),
+            ("second", doc::number(0.0)),
+            ("millisecond", doc::number(0.0)),
+        ]))
         .is_some());
     }
 }

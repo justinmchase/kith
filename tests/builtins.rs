@@ -1,5 +1,5 @@
-use kith::builtin::bytes_json;
 use kith::codec::decode;
+use kith::doc;
 use kith::parse::resolve_program;
 use kith::World;
 use serde_json::{json, Value as Json};
@@ -291,7 +291,9 @@ fn data_functions_build_bytes_blobs_and_buffers() {
     assert_eq!(field(&world, "n"), &json!(1.0));
     send(&mut world, "Buf");
     assert_eq!(field(&world, "got"), &json!(8.0));
-    world.send(root(&world), bytes_json(&[4, 5])).unwrap();
+    world
+        .send_document(root(&world), doc::bytes(vec![4, 5]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(field(&world, "n"), &json!(7.0));
 
@@ -433,13 +435,13 @@ fn time_values_stay_pure_and_clock_is_the_wall_read() {
     send(&mut world, "Diff");
     assert_eq!(field(&world, "n"), &json!(1.5));
     send(&mut world, "Line");
-    assert_eq!(field(&world, "got")["year"].as_i64(), Some(2023));
-    assert_eq!(field(&world, "got")["month"].as_i64(), Some(12));
-    assert_eq!(field(&world, "got")["day"].as_i64(), Some(31));
-    assert_eq!(field(&world, "got")["hour"].as_i64(), Some(19));
+    assert_eq!(field(&world, "got")["year"].as_f64(), Some(2023.0));
+    assert_eq!(field(&world, "got")["month"].as_f64(), Some(12.0));
+    assert_eq!(field(&world, "got")["day"].as_f64(), Some(31.0));
+    assert_eq!(field(&world, "got")["hour"].as_f64(), Some(19.0));
     send(&mut world, "Tokyo");
-    assert_eq!(field(&world, "got")["hour"].as_i64(), Some(9));
-    assert_eq!(field(&world, "got")["day"].as_i64(), Some(1));
+    assert_eq!(field(&world, "got")["hour"].as_f64(), Some(9.0));
+    assert_eq!(field(&world, "got")["day"].as_f64(), Some(1.0));
     send(&mut world, "Back");
     assert_eq!(field(&world, "got"), &json!("2024-01-02T00:00:00Z"));
     send(&mut world, "Off");
@@ -447,9 +449,9 @@ fn time_values_stay_pure_and_clock_is_the_wall_read() {
     send(&mut world, "Winter");
     assert_eq!(field(&world, "n"), &json!(-18000.0));
     send(&mut world, "Fixed");
-    assert_eq!(field(&world, "saw")["seconds"].as_i64(), Some(19800));
+    assert_eq!(field(&world, "saw")["seconds"].as_f64(), Some(19800.0));
     assert_eq!(field(&world, "got")["kind"], json!("fixed"));
-    assert_eq!(field(&world, "got")["seconds"].as_i64(), Some(0));
+    assert_eq!(field(&world, "got")["seconds"].as_f64(), Some(0.0));
     send(&mut world, "Utc");
     assert_eq!(field(&world, "saw"), &json!({"kind": "utc"}));
 

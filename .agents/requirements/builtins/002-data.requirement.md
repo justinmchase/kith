@@ -1,6 +1,6 @@
 ---
 id: builtins-002
-title: kith:data bytes, blobs, and buffers are pure values
+title: "kith:data bytes, blobs, and buffers are pure values"
 spec_ref: .agents/specifications/builtins.spec.md#data
 ---
 
