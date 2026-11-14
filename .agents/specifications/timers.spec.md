@@ -3,8 +3,9 @@
 This chapter defines delayed sends: a message scheduled for later without
 blocking a turn. Dispatch of those messages is defined in
 [dispatch](./dispatch.spec.md). Sending is defined in
-[components](./components.spec.md#sending). Terms are defined in the
-[glossary](./glossary.spec.md).
+[components](./components.spec.md#sending). Host evaluation of `rand` is
+defined in [runtime](./runtime.spec.md#host-callables). Terms are defined in
+the [glossary](./glossary.spec.md).
 
 ## Conventions
 
@@ -14,11 +15,11 @@ capitals.
 
 ## Definitions
 
-- **Clock**: the dispatcher's current time. It is virtual. A checker MAY
-  replace it.
+- **Clock**: the dispatcher's current time, in seconds. It is virtual. A
+  checker MAY replace it.
 - **Timer**: a send that is due at a clock time and has not yet been delivered.
-- **After**: a delay on a send (`send after`). The delay is milliseconds on
-  the clock, or `random` for a host-chosen delay in that unit.
+- **After**: a delay on a send (`send after Expression`). Expression evaluates
+  to seconds.
 
 ## Axioms
 
@@ -31,10 +32,13 @@ capitals.
 
 ## Constraints
 
-- `send after Delay Route V` MUST evaluate `V` on the sending turn and MUST
-  NOT deliver it until the clock reaches the due time.
-- `Delay` is a millisecond expression, or the keyword `random`. `random` MUST
-  pick a positive duration from the host RNG. It is not a Uffda expression.
+- `send after Delay Route V` MUST evaluate `V` and `Delay` on the sending
+  turn and MUST NOT deliver `V` until the clock reaches the due time.
+- `Delay` is a Uffda expression that produces a number of **seconds**.
+  `(rand Lo Hi)` is a Kith host callable: inclusive if both bounds are
+  integers, otherwise a number in `[Lo, Hi]`. It is not a Uffda global.
+  A checker MAY replace the RNG.
+- A negative delay MUST fail that send.
 - `World::run_until_idle` MUST drain mailboxes only. Pending timers MUST stay
   pending so a test can observe a wait.
 - `World::run` (and `kith run`) MUST advance the clock to the next due timer
@@ -46,9 +50,18 @@ capitals.
 ## Mechanism
 
 ```kith
-send after random up { kind: "Delivered" };
-send after 25 up { kind: "Delivered" };
+send after (rand 1 3) up { kind: "Delivered" };
+send after 2 up { kind: "Delivered" };
+send after 5 self "Tick";
 ```
+
+A `send after Delay self V` is how a component runs later without a child
+timer. It MUST evaluate `Delay` and `V` on this turn and MUST NOT block.
+The send is delivered when the clock reaches the due time. Recurrence is
+rescheduling from the handler, not a `every` keyword. HealthCheck arms
+the next Tick from Validating after Check, not from the Tick handler, so
+Tick is not taken in Waiting. The later self-send matches a handler whose
+route list includes `self`, not `on down` alone.
 
 The first slice uses a virtual clock starting at 0. Advancing to a timer does
 not wait on real time.
@@ -57,6 +70,8 @@ not wait on real time.
 
 - **Delay is a send, not a sleep.** Sleeping on a turn would stall every other
   actor on that dispatcher. A timer is just mail with a due time.
+- **The delay is an expression.** Bounds belong in source (`(rand 1 3)`), not
+  a keyword. Uffda stays pure; Kith evaluates `rand` against World RNG.
 - **Idle vs run.** Tests need to see Carrier in `Shipping` with delivery still
   in flight. Operators need `kith run` to finish. Those are two drains of the
   same clock.
@@ -65,5 +80,5 @@ not wait on real time.
 
 - Deadlines that fail a wait if a message does not arrive (`Wait` with a
   timeout).
-- Recurring timers and cancellation when an instance is destroyed.
-- Whether `random` should take an explicit range in source.
+- Cancellation of a pending self-send when an instance is destroyed.
+- Whether source should name the unit (`2s`) instead of bare seconds.

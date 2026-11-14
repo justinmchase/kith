@@ -57,7 +57,7 @@ fn parse_check_compile_and_run_ping() {
     let no_scene = dir.join("noscene.kith");
     std::fs::write(
         &no_scene,
-        "export Broken;\ncomponent Broken {\n  start Idle {}\n}\n",
+        "export Broken;\ncomponent Broken {\n  start {}\n}\n",
     )
     .unwrap();
     let rejected_scene = run(&["check", no_scene.to_str().unwrap()]);
@@ -80,7 +80,7 @@ fn parse_check_compile_and_run_ping() {
         "compile artifact must be a data codec record, not JSON"
     );
 
-    let ran = run(&["run", ping, "--message", r#"{"kind":"Ping","n":7}"#]);
+    let ran = run(&["run", ping, "--message", r#"["Ping",7]"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let stdout = String::from_utf8_lossy(&ran.stdout);
     assert!(
@@ -109,7 +109,7 @@ fn parse_does_not_resolve_imports_but_check_does() {
     let checked = run(&["check", uses]);
     assert!(checked.status.success(), "{}", stderr(&checked));
 
-    let ran = run(&["run", uses, "--message", r#"{"kind":"Ping","n":7}"#]);
+    let ran = run(&["run", uses, "--message", r#"["Ping",7]"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
     assert_eq!(fields["heard"], json!(7.0));
@@ -120,6 +120,14 @@ fn parse_does_not_resolve_imports_but_check_does() {
 fn check_order_workflow() {
     let order = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/order.kith");
     let checked = run(&["check", order.to_str().unwrap()]);
+    assert!(checked.status.success(), "{}", stderr(&checked));
+}
+
+#[test]
+// req:runtime-002 req:runtime-003
+fn check_http_health() {
+    let http = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/http.kith");
+    let checked = run(&["check", http.to_str().unwrap()]);
     assert!(checked.status.success(), "{}", stderr(&checked));
 }
 

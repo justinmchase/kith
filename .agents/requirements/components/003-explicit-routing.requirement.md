@@ -1,6 +1,6 @@
 ---
 id: components-003
-title: Sends are explicit send to, send down Kind, or send up; unhandled messages do not capture
+title: Sends are explicit send to, send down Kind, send up, or send self; unhandled messages do not capture
 spec_ref: .agents/specifications/components.spec.md#routing; .agents/specifications/components.spec.md#sending
 ---
 

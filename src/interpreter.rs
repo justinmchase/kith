@@ -1,8 +1,8 @@
-use crate::ast::{FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
+use crate::ast::{Field, FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
 use crate::codec::{decode, encode, json_u64};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::error::Error;
-use crate::host::{evaluate, match_message};
+use crate::host::{evaluate, match_field, match_message};
 use serde_json::{json, Value as Json};
 use std::collections::{HashMap, HashSet};
 
@@ -12,6 +12,8 @@ enum Route {
     Down,
     Up,
     Join,
+    Init,
+    SelfSend,
 }
 
 struct ChildRef {
@@ -94,6 +96,8 @@ impl World {
             }
             check_ports(program, &component.ports)?;
             check_gotos(component)?;
+            check_terminals(component)?;
+            check_routes(component)?;
         }
         for workflow in &program.workflows {
             check_workflow(program, workflow)?;
@@ -118,6 +122,7 @@ impl World {
             timers: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
+        world.enqueue_inits()?;
         Ok(world)
     }
 
@@ -243,24 +248,32 @@ impl World {
 
     pub fn run(&mut self) -> Result<(), Error> {
         loop {
-            self.run_until_idle()?;
-            let Some(due) = self.timers.iter().map(|timer| timer.due).min() else {
+            if !self.fire_next_timer()? {
                 return Ok(());
-            };
-            self.now = due;
-            let mut due_now = Vec::new();
-            self.timers.retain(|timer| {
-                if timer.due <= self.now {
-                    due_now.push(timer.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            for timer in due_now {
-                self.deliver(timer.to, timer.message, timer.route)?;
             }
         }
+    }
+
+    /// Drain mail, then deliver the next due timer. Returns false if none.
+    pub fn fire_next_timer(&mut self) -> Result<bool, Error> {
+        self.run_until_idle()?;
+        let Some(due) = self.timers.iter().map(|timer| timer.due).min() else {
+            return Ok(false);
+        };
+        self.now = due;
+        let mut due_now = Vec::new();
+        self.timers.retain(|timer| {
+            if timer.due <= self.now {
+                due_now.push(timer.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for timer in due_now {
+            self.deliver(timer.to, timer.message, timer.route)?;
+        }
+        Ok(true)
     }
 
     pub fn snapshot(&self) -> Result<String, Error> {
@@ -313,12 +326,7 @@ impl World {
                 json!({
                     "id": id,
                     "seq": seq,
-                    "route": match route {
-                        Route::Inject => "inject",
-                        Route::Down => "down",
-                        Route::Up => "up",
-                        Route::Join => "join",
-                    }
+                    "route": snapshot_route(*route)
                 })
             })
             .collect();
@@ -335,12 +343,7 @@ impl World {
                 "due": timer.due,
                 "to": timer.to.0,
                 "message": timer.message,
-                "route": match timer.route {
-                    Route::Inject => "inject",
-                    Route::Down => "down",
-                    Route::Up => "up",
-                    Route::Join => "join",
-                }
+                "route": snapshot_route(timer.route)
             })).collect::<Vec<_>>(),
         })
     }
@@ -383,12 +386,7 @@ impl World {
                         .ok_or_else(|| Error::new("route missing id"))?,
                 );
                 let seq = entry.get("seq").and_then(json_u64).unwrap_or(0);
-                let route = match entry.get("route").and_then(Json::as_str) {
-                    Some("down") => Route::Down,
-                    Some("up") => Route::Up,
-                    Some("join") => Route::Join,
-                    _ => Route::Inject,
-                };
+                let route = restore_route(entry.get("route").and_then(Json::as_str));
                 routes.insert((id, seq), route);
             }
         }
@@ -448,6 +446,20 @@ impl World {
         Ok(id)
     }
 
+    fn enqueue_inits(&mut self) -> Result<(), Error> {
+        let mut ids: Vec<_> = self
+            .instances
+            .iter()
+            .filter(|(_, instance)| instance.run.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_by_key(|id| id.0);
+        for id in ids {
+            self.deliver(id, Json::Null, Route::Init)?;
+        }
+        Ok(())
+    }
+
     fn spawn_kind(&mut self, kind: &str, parent: Option<ActorId>) -> Result<ActorId, Error> {
         if let Some(workflow) = self.program.workflow(kind).cloned() {
             return self.spawn_workflow(workflow, parent);
@@ -468,10 +480,11 @@ impl World {
         let mut fields = HashMap::new();
         for field in &component.fields {
             let value = if let Some(init) = &field.init {
-                evaluate(init, &HashMap::new())?
+                self.eval(init, &HashMap::new())?
             } else {
                 Json::Null
             };
+            self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
         self.instances.insert(
@@ -582,11 +595,11 @@ impl World {
         match &step.body {
             StepBody::Succeed {} => self.succeed(id, working),
             StepBody::Fail { error } => {
-                let value = evaluate(error, &bindings)?;
+                let value = self.eval(error, &bindings)?;
                 self.fail(id, value)
             }
             StepBody::Pass { value } => {
-                let output = evaluate(value, &bindings)?;
+                let output = self.eval(value, &bindings)?;
                 self.advance(id, output, step.next.as_ref())
             }
             StepBody::Choice { clauses } => {
@@ -649,10 +662,10 @@ impl World {
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
         let reducer = self.spawn_work(id, reduce)?;
         if let Some(init) = init {
-            let value = evaluate(init, bindings)?;
+            let value = self.eval(init, bindings)?;
             self.apply_fields(reducer, value)?;
         }
-        let items = evaluate(items_expr, bindings)?;
+        let items = self.eval(items_expr, bindings)?;
         let items = items
             .as_array()
             .ok_or_else(|| Error::new("fanout expects a list"))?
@@ -731,20 +744,55 @@ impl World {
         Ok(child)
     }
 
+    fn match_declared_field(
+        &self,
+        fields: &[Field],
+        name: &str,
+        value: &Json,
+    ) -> Result<(), Error> {
+        let field = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| Error::new(format!("unknown field {name}")))?;
+        let Some(pattern) = &field.pattern else {
+            return Ok(());
+        };
+        if match_field(pattern, value)? {
+            Ok(())
+        } else {
+            Err(Error::new(format!("field {name} did not match")))
+        }
+    }
+
+    fn write_field(&mut self, id: ActorId, name: &str, value: Json) -> Result<(), Error> {
+        let kind = self.instances[&id].kind.clone();
+        let fields = self
+            .program
+            .component(&kind)
+            .ok_or_else(|| Error::new("unknown kind"))?
+            .fields
+            .clone();
+        self.match_declared_field(&fields, name, &value)?;
+        self.instances
+            .get_mut(&id)
+            .expect("actor")
+            .fields
+            .insert(name.to_string(), value);
+        Ok(())
+    }
+
     fn apply_fields(&mut self, id: ActorId, value: Json) -> Result<(), Error> {
         let kind = self.instances[&id].kind.clone();
         let Json::Object(map) = value else {
-            return Err(Error::new(format!("into {kind} expected an object of fields")));
+            return Err(Error::new(format!(
+                "into {kind} expected an object of fields"
+            )));
         };
         for (name, field_value) in map {
             if !self.instances[&id].fields.contains_key(&name) {
                 return Err(Error::new(format!("unknown field {name} on {kind}")));
             }
-            self.instances
-                .get_mut(&id)
-                .expect("actor")
-                .fields
-                .insert(name, field_value);
+            self.write_field(id, &name, field_value)?;
         }
         Ok(())
     }
@@ -805,7 +853,7 @@ impl World {
         match next {
             None | Some(Next::Succeed {}) => self.succeed(id, output),
             Some(Next::Fail { error }) => {
-                let value = evaluate(error, &bindings_from(&output))?;
+                let value = self.eval(error, &bindings_from(&output))?;
                 self.fail(id, value)
             }
             Some(Next::Goto { step }) => self.goto_named(id, step),
@@ -866,11 +914,12 @@ impl World {
                     self.advance(id, message.clone(), next.as_ref())
                 }
                 Route::Inject => self.start_run(id, message.clone()),
-                Route::Up => Ok(vec![]),
+                Route::Up | Route::Init => Ok(vec![]),
                 Route::Down => Err(Error::new("workflow does not take down messages")),
+                Route::SelfSend => Err(Error::new("workflow does not take self messages")),
             };
         }
-        let (kind_name, state_name, fields) = {
+        let (kind_name, state_name, fields, completed, parent) = {
             let instance = self
                 .instances
                 .get(&id)
@@ -879,8 +928,13 @@ impl World {
                 instance.kind.clone(),
                 instance.state.clone(),
                 instance.fields.clone(),
+                instance.completed,
+                instance.parent,
             )
         };
+        if completed {
+            return unmatched(route, &kind_name, parent, message);
+        }
         let component = self
             .program
             .component(&kind_name)
@@ -905,6 +959,9 @@ impl World {
             return self.run_statements(id, &handler.body, &bindings);
         }
         for handler in &state.handlers {
+            if !route_matches(&handler.route, route) {
+                continue;
+            }
             if let Some(mut bindings) = match_handler(handler, message)? {
                 for (name, value) in &fields {
                     bindings.entry(name.clone()).or_insert(value.clone());
@@ -926,13 +983,9 @@ impl World {
         for statement in statements {
             match statement {
                 Statement::Assign { field, expression } => {
-                    let value = evaluate(expression, &bindings)?;
-                    bindings.insert(field.clone(), value.clone());
-                    self.instances
-                        .get_mut(&id)
-                        .expect("actor")
-                        .fields
-                        .insert(field.clone(), value);
+                    let value = self.eval(expression, &bindings)?;
+                    self.write_field(id, field, value.clone())?;
+                    bindings.insert(field.clone(), value);
                 }
                 Statement::SendUp { message, after } => {
                     let parent = self.instances[&id]
@@ -986,8 +1039,18 @@ impl World {
                         )?;
                     }
                 }
+                Statement::Send { message, after } => {
+                    self.enqueue_send(
+                        id,
+                        message,
+                        after.as_ref(),
+                        Route::SelfSend,
+                        &bindings,
+                        &mut sends,
+                    )?;
+                }
                 Statement::Print { expression } => {
-                    let value = evaluate(expression, &bindings)?;
+                    let value = self.eval(expression, &bindings)?;
                     eprint!("{}", encode(&value)?);
                     self.prints.push(value);
                 }
@@ -997,21 +1060,23 @@ impl World {
                         component
                             .states
                             .iter()
-                            .any(|declared| declared.name == *state)
+                            .any(|declared| declared.named && declared.name == *state)
                     });
                     if !known {
                         return Err(Error::new(format!("unknown state {state}")));
                     }
                     self.instances.get_mut(&id).expect("actor").state = state.clone();
+                    break;
                 }
                 Statement::Complete { message } => {
-                    let value = evaluate(message, &bindings)?;
+                    let value = self.eval(message, &bindings)?;
                     {
                         let instance = self.instances.get_mut(&id).expect("actor");
                         instance.completed = true;
                         instance.completion = Some(value.clone());
                     }
                     sends.extend(self.finish_to_parent(id, value)?);
+                    break;
                 }
             }
         }
@@ -1100,7 +1165,7 @@ impl World {
         bindings: &HashMap<String, Json>,
         sends: &mut Vec<(ActorId, Json, Route)>,
     ) -> Result<(), Error> {
-        let value = evaluate(message, bindings)?;
+        let value = self.eval(message, bindings)?;
         if let Some(after) = after {
             let delay = self.delay_ms(after, bindings)?;
             self.timers.push(Timer {
@@ -1115,24 +1180,55 @@ impl World {
         Ok(())
     }
 
-    fn delay_ms(
-        &mut self,
-        after: &Json,
-        bindings: &HashMap<String, Json>,
-    ) -> Result<u64, Error> {
-        if after.get("kind").and_then(Json::as_str) == Some("random") {
-            return Ok(self.random_delay());
+    fn eval(&mut self, expression: &Json, bindings: &HashMap<String, Json>) -> Result<Json, Error> {
+        if expression.get("kind").and_then(Json::as_str) == Some("sequence") {
+            let items = expression
+                .get("items")
+                .and_then(Json::as_array)
+                .ok_or_else(|| Error::new("sequence items"))?;
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                values.push(self.eval(item, bindings)?);
+            }
+            return Ok(Json::Array(values));
         }
-        let value = evaluate(after, bindings)?;
-        value
-            .as_f64()
-            .map(|ms| ms.max(0.0) as u64)
-            .ok_or_else(|| Error::new("send after expected a number of milliseconds"))
+        if let Some((lo, hi)) = rand_args(expression) {
+            let lo = self.eval(lo, bindings)?;
+            let hi = self.eval(hi, bindings)?;
+            return self.rand_between(&lo, &hi);
+        }
+        evaluate(expression, bindings)
     }
 
-    fn random_delay(&mut self) -> u64 {
+    fn rand_between(&mut self, lo: &Json, hi: &Json) -> Result<Json, Error> {
+        let lo = lo
+            .as_f64()
+            .ok_or_else(|| Error::new("rand expected numbers"))?;
+        let hi = hi
+            .as_f64()
+            .ok_or_else(|| Error::new("rand expected numbers"))?;
+        if lo > hi {
+            return Err(Error::new("rand low bound is greater than high bound"));
+        }
         self.rng = self.rng.wrapping_mul(1664525).wrapping_add(1013904223);
-        10 + (self.rng % 31)
+        if lo.fract() == 0.0 && hi.fract() == 0.0 {
+            let width = (hi as i64 - lo as i64 + 1) as u64;
+            let pick = lo as i64 + (self.rng % width) as i64;
+            return Ok(json!(pick as f64));
+        }
+        let t = (self.rng as f64) / (u64::MAX as f64);
+        Ok(json!(lo + (hi - lo) * t))
+    }
+
+    fn delay_ms(&mut self, after: &Json, bindings: &HashMap<String, Json>) -> Result<u64, Error> {
+        let value = self.eval(after, bindings)?;
+        let seconds = value
+            .as_f64()
+            .ok_or_else(|| Error::new("send after expected seconds"))?;
+        if seconds < 0.0 {
+            return Err(Error::new("send after delay must not be negative"));
+        }
+        Ok((seconds * 1000.0) as u64)
     }
 
     fn deliver(&mut self, to: ActorId, value: Json, route: Route) -> Result<(), Error> {
@@ -1154,6 +1250,41 @@ impl World {
         } else {
             Route::Inject
         }
+    }
+}
+
+fn route_matches(expected: &[String], route: Route) -> bool {
+    if expected.is_empty() {
+        return route != Route::Init;
+    }
+    expected.iter().any(|name| route_matches_one(name, route))
+}
+
+fn route_matches_one(name: &str, route: Route) -> bool {
+    match name {
+        "init" => route == Route::Init,
+        "self" => route == Route::SelfSend,
+        "up" => route == Route::Up,
+        "down" => matches!(route, Route::Down | Route::Inject),
+        _ => false,
+    }
+}
+
+fn rand_args(expression: &Json) -> Option<(&Json, &Json)> {
+    if expression.get("kind").and_then(Json::as_str) != Some("invocation") {
+        return None;
+    }
+    let name = expression
+        .get("expression")
+        .and_then(|value| value.get("name"))
+        .and_then(Json::as_str)?;
+    if name != "rand" {
+        return None;
+    }
+    let args = expression.get("args").and_then(Json::as_array)?;
+    match args.as_slice() {
+        [lo, hi] => Some((lo, hi)),
+        _ => None,
     }
 }
 
@@ -1228,6 +1359,8 @@ fn unmatched(
         Route::Down => Err(Error::new(format!("unmatched down to {kind}"))),
         Route::Inject => Err(Error::new("unmatched injected message")),
         Route::Join => Err(Error::new(format!("no join handler on {kind}"))),
+        Route::Init => Ok(vec![]),
+        Route::SelfSend => Err(Error::new(format!("unmatched self on {kind}"))),
     }
 }
 
@@ -1235,6 +1368,7 @@ fn check_gotos(component: &crate::ast::Component) -> Result<(), Error> {
     let names: HashSet<_> = component
         .states
         .iter()
+        .filter(|state| state.named)
         .map(|state| state.name.as_str())
         .collect();
     for state in &component.states {
@@ -1247,6 +1381,61 @@ fn check_gotos(component: &crate::ast::Component) -> Result<(), Error> {
                             component.name
                         )));
                     }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_terminals(component: &crate::ast::Component) -> Result<(), Error> {
+    for state in &component.states {
+        for handler in &state.handlers {
+            let last = handler.body.len().saturating_sub(1);
+            for (index, statement) in handler.body.iter().enumerate() {
+                let terminal = matches!(
+                    statement,
+                    Statement::Goto { .. } | Statement::Complete { .. }
+                );
+                if terminal && index != last {
+                    return Err(Error::new(format!(
+                        "goto and complete must be last in {}",
+                        component.name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_routes(component: &crate::ast::Component) -> Result<(), Error> {
+    for state in &component.states {
+        for handler in &state.handlers {
+            let mut seen = HashSet::new();
+            for name in &handler.route {
+                match name.as_str() {
+                    "init" => {
+                        if handler.route.len() != 1 {
+                            return Err(Error::new(format!(
+                                "init cannot be combined with other routes in {}",
+                                component.name
+                            )));
+                        }
+                    }
+                    "up" | "down" | "self" => {}
+                    other => {
+                        return Err(Error::new(format!(
+                            "unknown route {other} in {}",
+                            component.name
+                        )));
+                    }
+                }
+                if !seen.insert(name.as_str()) {
+                    return Err(Error::new(format!(
+                        "duplicate route {name} in {}",
+                        component.name
+                    )));
                 }
             }
         }
@@ -1388,11 +1577,24 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
     Ok(())
 }
 
+fn snapshot_route(route: Route) -> &'static str {
+    match route {
+        Route::Inject => "inject",
+        Route::Down => "down",
+        Route::Up => "up",
+        Route::Join => "join",
+        Route::Init => "init",
+        Route::SelfSend => "self",
+    }
+}
+
 fn restore_route(value: Option<&str>) -> Route {
     match value {
         Some("down") => Route::Down,
         Some("up") => Route::Up,
         Some("join") => Route::Join,
+        Some("init") => Route::Init,
+        Some("self") => Route::SelfSend,
         _ => Route::Inject,
     }
 }

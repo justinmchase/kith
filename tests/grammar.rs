@@ -6,7 +6,7 @@ use std::path::PathBuf;
 const PING: &str = include_str!("../examples/ping.kith");
 
 #[test]
-// req:grammar-001
+// req:grammar-001 req:components-012 req:components-017
 fn ping_source_parses_to_the_component_tree() {
     let program = parse_source(PING).expect("parse ping.kith");
     assert_eq!(program.kind, "program");
@@ -21,7 +21,19 @@ fn ping_source_parses_to_the_component_tree() {
         .collect();
     assert!(component_names.contains(&"Child"));
     assert!(component_names.contains(&"Ping"));
+    let child = program.component("Child").expect("Child");
+    assert_eq!(child.states[0].handlers[0].route, ["down"]);
+    assert_eq!(child.states[0].handlers[0].pattern["kind"], "then");
+    assert_eq!(
+        child.states[0].handlers[0].pattern["patterns"]
+            .as_array()
+            .expect("then")
+            .len(),
+        2
+    );
     let ping = program.component("Ping").expect("Ping");
+    assert_eq!(ping.states[0].handlers[0].route, ["down"]);
+    assert_eq!(ping.states[0].handlers[1].route, ["up"]);
     assert!(ping.fields.iter().any(|field| field.name == "heard"));
     assert!(ping
         .ports
@@ -37,7 +49,7 @@ fn ping_source_parses_to_the_component_tree() {
         .any(|child| child.key.as_deref() == Some("child") && child.component == "Child"));
 
     let mut world = World::start(program).expect("interpreter accepts parsed tree");
-    world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
+    world.inject(json!(["Ping", 7])).unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
@@ -52,7 +64,7 @@ export Parent;
 export Main;
 
 component Child {
-  start Idle {
+  start {
     on any {
       complete { kind: "X" };
     }
@@ -60,7 +72,7 @@ component Child {
 }
 
 component Other {
-  start Idle {
+  start {
     on (any) {
       complete { kind: "X" };
     }
@@ -70,7 +82,7 @@ component Other {
 component Parent {
   Child child;
 
-  start Idle {
+  start {
     on { kind: "To" } {
       send to child { kind: "X" };
     }
@@ -121,7 +133,7 @@ fn import_list_parses_and_relative_files_resolve() {
     let program = resolve_program(&path).expect("resolve import");
     assert!(program.component("Child").is_some());
     let mut world = World::start(program).expect("start imported child");
-    world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
+    world.inject(json!(["Ping", 7])).unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 
@@ -129,7 +141,7 @@ fn import_list_parses_and_relative_files_resolve() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("child.kith"),
-        "export Other;\ncomponent Other {\n  start Idle {}\n}\n",
+        "export Other;\ncomponent Other {\n  start {}\n}\n",
     )
     .unwrap();
     std::fs::write(
@@ -167,7 +179,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003
+// req:grammar-001 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -200,12 +212,15 @@ fn order_source_parses_tasks_picks_and_map() {
     assert!(summarize.fields.iter().any(|field| field.name == "total"));
     assert!(summarize.fields.iter().any(|field| field.name == "orderId"));
     assert_eq!(summarize.states[0].name, "Start");
+    assert!(!summarize.states[0].named);
     let fold = &summarize.states[0].handlers[0];
     assert_eq!(fold.pattern["kind"], "variable");
     assert_eq!(fold.pattern["name"], "item");
+    assert_eq!(fold.route, ["up", "down", "self"]);
     assert!(fold.item.is_none());
     let done = summarize.states[0].handlers.last().expect("else");
     assert_eq!(done.pattern["kind"], "any");
+    assert_eq!(done.route, ["up", "down", "self"]);
     assert!(matches!(
         done.body.last(),
         Some(kith::ast::Statement::Complete { .. })
@@ -224,18 +239,187 @@ fn order_source_parses_tasks_picks_and_map() {
         Some(kith::ast::Statement::Goto { state }) if state == "Shipping"
     ));
     let mock = program.component("MockShip").expect("MockShip");
+    assert_eq!(mock.states[0].handlers[0].route, ["down"]);
     assert!(matches!(
         &mock.states[0].handlers[0].body.last(),
         Some(kith::ast::Statement::SendUp { after: Some(delay), .. })
-            if delay["kind"] == "random"
+            if delay["kind"] == "invocation"
+                && delay["expression"]["name"] == "rand"
     ));
+    assert_eq!(carrier.states[0].handlers[0].route, ["down"]);
+    let shipping = carrier
+        .states
+        .iter()
+        .find(|state| state.name == "Shipping")
+        .expect("Shipping");
+    assert_eq!(shipping.handlers[0].route, ["up"]);
     let scene = &program.scene("Main").expect("Main").root;
     assert!(scene.children.iter().any(|child| {
         child.component == "Carrier"
-            && child
-                .children
-                .iter()
-                .any(|nested| nested.key.as_deref() == Some("ship") && nested.component == "MockShip")
+            && child.children.iter().any(|nested| {
+                nested.key.as_deref() == Some("ship") && nested.component == "MockShip"
+            })
     }));
     World::check(&program).expect("order checks");
+}
+
+#[test]
+// req:grammar-001 req:runtime-002 req:components-012 req:runtime-003 req:components-014 req:components-015 req:components-016 req:components-017
+fn http_source_parses_client_and_mock() {
+    let program = parse_source(include_str!("../examples/http.kith")).expect("parse http.kith");
+    let client = program.component("Client").expect("Client");
+    assert_eq!(client.states[0].name, "Idle");
+    assert!(client.states[0].named);
+    assert_eq!(client.states[0].handlers[0].route, ["down"]);
+    let sending = client
+        .states
+        .iter()
+        .find(|state| state.name == "Sending")
+        .expect("Sending");
+    assert_eq!(sending.handlers[0].route, ["up"]);
+    assert!(matches!(
+        sending.handlers[0].body.last(),
+        Some(kith::ast::Statement::Goto { state }) if state == "Idle"
+    ));
+    let http = program.component("Http").expect("Http");
+    assert!(!http.states[0].named);
+    assert_eq!(http.states[0].name, "Start");
+    assert_eq!(http.states[0].handlers[0].route, ["down"]);
+    let health = program.component("HealthCheck").expect("HealthCheck");
+    assert_eq!(health.states[0].name, "Checking");
+    assert!(health.states[0].named);
+    assert_eq!(health.states[0].handlers[0].route, ["init"]);
+    assert_eq!(health.states[0].handlers[1].route, ["self"]);
+    assert!(matches!(
+        &health.states[0].handlers[1].body[0],
+        kith::ast::Statement::SendTo { .. }
+    ));
+    let validating = health
+        .states
+        .iter()
+        .find(|state| state.name == "Validating")
+        .expect("Validating");
+    assert!(matches!(
+        &validating.handlers[0].body[1],
+        kith::ast::Statement::Send { after: Some(delay), .. }
+            if delay["kind"] == "number" && delay["value"] == 5.0
+    ));
+    assert!(matches!(
+        validating.handlers[0].body.last(),
+        Some(kith::ast::Statement::Goto { state }) if state == "Checking"
+    ));
+    World::check(&program).expect("http checks");
+}
+
+#[test]
+// req:components-015
+fn send_without_a_route_fails_parse() {
+    let err = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      send { kind: "Tick" };
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect_err("send requires a route");
+    assert!(!err.message.is_empty());
+    let delayed = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      send after 5 { kind: "Tick" };
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect_err("send after requires a route");
+    assert!(!delayed.message.is_empty());
+}
+
+#[test]
+// req:components-012
+fn on_route_or_list_parses() {
+    let program = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on up or down { kind: "Tick" } {}
+    on { kind: "Check" } {}
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse or list");
+    let box_kind = program.component("Box").expect("Box");
+    assert_eq!(box_kind.states[0].handlers[0].route, ["up", "down"]);
+    assert_eq!(
+        box_kind.states[0].handlers[1].route,
+        ["up", "down", "self"]
+    );
+    World::check(&program).expect("or list checks");
+}
+
+#[test]
+// req:components-017 req:grammar-001
+fn message_sequences_and_object_patterns_parse() {
+    let program = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  field s1: any = 200;
+  field s2: any = 200;
+  field s3: any = 200;
+  start {
+    on self "Check" a:200 b:200 c:200 {
+      send self "Check" s1 s2 s3;
+    }
+    on down { kind: "GET" url: any } {
+      send up { kind: "Done" status: 200 };
+    }
+    on up v:{ kind: "Done" status: number } {
+      print v;
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse sequences");
+    let box_kind = program.component("Box").expect("Box");
+    let handlers = &box_kind.states[0].handlers;
+    assert_eq!(handlers[0].pattern["kind"], "then");
+    assert_eq!(
+        handlers[0].pattern["patterns"].as_array().expect("then").len(),
+        4
+    );
+    match &handlers[0].body[0] {
+        kith::ast::Statement::Send { message, .. } => {
+            assert_eq!(message["kind"], "sequence");
+            assert_eq!(message["items"].as_array().expect("items").len(), 4);
+        }
+        other => panic!("expected send, got {other:?}"),
+    }
+    assert_eq!(handlers[1].pattern["kind"], "over");
+    assert!(handlers[1].pattern["keys"].get("kind").is_some());
+    assert!(handlers[1].pattern["keys"].get("url").is_some());
+    assert_eq!(handlers[2].pattern["kind"], "variable");
+    assert_eq!(handlers[2].pattern["name"], "v");
+    assert_eq!(handlers[2].pattern["pattern"]["kind"], "over");
+    World::check(&program).expect("sequence program checks");
 }

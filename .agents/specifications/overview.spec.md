@@ -43,8 +43,8 @@ primitives rather than defining their own.
 - **Messages are the only communication.** Components and workflows MUST NOT
   call one another as functions to cause behavior. They send messages. A
   message is routed to a named port (`send to`), down to children of a kind
-  (`send down`), or up toward the root (`send up`), then matched as a Uffda
-  pattern.
+  (`send down`), up toward the root (`send up`), or to this instance
+  (`send self`), then matched as a Uffda pattern.
 - **Machines and flows.** Component behavior is a state machine: a matched
   message may send, assign, and `complete`. Workflow behavior is a flow graph:
   completing a step follows `then` (or a `pick` clause) with that step's

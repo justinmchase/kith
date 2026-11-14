@@ -16,7 +16,8 @@ Preconditions:
 
 Expected behavior:
 
-- The start state MUST be named `Start`.
+- The start state MUST have implicit name `Start` and MUST NOT be a
+  `goto` target (`named: false`).
 - The last handler MUST be `else` (pattern `any`) whose body is one
   `complete` whose object has keys `kind`, `orderId`, and `total`
   (shorthand `orderId` / `total` for `orderId: orderId` / `total: total`).

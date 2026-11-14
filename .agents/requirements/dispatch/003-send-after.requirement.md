@@ -10,11 +10,12 @@ spec_ref: .agents/specifications/timers.spec.md#constraints; .agents/specificati
 
 Preconditions:
 
-- A component executes `send after random up V` (Order's MockShip).
+- A component executes `send after (rand 1 3) up V` (Order's MockShip).
 
 Expected behavior:
 
-- The sending turn MUST complete without delivering `V`.
+- The sending turn MUST evaluate the delay as seconds and MUST complete
+  without delivering `V`.
 - `World::run_until_idle` MUST leave the timer pending.
 - `World::run` MUST advance the virtual clock and deliver `V` as an up
   message on a later turn.

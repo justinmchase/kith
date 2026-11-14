@@ -18,7 +18,9 @@ Expected behavior:
 - After `{ kind: "Item", ... }`, Carrier MUST be in `Shipping`.
   `{ kind: "Delivered" }` MUST match there and `complete` `Shipped`.
 - `{ kind: "Delivered" }` while still `Waiting` MUST fail as unmatched down.
-- `goto` of a name that is not a state of the component MUST fail `check`.
+- `goto` of a name that is not a **named** state of the component MUST
+  fail `check`. Unnamed `start { }` is not a target: `goto Start` MUST
+  fail unless the start was declared `start Start`.
 
 Postconditions:
 

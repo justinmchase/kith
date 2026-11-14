@@ -36,14 +36,17 @@ The executable name MUST be `kith`. The initial surface MUST be:
 - `compile` MUST be reproducible from the same sources and grammar artifacts.
 - `run` MUST execute only compiled trees: if given source, it compiles first
   (in memory or to the artifact path) and then interprets.
-- `run` MUST start the unique exported scene of the program. `parse` prints
+- `run` MUST start the unique exported scene of the program, offer
+  construction init, then drain. `--message` is optional: a root that
+  `send self`s from `on init` begins without an inject. `parse` prints
   one file's syntax tree as a Uffda data codec record and MUST NOT resolve
   imports. `check` and `compile` MUST resolve relative `.kith` imports before
   checking. `compile` MUST write a `.kith.ast` data codec artifact. `run` MUST
   print a data codec record of the root component's fields, or of the
   workflow succeed output when the root is a workflow. `print` values MUST
   go to stderr as data codec records so stdout stays the run result.
-  `--message` remains JSON for this slice. `run` MUST drain mailboxes and
+  `--message` remains JSON for this slice (an object, a string, or an
+  array of send arguments). `run` MUST drain mailboxes and
   advance pending `send after` timers ([timers](./timers.spec.md)).
 
 ## Deferred commands

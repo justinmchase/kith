@@ -137,11 +137,18 @@ pub struct Instance {
     pub children: Vec<Instance>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct State {
     pub kind: String,
     pub name: String,
     pub start: bool,
+    /// `false` for unnamed `start { }`: the implicit name `Start` is not a `goto` target.
+    #[serde(default = "default_true")]
+    pub named: bool,
     #[serde(default)]
     pub handlers: Vec<Handler>,
 }
@@ -152,6 +159,8 @@ pub struct Handler {
     pub pattern: Json,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<Json>,
+    #[serde(default)]
+    pub route: Vec<String>,
     #[serde(default)]
     pub body: Vec<Statement>,
 }
@@ -177,6 +186,12 @@ pub enum Statement {
     #[serde(rename = "sendDown")]
     SendDown {
         component: Option<String>,
+        message: Json,
+        #[serde(default)]
+        after: Option<Json>,
+    },
+    #[serde(rename = "send")]
+    Send {
         message: Json,
         #[serde(default)]
         after: Option<Json>,
@@ -380,36 +395,27 @@ pub fn ping_program() -> Program {
 
 pub fn ping_pattern(kind: &str) -> serde_json::Value {
     serde_json::json!({
-        "kind": "over",
-        "keys": {
-            "kind": {
+        "kind": "then",
+        "patterns": [
+            {
                 "kind": "equal",
                 "value": {"kind": "value.literal", "value": kind}
             },
-            "n": {
+            {
                 "kind": "variable",
                 "name": "n",
-                "pattern": {"kind": "any"}
+                "pattern": {"kind": "type", "type": "number"}
             }
-        },
-        "rest": null
+        ]
     })
 }
 
 pub fn ping_object(kind: &str) -> serde_json::Value {
     serde_json::json!({
-        "kind": "object",
-        "keys": [
-            {
-                "kind": "objectKey",
-                "name": "kind",
-                "expression": {"kind": "string", "values": [kind]}
-            },
-            {
-                "kind": "objectKey",
-                "name": "n",
-                "expression": {"kind": "reference", "name": "n"}
-            }
+        "kind": "sequence",
+        "items": [
+            {"kind": "string", "values": [kind]},
+            {"kind": "reference", "name": "n"}
         ]
     })
 }

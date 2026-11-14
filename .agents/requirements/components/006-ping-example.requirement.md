@@ -14,8 +14,8 @@ Preconditions:
 
 Expected behavior:
 
-- Injecting `{ kind: "Ping", n: 7 }` MUST `send to child`, Child MUST
-  `send up` `{ kind: "Pong", n: 7 }`, and `Ping.heard` MUST be `7`.
+- Injecting `["Ping", 7]` MUST `send to child`, Child MUST
+  `send up` `["Pong", 7]`, and `Ping.heard` MUST be `7`.
 
 Postconditions:
 

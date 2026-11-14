@@ -82,13 +82,17 @@ capitals.
 
 - Creating an instance creates its component actor and an empty mailbox, and
   puts the machine in its start state.
+- After the scene tree is constructed, the dispatcher offers each component
+  instance init. Only `on init` matches. Unmatched init is dropped. This
+  MUST happen before any injected message.
 - A send that routes to an instance appends the message to that instance's
   mailbox and marks the actor ready.
 - A turn dequeues one message, matches it in the current state, and if a
   transition matches, runs that transition to completion of its synchronous
   work (expressions, field changes, state change, recording sends and spawns).
 - Sends recorded in a turn MUST be routed after the turn's state change is
-  visible, so a message to self is taken on a later turn.
+  visible, so a message to self (`send self V`) is taken on a later turn
+  and matched in the state after that turn's terminal `goto`, if any.
 
 ### Transition actors
 
@@ -105,7 +109,7 @@ capitals.
 
 ### Routing
 
-- The dispatcher performs send to, send down, and send up as
+- The dispatcher performs send to, send down, send up, and send self as
   [components](./components.spec.md#routing) specifies. Routing chooses a
   mailbox; it does not run a transition.
 - Routing to a destroyed instance MUST drop the message.

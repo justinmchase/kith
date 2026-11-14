@@ -93,7 +93,7 @@ workflow Order {
     ({ kind: "Paid" }) -> Fulfill;
     else -> Decline;
   };
-  Fulfill: { items: any, orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
+  Fulfill: { items: any orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
   Reject: fail "invalid order";
   Decline: fail "payment declined";
 }
@@ -152,9 +152,9 @@ it spawns a bare instance (no ports allowed).
 A task or map item that does not `complete` leaves the run at that step. That
 is the callback pattern. In Order, Carrier `send to ship` a `Dispatch` and
 `goto Shipping`. MockShip (a child, filled on the Carrier prototype) waits
-with `send after random up { kind: "Delivered" }`. Shipping matches that up
-message and `complete`s. The host MAY instead `World::send` `Delivered`
-into the Carrier. The workflow graph has no `on`; the work item matches.
+with `send after (rand 1 3) up { kind: "Delivered" }`. Shipping matches
+`on up { kind: "Delivered" }` and `complete`s. A host driver MUST deliver
+on that same up route. The workflow graph has no `on`; the work item matches.
 The join set advances when that item `complete`s.
 
 `World::run_until_idle` leaves those timers pending (Carriers still in
@@ -186,7 +186,7 @@ plus the program and continue. The record MUST NOT be JSON.
 
 Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
 at `Order` MUST accept and charge, then wait on two `Carrier` work items.
-After each MockShip `send after random up { kind: "Delivered" }`, `Summarize`
+After each MockShip `send after (rand 1 3) up { kind: "Delivered" }`, `Summarize`
 MUST fold each `Shipped` payload into
 `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
 
