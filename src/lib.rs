@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod builtin;
 pub mod cli;
 pub mod codec;
 pub mod dispatch;

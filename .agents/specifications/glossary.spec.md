@@ -26,6 +26,12 @@ capitals.
 
 - **Program**: the set of modules that make up one Kith application.
 - **Module**: one Kith source file.
+- **Built-in module**: a module named `kith:` plus one lowercase name. The
+  host registers its declaration with the Uffda resolver. It is not
+  downloaded and not locked. An import map does not rewrite it.
+- **Rule**: a pattern exported by a module. After import it is a pattern
+  name, in the same scope as `number` and `string`. Matching it does not
+  send and does not read a clock.
 - **Package**: modules published together under one name and version, imported
   as Uffda's packages are.
 - **Root**: the instance that has no parent. A running program has one root:

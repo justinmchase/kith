@@ -1,4 +1,5 @@
 use crate::ast::{Field, FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
+use crate::builtin::{self, Driver};
 use crate::codec::{decode, encode, json_u64};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::error::Error;
@@ -83,6 +84,7 @@ struct InstanceState {
     completion: Option<Json>,
     join: Option<JoinSet>,
     run: Option<WorkflowRun>,
+    driver: Option<Driver>,
 }
 
 pub struct World {
@@ -98,6 +100,9 @@ pub struct World {
     timers: Vec<Timer>,
     joins: HashMap<u64, PendingJoin>,
     next_join: u64,
+    clock_zone: Json,
+    clock_script: Option<Vec<Json>>,
+    clock_replies: Vec<Json>,
 }
 
 impl World {
@@ -145,6 +150,9 @@ impl World {
             timers: Vec::new(),
             joins: HashMap::new(),
             next_join: 1,
+            clock_zone: builtin::process_zone(),
+            clock_script: None,
+            clock_replies: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -241,6 +249,27 @@ impl World {
 
     pub fn prints(&self) -> &[Json] {
         &self.prints
+    }
+
+    pub fn virtual_now(&self) -> u64 {
+        self.now
+    }
+
+    /// Replace the wall-clock script. `zone` is frozen for later `"Zone"`
+    /// replies. Each script entry is one `"Now"` instant, in order. An empty
+    /// script makes the next `"Now"` fail. This does not move the dispatcher
+    /// clock that `send after` uses.
+    pub fn replace_clock(&mut self, zone: &str, script: &[&str]) -> Result<(), Error> {
+        let zone = builtin::zone_value(zone)?;
+        let mut instants = Vec::with_capacity(script.len());
+        for text in script {
+            let millis = builtin::parse_instant(text)?;
+            instants.push(builtin::instant_json(millis));
+        }
+        self.clock_zone = zone;
+        self.clock_script = Some(instants);
+        self.clock_replies.clear();
+        Ok(())
     }
 
     pub fn send(&mut self, id: ActorId, message: Json) -> Result<(), Error> {
@@ -347,6 +376,7 @@ impl World {
                         "definition": run.definition,
                         "prototypes": run.prototypes,
                     })),
+                    "driver": instance.driver.as_ref().map(builtin::driver_json),
                 })
             })
             .collect();
@@ -386,6 +416,11 @@ impl World {
                 "join": timer.join,
                 "slot": timer.slot,
             })).collect::<Vec<_>>(),
+            "clock": {
+                "zone": self.clock_zone,
+                "script": self.clock_script,
+                "replies": self.clock_replies,
+            },
         })
     }
 
@@ -455,6 +490,25 @@ impl World {
                 joins.insert(id, restore_join(entry)?);
             }
         }
+        let clock = snapshot.get("clock");
+        let clock_zone = clock
+            .and_then(|clock| clock.get("zone"))
+            .cloned()
+            .unwrap_or_else(|| json!({"kind": "utc"}));
+        let clock_script = clock.and_then(|clock| {
+            clock.get("script").and_then(|script| {
+                if script.is_null() {
+                    None
+                } else {
+                    script.as_array().cloned()
+                }
+            })
+        });
+        let clock_replies = clock
+            .and_then(|clock| clock.get("replies"))
+            .and_then(Json::as_array)
+            .cloned()
+            .unwrap_or_default();
         Ok(Self {
             program,
             instances,
@@ -468,6 +522,9 @@ impl World {
             timers,
             joins,
             next_join,
+            clock_zone,
+            clock_script,
+            clock_replies,
         })
     }
 
@@ -553,9 +610,19 @@ impl World {
                 completion: None,
                 join: None,
                 run: None,
+                driver: self.driver_for(kind),
             },
         );
         Ok(id)
+    }
+
+    fn driver_for(&self, kind: &str) -> Option<Driver> {
+        self.program
+            .host_kinds
+            .iter()
+            .any(|name| name == kind)
+            .then(|| builtin::initial_driver(kind))
+            .flatten()
     }
 
     fn spawn_workflow(
@@ -590,6 +657,7 @@ impl World {
                     definition: workflow,
                     prototypes: Vec::new(),
                 }),
+                driver: None,
             },
         );
         Ok(id)
@@ -643,7 +711,7 @@ impl World {
             run.output = working.clone();
         }
         let bindings = match &step.pattern {
-            Some(pattern) => bind_step(pattern, &working)?,
+            Some(pattern) => bind_step(pattern, &working, &self.program.rules)?,
             None => bindings_from(&working),
         };
         match &step.body {
@@ -658,7 +726,7 @@ impl World {
             }
             StepBody::Choice { clauses } => {
                 for clause in clauses {
-                    if match_message(&clause.pattern, &working)?.is_some() {
+                    if match_program(&clause.pattern, &working, &self.program.rules)?.is_some() {
                         return self.goto_named(id, &clause.step);
                     }
                 }
@@ -811,7 +879,7 @@ impl World {
         let Some(pattern) = &field.pattern else {
             return Ok(());
         };
-        if match_field(pattern, value)? {
+        if self.field_matches(pattern, value)? {
             Ok(())
         } else {
             Err(Error::new(format!("field {name} did not match")))
@@ -960,6 +1028,12 @@ impl World {
         message: &Json,
         route: Route,
     ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        if self.instances[&id].driver.is_some() {
+            if route == Route::Init {
+                return Ok(vec![]);
+            }
+            return self.drive(id, message);
+        }
         if self.instances[&id].run.is_some() {
             return match route {
                 Route::Join => {
@@ -1017,7 +1091,7 @@ impl World {
             if !route_matches(&handler.route, route) {
                 continue;
             }
-            if let Some(mut bindings) = match_handler(handler, message)? {
+            if let Some(mut bindings) = match_handler(handler, message, &self.program.rules)? {
                 for (name, value) in &fields {
                     bindings.entry(name.clone()).or_insert(value.clone());
                 }
@@ -1365,10 +1439,115 @@ impl World {
                         value: json!({ "status": 200, "url": url }),
                     });
                 }
+                name if self.program.functions.iter().any(|item| item == name) => {
+                    let mut values = Vec::with_capacity(args.len());
+                    for arg in args {
+                        values.push(self.eval(arg, bindings)?);
+                    }
+                    return Ok(Slot::Ready(builtin::call(name, &values)?));
+                }
                 _ => {}
             }
         }
-        Ok(Slot::Ready(evaluate(expression, bindings)?))
+        let (expression, extras) = self.lower_hosts(expression, bindings)?;
+        let mut bindings = bindings.clone();
+        bindings.extend(extras);
+        Ok(Slot::Ready(evaluate(&expression, &bindings)?))
+    }
+
+    fn lower_hosts(
+        &mut self,
+        expression: &Json,
+        bindings: &HashMap<String, Json>,
+    ) -> Result<(Json, HashMap<String, Json>), Error> {
+        let mut extras = HashMap::new();
+        let mut seq = 0u32;
+        let lowered = self.lower_node(expression, bindings, &mut extras, &mut seq)?;
+        Ok((lowered, extras))
+    }
+
+    fn lower_node(
+        &mut self,
+        expression: &Json,
+        bindings: &HashMap<String, Json>,
+        extras: &mut HashMap<String, Json>,
+        seq: &mut u32,
+    ) -> Result<Json, Error> {
+        if let Some(name) = invocation_name(expression) {
+            if self.program.functions.iter().any(|item| item == name) {
+                let value = self.eval(expression, bindings)?;
+                let key = format!("$k{seq}");
+                *seq += 1;
+                extras.insert(key.clone(), value);
+                return Ok(json!({"kind": "reference", "name": key}));
+            }
+        }
+        match expression {
+            Json::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(self.lower_node(item, bindings, extras, seq)?);
+                }
+                Ok(Json::Array(out))
+            }
+            Json::Object(map) => {
+                let mut out = serde_json::Map::new();
+                for (key, value) in map {
+                    out.insert(key.clone(), self.lower_node(value, bindings, extras, seq)?);
+                }
+                Ok(Json::Object(out))
+            }
+            other => Ok(other.clone()),
+        }
+    }
+
+    fn field_matches(&self, pattern: &Json, value: &Json) -> Result<bool, Error> {
+        if builtin::uses_rule(pattern, &self.program.rules) {
+            return Ok(builtin::match_with_rules(pattern, value, &self.program.rules)?.is_some());
+        }
+        match_field(pattern, value)
+    }
+
+    fn drive(&mut self, id: ActorId, message: &Json) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        let parent = self.instances[&id].parent;
+        let driver = self.instances[&id]
+            .driver
+            .clone()
+            .ok_or_else(|| Error::new("missing driver"))?;
+        let replies = match driver {
+            Driver::Pipe(pipe) => {
+                let (pipe, replies) = builtin::drive_pipe(pipe, message);
+                self.instances.get_mut(&id).expect("actor").driver = Some(Driver::Pipe(pipe));
+                replies
+            }
+            Driver::Clock => vec![self.clock_reply(message)],
+        };
+        let Some(parent) = parent else {
+            return Ok(vec![]);
+        };
+        Ok(replies
+            .into_iter()
+            .map(|reply| (parent, reply, Route::Up))
+            .collect())
+    }
+
+    fn clock_reply(&mut self, message: &Json) -> Json {
+        match message.as_str() {
+            Some("Now") => {
+                if self.clock_script.as_ref().is_some_and(Vec::is_empty) {
+                    return json!(["Error", "clock"]);
+                }
+                let instant = if let Some(script) = self.clock_script.as_mut() {
+                    script.remove(0)
+                } else {
+                    builtin::instant_json(builtin::wall_millis())
+                };
+                self.clock_replies.push(instant.clone());
+                json!(["Instant", instant])
+            }
+            Some("Zone") => json!(["Zone", self.clock_zone.clone()]),
+            _ => json!(["Error", "unknown"]),
+        }
     }
 
     fn eval_write(
@@ -1692,24 +1871,41 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
     Ok(())
 }
 
-fn bind_step(pattern: &Json, working: &Json) -> Result<HashMap<String, Json>, Error> {
-    match_message(pattern, working)?.ok_or_else(|| Error::new("step pattern missed"))
+fn bind_step(
+    pattern: &Json,
+    working: &Json,
+    rules: &[String],
+) -> Result<HashMap<String, Json>, Error> {
+    match_program(pattern, working, rules)?.ok_or_else(|| Error::new("step pattern missed"))
+}
+
+fn match_program(
+    pattern: &Json,
+    message: &Json,
+    rules: &[String],
+) -> Result<Option<HashMap<String, Json>>, Error> {
+    if builtin::uses_rule(pattern, rules) {
+        builtin::match_with_rules(pattern, message, rules)
+    } else {
+        match_message(pattern, message)
+    }
 }
 
 fn match_handler(
     handler: &crate::ast::Handler,
     message: &Json,
+    rules: &[String],
 ) -> Result<Option<HashMap<String, Json>>, Error> {
     let Some(item_pattern) = &handler.item else {
-        return match_message(&handler.pattern, message);
+        return match_program(&handler.pattern, message, rules);
     };
     let Some([acc, item]) = message.as_array().map(Vec::as_slice) else {
         return Ok(None);
     };
-    let Some(mut bindings) = match_message(&handler.pattern, acc)? else {
+    let Some(mut bindings) = match_program(&handler.pattern, acc, rules)? else {
         return Ok(None);
     };
-    let Some(item_bindings) = match_message(item_pattern, item)? else {
+    let Some(item_bindings) = match_program(item_pattern, item, rules)? else {
         return Ok(None);
     };
     bindings.extend(item_bindings);
@@ -2130,6 +2326,7 @@ fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
             .filter(|value| !value.is_null()),
         join,
         run,
+        driver: entry.get("driver").and_then(builtin::driver_from),
     })
 }
 

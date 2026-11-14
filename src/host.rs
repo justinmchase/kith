@@ -127,6 +127,16 @@ fn json_to_value<'gc>(mc: &uffda_heap::Mutation<'gc>, value: &Json) -> Result<Va
                 .map(|value| json_to_value(mc, value))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
+        Json::Object(_) if crate::builtin::bytes_of(value).is_some() => Value::Bytes(
+            uffda_heap::Gc::new(mc, crate::builtin::bytes_of(value).expect("bytes")),
+        ),
+        Json::Object(_) if crate::builtin::instant_millis(value).is_some() => {
+            let millis = crate::builtin::instant_millis(value).expect("instant");
+            let date =
+                time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
+                    .map_err(|_| Error::new("invalid instant"))?;
+            Value::date(mc, date)
+        }
         Json::Object(values) => Value::object(
             mc,
             values
