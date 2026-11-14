@@ -315,5 +315,6 @@ two named states; a component MUST NOT declare three `start` states.
 - **Closed object patterns** for message shapes. That is an Uffda pattern
   gap, not an actor gap; track it upstream if Kith messages need it.
 - **Host I/O adapters.** A built-in module binds its driver by import.
-  Binding a user-declared `Http` kind to a native client, and `kith:http`
-  itself, are not this slice. The example mock stays the user component.
+  `kith:http` is that driver. A user-declared `Http`, including the mock in
+  `examples/http.kith`, stays a user component and does not import it.
+  Device payloads are `Bytes`. Bodies use the stream messages.

@@ -7,7 +7,8 @@ Delayed sends stay in [timers](./timers.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
 
 `kith:net`, `kith:http`, `kith:stdio`, `kith:fs`, `kith:encoding`,
-`kith:crypto`, `kith:path`, and `kith:process` are not part of this chapter.
+`kith:crypto`, `kith:path`, and `kith:process` are defined in
+[edges](./edges.spec.md).
 
 ## Conventions
 
@@ -31,7 +32,7 @@ capitals.
   `.kith` specifiers stay as [scenes](./scenes.spec.md#import-and-export)
   defines them. `jsr:` is not required to load a Kith program.
 - A specifier that has the `kith:` shape and names no registered module
-  (`kith:net`) MUST fail as an unknown built-in. A specifier that contains
+  (`kith:dns`) MUST fail as an unknown built-in. A specifier that contains
   `:` and is neither `kith:` nor a relative path MUST fail as an unsupported
   import specifier.
 - The names after the specifier are the exports to bind. A missing export

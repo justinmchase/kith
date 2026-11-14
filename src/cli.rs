@@ -21,7 +21,13 @@ pub enum Command {
     Run {
         path: PathBuf,
         message: Option<Json>,
+        argv: Vec<String>,
     },
+}
+
+pub struct RunResult {
+    pub text: String,
+    pub code: u8,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Command, Error> {
@@ -45,6 +51,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
         "run" => {
             let mut path = None;
             let mut message = None;
+            let mut argv = Vec::new();
             while let Some(arg) = args.next() {
                 if arg == "--message" {
                     let value = args
@@ -54,15 +61,19 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
                         serde_json::from_str(value)
                             .map_err(|error| Error::new(error.to_string()))?,
                     );
+                } else if arg == "--" {
+                    argv.extend(args.cloned());
+                    break;
                 } else if path.is_none() {
                     path = Some(PathBuf::from(arg));
                 } else {
-                    return Err(Error::new(format!("unexpected argument {arg}")));
+                    argv.push(arg.clone());
                 }
             }
             Ok(Command::Run {
                 path: path.ok_or_else(|| Error::new("usage: kith run <file> [--message JSON]"))?,
                 message,
+                argv,
             })
         }
         other => Err(Error::new(format!(
@@ -71,18 +82,24 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
     }
 }
 
-pub fn run(command: Command) -> Result<String, Error> {
+pub fn run(command: Command) -> Result<RunResult, Error> {
     match command {
         Command::Parse { path } => {
             let program = parse_file(&path)?;
             let tree =
                 serde_json::to_value(&program).map_err(|error| Error::new(error.to_string()))?;
-            encode(&tree)
+            Ok(RunResult {
+                text: encode(&tree)?,
+                code: 0,
+            })
         }
         Command::Check { path } => {
             let program = load_program(&path)?;
             World::check(&program)?;
-            Ok("ok\n".into())
+            Ok(RunResult {
+                text: "ok\n".into(),
+                code: 0,
+            })
         }
         Command::Compile { path } => {
             let program = load_program(&path)?;
@@ -91,22 +108,63 @@ pub fn run(command: Command) -> Result<String, Error> {
             let document = artifact_document(&program);
             std::fs::write(&out, encode(&document)?)
                 .map_err(|error| Error::new(error.to_string()))?;
-            Ok(format!("{}\n", out.display()))
+            Ok(RunResult {
+                text: format!("{}\n", out.display()),
+                code: 0,
+            })
         }
-        Command::Run { path, message } => {
+        Command::Run {
+            path,
+            message,
+            argv,
+        } => {
             let program = load_program(&path)?;
-            run_program(program, message)
+            run_program(program, message, argv)
         }
     }
 }
 
-pub fn run_program(program: Program, message: Option<Json>) -> Result<String, Error> {
+pub fn run_program(
+    program: Program,
+    message: Option<Json>,
+    argv: Vec<String>,
+) -> Result<RunResult, Error> {
     let mut world = World::start(program)?;
+    world.set_argv(argv);
     if let Some(message) = message {
         world.inject(message)?;
     }
-    world.run()?;
-    doc::encode(&world.result_document())
+    finish(&mut world)?;
+    let text = if world.suppress_result() {
+        String::new()
+    } else {
+        doc::encode(&world.result_document())?
+    };
+    Ok(RunResult {
+        text,
+        code: world.exit_code().unwrap_or(0),
+    })
+}
+
+fn finish(world: &mut World) -> Result<(), Error> {
+    loop {
+        world.run_until_idle()?;
+        world.poll_io()?;
+        if world.exit_code().is_some() {
+            return Ok(());
+        }
+        let fired = world.fire_next_timer()?;
+        world.poll_io()?;
+        if world.exit_code().is_some() {
+            return Ok(());
+        }
+        if world.outstanding() == 0 && !world.listening() && !fired {
+            return Ok(());
+        }
+        if world.outstanding() > 0 || world.listening() {
+            world.wait_io(std::time::Duration::from_millis(50))?;
+        }
+    }
 }
 
 fn artifact_path(source: &Path) -> PathBuf {

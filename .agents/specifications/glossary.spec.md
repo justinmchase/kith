@@ -145,7 +145,14 @@ capitals.
   transition.
 - **Print**: the host function `(print V…)`, the same as
   `(writeLine stdout V…)`. It is not a statement and MUST NOT complete the
-  instance.
+  instance. It is not the `Stderr` component.
+- **Built-in module**: a `kith:` module registered in the binary. Its
+  functions and rules come from that declaration. Its components are host
+  drivers.
+- **Frozen argv**: the program arguments captured at start, after `kith run`
+  flags and the program path. Later reads see that copy.
+- **Frozen env**: the process environment captured at start. Later reads see
+  that copy and MUST NOT re-read the operating system.
 - **Child workflow**: a workflow instance owned by another workflow or by a
   component. Ownership is has-a.
 - **Fan-out**: a map step (`fanout Expression with Kind into Acc`) that

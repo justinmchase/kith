@@ -170,12 +170,12 @@ fn kith_prefix_binds_exports_and_rejects_the_other_shapes() {
         .message
         .contains("invalid kith import specifier"));
     let net = load(
-        r#"import "kith:net" Socket; component Root { start {} } export scene Main { Root() {} }"#,
+        r#"import "kith:dns" Socket; component Root { start {} } export scene Main { Root() {} }"#,
     );
     assert!(net
         .unwrap_err()
         .message
-        .contains("unknown built-in module kith:net"));
+        .contains("unknown built-in module kith:dns"));
     let jsr = load(
         r#"import "jsr:@scope/name" Name; component Root { start {} } export scene Main { Root() {} }"#,
     );
