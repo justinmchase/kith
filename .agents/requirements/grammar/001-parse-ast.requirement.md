@@ -14,10 +14,10 @@ Preconditions:
 
 Expected behavior:
 
-- Parsing the normative Parent/Child source MUST produce a `program` tree with
-  exports `Child`, `Parent`, and `Main`, components `Child` and `Parent`, a
-  `heard` field and a `Child child` port on `Parent`, and scene `Main` whose
-  root is `Parent` with a child instance of `Child` filling port `child`.
+- Parsing the normative Ping/Child source MUST produce a `program` tree with
+  exports `Child`, `Ping`, and `Main`, components `Child` and `Ping` (Ping has
+  field `heard` and port `child`), and scene `Main` whose root is `Ping` with
+  `child` filled by `Child`.
 - The tree MUST be the same shape the interpreter accepts as a hand-built AST.
 - The tree MUST NOT include a program `root` string or `children` on a
   component.

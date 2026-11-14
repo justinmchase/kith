@@ -45,10 +45,22 @@ pub fn match_message(
     pattern: &Json,
     message: &Json,
 ) -> Result<Option<HashMap<String, Json>>, Error> {
+    let mode = match then_arity(pattern) {
+        Some(arity) => {
+            let Some(values) = message.as_array() else {
+                return Ok(None);
+            };
+            if values.len() != arity {
+                return Ok(None);
+            }
+            InputMode::Iterable
+        }
+        None => InputMode::Scalar,
+    };
     let pattern = parse_pattern(pattern)?;
     let names = binding_names(&pattern);
     let input = to_uffda_json(message)?;
-    let mut runtime = Runtime::for_pattern(pattern, input, InputMode::Scalar)
+    let mut runtime = Runtime::for_pattern(pattern, input, mode)
         .map_err(|error| Error::new(error.to_string()))?;
     runtime
         .run()
@@ -68,6 +80,35 @@ pub fn match_message(
         }
         Ok(Some(bindings))
     })
+}
+
+/// Match a stored field as one scalar value. Uffda Maybe (`number?`) that
+/// skips a present non-null value is not a match: optional means null or T.
+pub fn match_field(pattern: &Json, value: &Json) -> Result<bool, Error> {
+    let pattern = parse_pattern(pattern)?;
+    let input = to_uffda_json(value)?;
+    let mut runtime = Runtime::for_pattern(pattern, input, InputMode::Scalar)
+        .map_err(|error| Error::new(error.to_string()))?;
+    runtime
+        .run()
+        .map_err(|error| Error::new(error.to_string()))?;
+    runtime.read(|execution| {
+        let matched = execution
+            .result()
+            .ok_or_else(|| Error::new("missing match"))?;
+        if matched.kind != MatchKind::Ok {
+            return Ok(false);
+        }
+        let consumed = matched.end > matched.start;
+        Ok(consumed || value.is_null())
+    })
+}
+
+fn then_arity(pattern: &Json) -> Option<usize> {
+    if pattern.get("kind").and_then(Json::as_str) != Some("then") {
+        return None;
+    }
+    pattern.get("patterns").and_then(Json::as_array).map(Vec::len)
 }
 
 fn json_to_value<'gc>(mc: &uffda_heap::Mutation<'gc>, value: &Json) -> Result<Value<'gc>, Error> {

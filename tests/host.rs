@@ -1,4 +1,4 @@
-use kith::host::{evaluate, match_message};
+use kith::host::{evaluate, match_field, match_message};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -43,4 +43,104 @@ fn object_pattern_matches_ping_and_rejects_pong() {
     assert_eq!(bindings.get("n"), Some(&json!(7.0)));
     let missed = match_message(&pattern, &json!({"kind": "Pong", "n": 7})).expect("match");
     assert!(missed.is_none());
+}
+
+#[test]
+// req:workflows-003
+fn reduce_step_adds_one_to_the_accumulator() {
+    let pattern = json!({
+        "kind": "over",
+        "keys": {
+            "total": {
+                "kind": "variable",
+                "name": "total",
+                "pattern": {"kind": "any"}
+            }
+        }
+    });
+    let bindings = match_message(&pattern, &json!({"total": 1.0}))
+        .expect("match")
+        .expect("accumulator should match");
+    assert_eq!(
+        evaluate(
+            &json!({
+                "kind": "invocation",
+                "expression": {"kind": "reference", "name": "add"},
+                "args": [
+                    {"kind": "reference", "name": "total"},
+                    {"kind": "number", "value": 1}
+                ]
+            }),
+            &bindings,
+        )
+        .expect("add"),
+        json!(2.0)
+    );
+}
+
+#[test]
+// req:uffda-host-003 req:components-017
+fn then_pattern_matches_a_sequence_and_rejects_wrong_shape() {
+    let pattern = json!({
+        "kind": "then",
+        "patterns": [
+            {
+                "kind": "equal",
+                "value": {"kind": "value.literal", "value": "Check"}
+            },
+            {
+                "kind": "variable",
+                "name": "a",
+                "pattern": {
+                    "kind": "equal",
+                    "value": {"kind": "value.literal", "value": 200}
+                }
+            },
+            {
+                "kind": "variable",
+                "name": "b",
+                "pattern": {
+                    "kind": "equal",
+                    "value": {"kind": "value.literal", "value": 200}
+                }
+            },
+            {
+                "kind": "variable",
+                "name": "c",
+                "pattern": {
+                    "kind": "equal",
+                    "value": {"kind": "value.literal", "value": 200}
+                }
+            }
+        ]
+    });
+    let matched = match_message(&pattern, &json!(["Check", 200, 200, 200])).expect("match");
+    let bindings = matched.expect("Check sequence should match");
+    assert_eq!(bindings.get("a"), Some(&json!(200.0)));
+    assert_eq!(bindings.get("b"), Some(&json!(200.0)));
+    assert_eq!(bindings.get("c"), Some(&json!(200.0)));
+    assert!(match_message(&pattern, &json!(["Check", 200, 200]))
+        .expect("match")
+        .is_none());
+    assert!(match_message(
+        &pattern,
+        &json!({"kind": "Check", "a": 200, "b": 200, "c": 200})
+    )
+    .expect("match")
+    .is_none());
+}
+
+#[test]
+// req:components-018
+fn number_maybe_field_accepts_null_and_number_not_string() {
+    let pattern = json!({
+        "kind": "maybe",
+        "pattern": {"kind": "type", "type": "number"}
+    });
+    assert!(match_field(&pattern, &json!(null)).expect("match"));
+    assert!(match_field(&pattern, &json!(200)).expect("match"));
+    assert!(!match_field(&pattern, &json!("no")).expect("match"));
+    let number = json!({"kind": "type", "type": "number"});
+    assert!(!match_field(&number, &json!(null)).expect("match"));
+    assert!(match_field(&number, &json!(0)).expect("match"));
 }

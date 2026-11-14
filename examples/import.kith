@@ -1,0 +1,31 @@
+export Worker;
+export Count;
+export Import;
+export Main;
+
+component Worker {
+  start {
+    on { kind: "Item" item: any index: number } {
+      complete { kind: "Done" item index };
+    }
+  }
+}
+
+component Count {
+  field total: number = 0;
+
+  start {
+    on item: any {
+      total -> (add total 1);
+    }
+    else complete total;
+  }
+}
+
+workflow Import {
+  start { items: any } -> fanout items with Worker into Count then succeed;
+}
+
+export scene Main {
+  Import();
+}

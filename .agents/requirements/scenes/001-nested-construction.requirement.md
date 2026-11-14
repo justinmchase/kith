@@ -10,13 +10,13 @@ spec_ref: .agents/specifications/scenes.spec.md#declaration; .agents/specificati
 
 Preconditions:
 
-- Source declares `export scene Main { Parent() { child = Child() } }` and
-  both kinds, with `Child child` on `Parent`.
+- Source declares `export scene Main { Ping() { child = Child(); } }` and
+  component `Ping` with port `Child child`.
 
 Expected behavior:
 
-- Starting the program MUST create a `Parent` root and one `Child` filling
-  port `child`.
+- Starting the program MUST create a `Ping` root with a `Child` filling
+  `child`.
 - Check MUST reject a duplicate port fill under one parent.
 - Check MUST reject a construction that names an unknown kind.
 - Check MUST reject a missing port fill.

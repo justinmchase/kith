@@ -1,6 +1,6 @@
 ---
 id: components-006
-title: Parent sends Ping to child, child sends Pong up, heard becomes 7
+title: Ping sends to Child; heard becomes 7
 spec_ref: .agents/specifications/components.spec.md#example
 ---
 
@@ -10,14 +10,12 @@ spec_ref: .agents/specifications/components.spec.md#example
 
 Preconditions:
 
-- The normative Parent/Child program is loaded, as source or as a hand-built
-  syntax tree, including exported scene `Main` and port `Child child`.
+- The normative Ping/Child program is loaded.
 
 Expected behavior:
 
-- Injecting `{ kind: "Ping", n: 7 }` at the `Parent` root MUST `send to child`,
-  the child MUST send up `{ kind: "Pong", n: 7 }`, and `Parent.heard` MUST be
-  `7`.
+- Injecting `["Ping", 7]` MUST `send to child`, Child MUST
+  `send up` `["Pong", 7]`, and `Ping.heard` MUST be `7`.
 
 Postconditions:
 

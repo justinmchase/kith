@@ -1,31 +1,31 @@
 export Child;
-export Parent;
+export Ping;
 export Main;
 
 component Child {
-  start Idle {
-    on ({ kind: "Ping", n: number }) {
-      send up { kind: "Pong", n: n };
+  start {
+    on down "Ping" n:number {
+      send up "Pong" n;
     }
   }
 }
 
-component Parent {
+component Ping {
   field heard: number = 0;
   Child child;
 
-  start Idle {
-    on ({ kind: "Ping", n: number }) {
-      send to child { kind: "Ping", n: n };
+  start {
+    on down "Ping" n:number {
+      send to child "Ping" n;
     }
-    on ({ kind: "Pong", n: number }) {
+    on up "Pong" n:number {
       heard -> n;
     }
   }
 }
 
 export scene Main {
-  Parent() {
+  Ping() {
     child = Child();
   }
 }

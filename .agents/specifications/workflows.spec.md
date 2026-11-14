@@ -1,178 +1,220 @@
 # Workflows
 
-This chapter defines workflows: first-class long-running instances, child
-workflows, dynamic fan-out and join, streaming inputs, and clustered execution.
-They share dispatch with components ([dispatch](./dispatch.spec.md)) and has-a
-composition with [scenes](./scenes.spec.md). Terms are defined in the
-[glossary](./glossary.spec.md).
+This chapter defines workflows as a **flow graph** in the same family as
+[AWS Step Functions](https://docs.aws.amazon.com/step-functions/) (Task, Map,
+Choice, Pass, Succeed, Fail — Amazon States Language's verbs, not its JSON).
+Source is Kith syntax. The graph is data: it MAY be declared, built at run
+time, snapshotted, and rehydrated. Terms are defined in the
+[glossary](./glossary.spec.md). Components and `complete` are defined in
+[components](./components.spec.md). A scene MAY run a workflow or a
+component ([scenes](./scenes.spec.md)). The parent/child machine example is
+[Ping](./components.spec.md#declaration).
 
 ## Conventions
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are to be interpreted
-as described in RFC 2119 and RFC 8174 when, and only when, they appear in all
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY be interpreted as
+described in RFC 2119 and RFC 8174 when, and only when, they appear in all
 capitals.
 
 ## Definitions
 
-- **Workflow declaration**: the source that names a workflow, its fields, and
-  its state machine. Static children are constructed by a scene.
-- **Work item**: one element of a fan-out, each run as a child instance or a
-  transition actor.
-- **Join set**: the in-flight work items a join is waiting on.
-- **Placement**: which process in the cluster currently runs a workflow
-  instance.
+- **Workflow declaration**: source that names a flow graph and compiles to the
+  same IR a `run` step MAY execute from a value.
+- **Step**: one node in that graph (task, map, choice, pass, run, succeed,
+  fail). It is not an actor.
+- **Run**: one execution of a graph: current step, working input/output,
+  in-flight work, status.
+- **Task**: run one component or workflow until it `complete`s. That payload
+  is the step output and the next step's input.
+- **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: one
+  reducer instance holds the aggregate in its fields. Each completion is
+  one item; end of the map takes `else` and `complete`.
 
 ## Axioms
 
-- A workflow is a first-class instance: it has identity, a machine, a mailbox,
-  and optional children.
-- A workflow's identity does not depend on which process currently runs it.
-- Fan-out creates children or transition actors dynamically; join enables a
-  later transition with their outcomes.
-- Progress is a fact about the instance. Any caller that may send the workflow
-  a message MAY learn its progress.
-- Streaming inputs are messages. They MAY arrive after the workflow has
-  started, and they are matched in whatever state the machine is in when they
-  arrive.
+- A workflow is not a component. It has no `on` handlers and no `state`.
+- Completing a step transitions along `then` (or a choice clause). The working
+  value is the output of the step that just finished.
+- Fan-out cardinality is known only at run time, including zero and one.
+  Fan-in is a reduce: the working value after a map is the reducer's
+  `complete` payload, not a collection of item payloads.
+- The graph is a value. A declared `workflow Name` is sugar for a named IR.
+  `run path` executes whatever graph is in the working value at `path`.
+- A run MUST be serializable as a Uffda data codec record. Restoring a
+  snapshot MUST resume the same step, working value, join set, and mailboxes.
 
 ## Constraints
 
-### Distinct primitive
-
-- Workflow and component are different declarations. A workflow MUST NOT be
-  written as a component with extra flags, and a component MUST NOT be written
-  as a short-lived workflow.
-- A workflow MAY be a child of a component or of another workflow. A component
-  MAY be a child of a workflow. Ownership is still has-a.
-
-### Fan-out and join
-
-- Fan-out MUST be able to spawn a number of work items that is known only at
-  run time, including zero and one.
-- Each work item MUST run as its own actor, so items MAY proceed in parallel.
-- Join MUST wait for a declared condition on the join set (every item, a
-  pattern of outcomes, or cancellation of the rest) and MUST then enqueue a
-  single outcome message on the workflow's component actor.
-- A workflow MUST NOT block a dispatcher thread while joining. Join is a
-  transition actor.
-
-### Streaming
-
-- A workflow MUST accept messages after it has started, not only a single
-  argument at creation.
-- Arrival order of a stream is a source of variation when the sender is
-  outside the workflow. Within one sender-to-workflow mailbox, order MUST be
-  preserved.
-
-### Clustered execution
-
-- A workflow MUST be able to run on any process of the cluster that the
-  runtime places it on.
-- Placement MUST NOT be part of the program's meaning. A transition MUST NOT
-  name a host, thread, or process.
-- After a move, the instance MUST resume with the same identity, the same
-  machine state, and the same undelivered mailbox messages, as if it had not
-  moved.
-- Two placements MUST NOT run turns of the same instance at the same time.
-
-### Determinism
-
-- Given the same machine state and the same enabling message, a workflow
-  transition MUST be deterministic in the same sense as a component
-  transition.
-- Which work item of a join set completes first MUST NOT be assumed by the
-  program. A transition that needs a particular item MUST match it by
-  identity or pattern, not by arrival race.
+- A scene root MAY be a workflow or a component. `kith run` and `World::start`
+  run that instance. When the root is a workflow, inject starts the run.
+- A workflow MUST have exactly one `start` step.
+- A task or map kind MUST exist and MUST NOT require unfilled ports unless a
+  scene prototype supplies that tree.
+- `complete V` on a work item MUST send `V` to the waiting workflow and count
+  down the join set. For a map, `V` MUST be sent to the reducer as one item.
+  The reducer's `complete` after `else` (including when the list is empty)
+  advances `then`. The join MUST NOT materialize an array of all
+  payloads as the step output.
+- Choice matches the working value against clause patterns in order. `else`
+  MUST be last if present. No match MUST fail the run.
+- Snapshot and restore MUST round-trip a run, including in-flight map items.
 
 ## Mechanism
 
 ### Declaration
 
-The following sketch establishes the shape; token spelling is not frozen.
+The normative workflow is `examples/order.kith`: validate, choose, charge,
+choose, map `Carrier` work items, reduce into `Summarize`. Tasks `complete`;
+the graph moves with `then` / `pick`. A map item MAY wait without completing
+until the host sends a later message into that work item. Fan-out names the
+work item and the accumulator component; that component holds the aggregate
+in its fields. A step MAY destructure the working value before the body.
 
-```text
-workflow Import {
-  start Ready {
-    on (Start items) {
-      fanout items -> item;
+```kith
+component Summarize {
+  field orderId: any;
+  field total: number = 0;
+  start {
+    on item: any {
+      total -> (add total 1);
     }
-    on item.Done {
-      join;
-    }
+    else complete { kind: "Summarize" orderId total };
   }
 }
 
-export scene ImportRun {
-  Import() {
-    item = ProcessItem()
-  }
+workflow Order {
+  start Validate: ValidateOrder then Stock;
+  Stock: pick {
+    ({ kind: "Accepted" }) -> Pay;
+    else -> Reject;
+  };
+  Pay: ChargeCard then Paid;
+  Paid: pick {
+    ({ kind: "Paid" }) -> Fulfill;
+    else -> Decline;
+  };
+  Fulfill: { items: any orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
+  Reject: fail "invalid order";
+  Decline: fail "payment declined";
 }
 ```
 
-- `workflow Name { ... }` declares a kind of workflow.
-- Static children are wired in a [scene](./scenes.spec.md), not on the
-  workflow kind. Fan-out MAY create many instances of a wired kind, each an
-  item in a join set.
-- `fanout collection -> child` spawns one work item per element as children
-  of that kind, and records a join set.
-- Completions arrive as messages (`item.Done` in the sketch). A join
-  transition reduces the join set and, when the join condition holds, continues
-  the workflow.
+```kith
+workflow Import {
+  start { items: any } -> fanout items with Worker into Count then succeed;
+}
 
-### Progress
+workflow Host {
+  start run plan then succeed;
+}
+```
 
-- Each fan-out records branches; each work item is a leaf until it fans out
-  further.
-- Progress MUST roll up completed and total counts along that tree.
-- A workflow MAY include progress content computed by expressions from its
-  fields. That content MUST be data a caller can read without taking a turn
-  that changes the machine.
+- `start Body then Target` is the entry node (implicit name `Start` when
+  unnamed). `Name: Body then Target` is a later node.
+- `Name: Pattern -> Body then Target` matches Pattern against the working
+  value (same Prefix as `on`: an Over, a grouped `(P)`, or a capture).
+  `{ items: any, orderId: any }` is a Uffda Over: those keys bind, nested
+  patterns destructure, extra keys are ignored unless rest requires them.
+  No match MUST fail the run.
+- **task** `Kind` — spawn `Kind`, send the working value, wait for `complete`
+  (Step Functions Task).
+- **map** `fanout Expression with Kind into Acc(Init)` — Expression is the
+  list (Step Functions Map). Spawn one `Kind` per element with
+  `{ kind: "Item", item, index }`. `into Acc` is the accumulator component.
+  `Acc(orderId)` initializes fields from those arguments; field inits on
+  Acc still apply. Each completion is sent as the payload (`on item: any`).
+  After the last item (or immediately when the list is empty) the runtime
+  ends the accumulator; that takes `else`. `Acc`'s `else` MUST `complete`;
+  that payload is the map output.
+- **choice** `pick { (Pattern) -> Name; else -> Name; }` — Step Functions
+  Choice. Each clause names a later step. A clause MUST NOT inline a
+  fanout (or other body); it routes to a step that MAY be a fanout.
+  The pattern is grouped so `->` is Kith's edge, not a Uffda Then.
+- **pass** `pass Expression` — replace the working value (Pass).
+- **run** `run path` — execute the workflow IR at that key (dynamic graph).
+- **succeed** / **fail Expression** — terminal (Succeed / Fail).
+- `then Name` | `then succeed` | `then fail E` is Next / End. `then succeed`
+  is one Next, not the only Next; `then Packed` continues the graph.
 
-### Child workflows
+Scene children under a workflow are **prototypes**, not live children. A task
+or map that names that kind clones the prototype tree (ports filled). Otherwise
+it spawns a bare instance (no ports allowed).
 
-- A child workflow is an ordinary child instance whose kind is a workflow.
-- Destroying a parent MUST cancel its child workflows. Cancellation MUST
-  propagate to their join sets.
-- A child workflow's completion is a message to its parent, like any other
-  child.
+### Working value
 
-### Clustered execution
+- Inject at the root sets the working value and enters `start`.
+- A step's output becomes the next step's input (Step Functions default
+  ResultPath `$`).
+- The run's output is the working value at succeed. `kith run` prints it.
 
-- The runtime MAY move a workflow between processes between turns.
-- A move MUST wait until the current turn of that instance is complete.
-- Durable facts of a workflow are at least: identity, kind, machine state,
-  mailbox, join sets, and child identities. How they are stored is the planned
-  `persistence` chapter.
-- Streaming senders address the workflow by identity, not by placement. The
-  cluster MUST route those messages to the current placement.
+### Waiting for an outside message
+
+A task or map item that does not `complete` leaves the run at that step. That
+is the callback pattern. In Order, Carrier `send to ship` a `Dispatch` and
+`goto Shipping`. MockShip (a child, filled on the Carrier prototype) waits
+with `send after (rand 1 3) up { kind: "Delivered" }`. Shipping matches
+`on up { kind: "Delivered" }` and `complete`s. A host driver MUST deliver
+on that same up route. The workflow graph has no `on`; the work item matches.
+The join set advances when that item `complete`s.
+
+`World::run_until_idle` leaves those timers pending (Carriers still in
+`Shipping`). `World::run` / `kith run` advances the clock until they fire.
+
+### Dynamic graphs
+
+A workflow IR is tagged data with `kind: "workflow"`, `start`, and `steps`.
+Uffda expressions MAY build that value. `run plan` MUST accept it. Building
+graphs at run time MUST NOT require new source.
+
+### Snapshot
+
+`World::snapshot` MUST emit one Uffda data codec record for every instance
+(component machine or workflow run), join sets, mailboxes, ready queue,
+clock, RNG, and pending timers. `World::restore` MUST accept that record
+plus the program and continue. The record MUST NOT be JSON.
+
+## Syntax tree
+
+- `{ kind: "workflow", name, start, steps: [FlowStep] }`
+- `{ name, start: boolean, pattern: Pattern | null, body: StepBody, next: Next | null }`
+- `body.kind`: `task` `{ component }`, `map` `{ items, component, reduce, init }`,
+  `choice` `{ clauses: [{ pattern, step }] }`, `pass` `{ value }`,
+  `run` `{ path }`, `succeed`, `fail` `{ error }`
+- `next.kind`: `goto` `{ step }`, `succeed`, `fail` `{ error }`
+
+## Example
+
+Inject `{ kind: "Order", orderId: "o-1", items: ["sku-a", "sku-b"], card: "ok" }`
+at `Order` MUST accept and charge, then wait on two `Carrier` work items.
+After each MockShip `send after (rand 1 3) up { kind: "Delivered" }`, `Summarize`
+MUST fold each `Shipped` payload into
+`{ kind: "Summarize", orderId: "o-1", total: 2 }`.
+
+Inject `{ kind: "Nope" }` MUST fail the run with `invalid order`.
+
+Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
+`Worker`s and reduce them with `Count` to `2`.
 
 ## Why this design
 
-- **A second primitive, not a component flag.** Components are a topology for
-  local concurrent behavior. Workflows are relocatable, joinable, long-running
-  work with progress. Collapsing them now would mix mailbox-as-UI-tree with
-  mailbox-as-orchestrator before either is built. They share dispatch so the
-  runtime stays one scheduler.
-- **Fan-out as spawn, join as message.** A blocking join would stall the
-  dispatcher. An implicit promise graph would hide actors. Spawn and complete
-  as messages keep checkability: the checker varies completion order at the
-  mailbox.
-- **Placement is not in the program.** If a transition could name a host,
-  clustered execution would leak into business and component code, and a
-  checker could not relocate work.
+- **Step Functions' graph, Kith's syntax.** Task / Map / Choice / Pass /
+  Succeed / Fail are the right verbs. JSON state machines are not.
+- **Components stay machines; workflows stay flows.** Ping is has-a
+  (`send to` / `send up`). Order is a graph (`then` / `pick` / `fanout`).
+- **The graph is data.** That is what makes dynamic steps, runtime-built
+  workflows, and rehydration the same interpreter.
+- **Fan-in is an accumulator component, not a collect.** A results array is
+  O(n) memory and forces the next step to re-walk every payload. The
+  accumulator holds a constant-size aggregate in its fields. Fan-out only
+  delivers items; it MUST NOT own that state. Collecting into a list is
+  still possible: write an accumulator that concatenates, and accept the
+  cost.
 
 ## Open questions
 
-- **Join conditions.** All items, first success, first failure, N-of-M, and
-  how failures cancel the rest.
-- **Partial results.** Whether a join MAY yield a stream of per-item messages
-  as well as a final join message.
-- **Exactly-once turns** after a crash, versus at-least-once with idempotent
-  transitions.
-- **How a stream is declared** (a child slot that receives, a pattern of
-  messages, a Uffda async iterable).
-- **Who may query progress** without sending a message that the machine must
-  match.
-- **Timers** for workflow deadlines, in the planned `timers` chapter.
-- **Whether Coleslaw's planned workflow chapter** is only a restriction of
-  this one. Deferred to Coleslaw.
+- Parallel, Wait-with-timeout, Retry/Catch, JSONPath InputPath / ResultPath
+  beyond a single object key. Delayed `send after` is in
+  [timers](./timers.spec.md).
+- Nested Map iterators that are full subgraphs, not a single kind.
+- Exactly-once after a crash versus at-least-once restore.
+- Bounded map concurrency so a pending fold queue cannot grow with n.

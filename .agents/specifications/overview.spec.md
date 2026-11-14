@@ -43,22 +43,24 @@ primitives rather than defining their own.
 - **Messages are the only communication.** Components and workflows MUST NOT
   call one another as functions to cause behavior. They send messages. A
   message is routed to a named port (`send to`), down to children of a kind
-  (`send down`), or up toward the root (`send up`), then matched as a Uffda
-  pattern.
-- **State machines are the only behavior.** Choosing what happens — which
-  messages to send, whether to change state, whether to spawn work — MUST be
-  done by a transition of a state machine. Expressions compute values and have
-  no effect.
+  (`send down`), up toward the root (`send up`), or to this instance
+  (`send self`), then matched as a Uffda pattern.
+- **Machines and flows.** Component behavior is a state machine: a matched
+  message may send, assign, and `complete`. Workflow behavior is a flow graph:
+  completing a step follows `then` (or a `pick` clause) with that step's
+  output as the working value. Expressions compute values and have no effect.
 - **Dispatch is the runtime.** User code MUST NOT schedule actors, wait on
-  threads, or lock shared state. The dispatcher treats components and
-  in-flight transitions as actors and is the parallelization mechanism.
+  threads, or lock shared state. Delayed work is `send after`, not a sleep.
+  The dispatcher treats components and in-flight transitions as actors and is
+  the parallelization mechanism.
 - **Patterns match messages.** A receive clause is a Uffda pattern. Checking a
   message against a transition means matching that pattern.
-- **Expressions are pure.** Uffda expressions compute values. Effects are
-  explicit: sending a message, changing machine state, spawning or joining
-  work.
+- **Expressions are pure.** Uffda expressions compute values (including
+  globals such as `length`). Effects are explicit: sending a message, printing,
+  changing machine state, spawning or joining work.
 - **One tree per exported scene.** A running program is the instance tree of
-  its unique exported scene. Each instance has at most one parent. The tree is
+  its unique exported scene. The root is that scene's top instance, a
+  component or a workflow. Each instance has at most one parent. The tree is
   has-a all the way down.
 - **Scheduling is a source of variation.** The order in which independent actors
   run is not part of a program's meaning. A checker MUST be able to vary that

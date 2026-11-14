@@ -1,4 +1,5 @@
-use crate::ast::{Component, Program, Scene};
+use crate::ast::{Component, Program, Scene, Workflow};
+use crate::codec::decode;
 use crate::error::Error;
 use crate::json_util::from_uffda_value;
 use serde_json::Value as Json;
@@ -173,11 +174,13 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
             }
             if let Some(component) = dep.component(name).cloned() {
                 merge_component(&mut program, component);
+            } else if let Some(workflow) = dep.workflow(name).cloned() {
+                merge_workflow(&mut program, workflow);
             } else if let Some(scene) = dep.scene(name).cloned() {
                 merge_scene(&mut program, scene);
             } else {
                 return Err(Error::new(format!(
-                    "{name} is exported by {} but is not a component or scene",
+                    "{name} is exported by {} but is not a component, workflow, or scene",
                     import.module_url
                 )));
             }
@@ -192,6 +195,12 @@ fn merge_component(program: &mut Program, component: Component) {
     }
 }
 
+fn merge_workflow(program: &mut Program, workflow: Workflow) {
+    if program.workflow(&workflow.name).is_none() {
+        program.workflows.push(workflow);
+    }
+}
+
 fn merge_scene(program: &mut Program, scene: Scene) {
     if program.scene(&scene.name).is_none() {
         program.scenes.push(scene);
@@ -201,16 +210,16 @@ fn merge_scene(program: &mut Program, scene: Scene) {
 pub fn looks_like_artifact(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension == "json")
+        .is_some_and(|extension| extension == "ast")
         || path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".kith.json"))
+            .is_some_and(|name| name.ends_with(".kith.ast"))
 }
 
 pub fn load_artifact(path: &Path) -> Result<Program, Error> {
     let text = std::fs::read_to_string(path).map_err(|error| Error::new(error.to_string()))?;
-    let value: Json = serde_json::from_str(&text).map_err(|error| Error::new(error.to_string()))?;
+    let value = decode(&text)?;
     if let Some(program) = value.get("program") {
         serde_json::from_value(program.clone()).map_err(|error| Error::new(error.to_string()))
     } else {

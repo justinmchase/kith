@@ -35,5 +35,5 @@ Uffda does not need new runtime types for those primitives.
 kith parse app.kith
 kith check app.kith
 kith compile app.kith
-kith run app.kith --message '{"kind":"Ping","n":7}'
+kith run app.kith --message '["Ping", 7]'
 ```

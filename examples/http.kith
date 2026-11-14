@@ -1,0 +1,84 @@
+export Http;
+export Client;
+export HealthCheck;
+export Main;
+
+component Http {
+  start {
+    on down "GET" url:any {
+      print "Requested" url;
+      send after (rand 1 3) up "Response" 200 "ok";
+    }
+  }
+}
+
+component Client {
+  Http http;
+
+  start Idle {
+    on down "Go" url:any {
+      send to http "GET" url;
+      goto Sending;
+    }
+  }
+
+  state Sending {
+    on up "Response" status:number body:any {
+      send up "Done" status body;
+      goto Idle;
+    }
+  }
+}
+
+component HealthCheck {
+  field s1: number?;
+  field s2: number?;
+  field s3: number?;
+  Client client;
+
+  start Checking {
+    on init {
+      send self "Tick";
+    }
+    on self "Tick" {
+      send to client "Go" "https://example.com";
+      goto Waiting;
+    }
+  }
+
+  state Waiting {
+    on up "Done" status:number body:any {
+      s1 -> s2;
+      s2 -> s3;
+      s3 -> status;
+      send self "Check" s1 s2 s3;
+      goto Validating;
+    }
+  }
+
+  state Validating {
+    on self "Check" a:200 b:200 c:200 {
+      print "Healthy";
+      send after 5 self "Tick";
+      goto Checking;
+    }
+    on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
+      print "Unhealthy";
+      send after 5 self "Tick";
+      goto Checking;
+    }
+    else {
+      print "Indeterminate";
+      send after 5 self "Tick";
+      goto Checking;
+    }
+  }
+}
+
+export scene Main {
+  HealthCheck() {
+    client = Client() {
+      http = Http();
+    }
+  }
+}

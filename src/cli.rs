@@ -1,4 +1,5 @@
 use crate::ast::Program;
+use crate::codec::encode;
 use crate::error::Error;
 use crate::interpreter::World;
 use crate::parse::{artifact_document, load_program, parse_file};
@@ -73,7 +74,9 @@ pub fn run(command: Command) -> Result<String, Error> {
     match command {
         Command::Parse { path } => {
             let program = parse_file(&path)?;
-            serde_json::to_string_pretty(&program).map_err(|error| Error::new(error.to_string()))
+            let tree =
+                serde_json::to_value(&program).map_err(|error| Error::new(error.to_string()))?;
+            encode(&tree)
         }
         Command::Check { path } => {
             let program = load_program(&path)?;
@@ -85,12 +88,8 @@ pub fn run(command: Command) -> Result<String, Error> {
             World::check(&program)?;
             let out = artifact_path(&path);
             let document = artifact_document(&program);
-            std::fs::write(
-                &out,
-                serde_json::to_string_pretty(&document)
-                    .map_err(|error| Error::new(error.to_string()))?,
-            )
-            .map_err(|error| Error::new(error.to_string()))?;
+            std::fs::write(&out, encode(&document)?)
+                .map_err(|error| Error::new(error.to_string()))?;
             Ok(format!("{}\n", out.display()))
         }
         Command::Run { path, message } => {
@@ -104,10 +103,9 @@ pub fn run_program(program: Program, message: Option<Json>) -> Result<String, Er
     let mut world = World::start(program)?;
     if let Some(message) = message {
         world.inject(message)?;
-        world.run_until_idle()?;
     }
-    serde_json::to_string_pretty(&world.root_fields())
-        .map_err(|error| Error::new(error.to_string()))
+    world.run()?;
+    encode(&world.result())
 }
 
 fn artifact_path(source: &Path) -> PathBuf {
@@ -117,9 +115,9 @@ fn artifact_path(source: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("program.kith");
     if name.ends_with(".kith") {
-        out.set_file_name(format!("{name}.json"));
+        out.set_file_name(format!("{name}.ast"));
     } else {
-        out.set_extension("kith.json");
+        out.set_extension("kith.ast");
     }
     out
 }

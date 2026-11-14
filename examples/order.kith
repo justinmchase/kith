@@ -1,0 +1,97 @@
+export ValidateOrder;
+export ChargeCard;
+export MockShip;
+export Carrier;
+export Summarize;
+export Order;
+export Main;
+
+component ValidateOrder {
+  start {
+    on { kind: "Order" orderId: any items: any card: any } {
+      complete { kind: "Accepted" orderId items card };
+    }
+    else {
+      complete { kind: "Rejected" };
+    }
+  }
+}
+
+component ChargeCard {
+  start {
+    on { kind: "Accepted" card: "ok" orderId: any items: any } {
+      complete { kind: "Paid" orderId items };
+    }
+    on { kind: "Accepted" orderId: any items: any card: any } {
+      complete { kind: "Declined" orderId };
+    }
+  }
+}
+
+component MockShip {
+  start {
+    on down { kind: "Dispatch" item: any index: number } {
+      print { kind: "InTransit" item index };
+      send after (rand 1 3) up { kind: "Delivered" };
+    }
+  }
+}
+
+component Carrier {
+  field item: string = "";
+  field index: number = 0;
+  MockShip ship;
+
+  start Waiting {
+    on down { kind: "Item" item: any index: number } {
+      item -> item;
+      index -> index;
+      print { kind: "PickupRequested" item index };
+      send to ship { kind: "Dispatch" item index };
+      goto Shipping;
+    }
+  }
+
+  state Shipping {
+    on up { kind: "Delivered" } {
+      complete { kind: "Shipped" item index };
+    }
+  }
+}
+
+component Summarize {
+  field orderId: any;
+  field total: number = 0;
+
+  start {
+    on item: any {
+      total -> (add total 1);
+      print { kind: "Tally" total status: item.kind };
+    }
+    else complete { kind: "Summarize" orderId total };
+  }
+}
+
+workflow Order {
+  start Validate: ValidateOrder then Stock;
+  Stock: pick {
+    ({ kind: "Accepted" }) -> Pay;
+    else -> Reject;
+  };
+  Pay: ChargeCard then Paid;
+  Paid: pick {
+    ({ kind: "Paid" }) -> Fulfill;
+    else -> Decline;
+  };
+  Fulfill: { items: any orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
+  Reject: fail "invalid order";
+  Decline: fail "payment declined";
+}
+
+export scene Main {
+  Order() {
+    Carrier() {
+      ship = MockShip();
+    }
+  }
+}

@@ -10,18 +10,18 @@ spec_ref: .agents/specifications/cli.spec.md#commands
 
 Preconditions:
 
-- `examples/ping.kith` is the normative Parent/Child program with exported
-  scene `Main`.
+- `examples/ping.kith` is the normative Ping/Child program with exported
+  scene `Main` whose root is component `Ping`.
 
 Expected behavior:
 
-- `kith parse` MUST print a `program` syntax tree with scene `Main` and MUST
-  NOT start actors.
-- `kith check` MUST accept the example and MUST reject a component with no
-  start state.
-- `kith compile` MUST write a program artifact.
-- `kith run examples/ping.kith --message '{"kind":"Ping","n":7}'` MUST leave
-  `Parent.heard` at `7` and exit 0.
+- `kith parse` MUST print a `program` syntax tree with scene `Main` as a
+  Uffda data codec record (not JSON) and MUST NOT start actors.
+- `kith check` MUST accept the example and MUST reject a workflow with no
+  start step, and a program with no exported scene.
+- `kith compile` MUST write a `.kith.ast` data codec artifact.
+- `kith run examples/ping.kith --message '["Ping",7]'` MUST print
+  a data codec record with `heard` `7` and exit 0.
 
 Postconditions:
 

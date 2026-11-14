@@ -1,6 +1,6 @@
 import "@justinmchase/uffda/source" Source;
 import "@justinmchase/uffda/tokenizer" TokenizerNoWhitespace;
-import "@justinmchase/uffda/pattern" Pattern;
+import "@justinmchase/uffda/pattern" Pattern PatternTokens;
 import "@justinmchase/uffda/expression" Expression;
 
 export KithLang;
@@ -29,17 +29,25 @@ rule Import =
 rule ExportName = n:Identifier -> { kind: "export", name: n };
 
 rule ExportList =
-  "export" not "scene" not "component" f:ExportName r:ExportName* ";"
+  "export" not "scene" not "component" not "workflow" f:ExportName r:ExportName* ";"
   -> (flat [[f] (flat r)])
 ;
 
 rule Field =
-  "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
-  -> { kind: "field", name: n, pattern: p, init: e }
+  | (
+    "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
+    -> { kind: "field", name: n, pattern: p, init: e }
+  )
+  | (
+    "field" n:Identifier ":" p:Pattern ";"
+    -> { kind: "field", name: n, pattern: p }
+  )
 ;
 
 rule Port =
-  not "field" not "start" not "state" k:Identifier n:Identifier ";"
+  not "field" not "start" not "state" not "step" not "join" not "print" not "else" not "goto"
+  not "with" not "into" not "fanout" not "after" not "self" not "init" not "or"
+  k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
 
@@ -49,47 +57,250 @@ rule Assign =
 ;
 
 rule SendUp =
-  "send" "up" e:Expression ";"
-  -> { kind: "sendUp", message: e }
+  | (
+    "send" "after" d:Expression "up" e:MessageSeq ";"
+    -> { kind: "sendUp", after: d, message: e }
+  )
+  | (
+    "send" "up" e:MessageSeq ";"
+    -> { kind: "sendUp", message: e }
+  )
 ;
 
 rule SendTo =
-  "send" "to" n:Identifier e:Expression ";"
-  -> { kind: "sendTo", port: n, message: e }
+  | (
+    "send" "after" d:Expression "to" n:Identifier e:MessageSeq ";"
+    -> { kind: "sendTo", after: d, port: n, message: e }
+  )
+  | (
+    "send" "to" n:Identifier e:MessageSeq ";"
+    -> { kind: "sendTo", port: n, message: e }
+  )
 ;
 
 rule SendDown =
   | (
-    "send" "down" "any" e:Expression ";"
+    "send" "after" d:Expression "down" "any" e:MessageSeq ";"
+    -> { kind: "sendDown", after: d, component: null, message: e }
+  )
+  | (
+    "send" "after" d:Expression "down" n:Identifier e:MessageSeq ";"
+    -> { kind: "sendDown", after: d, component: n, message: e }
+  )
+  | (
+    "send" "down" "any" e:MessageSeq ";"
     -> { kind: "sendDown", component: null, message: e }
   )
   | (
-    "send" "down" n:Identifier e:Expression ";"
+    "send" "down" n:Identifier e:MessageSeq ";"
     -> { kind: "sendDown", component: n, message: e }
   )
 ;
 
-rule Statement =
+# Self-send. Taken on a later turn (`on self` or unqualified `on`). A route is required.
+rule SendSelf =
+  | (
+    "send" "after" d:Expression "self" e:MessageSeq ";"
+    -> { kind: "send", after: d, message: e }
+  )
+  | (
+    "send" "self" e:MessageSeq ";"
+    -> { kind: "send", message: e }
+  )
+;
+
+# `{ kind: "Done" status body }` is `kind: "Done"` plus shorthand `status` / `body`.
+# Commas between entries are optional.
+rule MessageObjectEntry =
+  | (
+    n:Identifier ":" v:Expression
+    -> { kind: "objectKey", name: n, expression: v }
+  )
+  | (
+    n:Identifier not ":"
+    -> { kind: "objectKey", name: n, expression: { kind: "reference", name: n } }
+  )
+;
+
+rule MessageObjectTail =
+  ","? more:MessageObjectEntry -> more
+;
+
+rule MessageObjectEntries =
+  first:MessageObjectEntry rest:MessageObjectTail* ","?
+  -> (flat (pack first rest))
+;
+
+rule MessageObject =
+  "{" keys:MessageObjectEntries? "}"
+  -> { kind: "object", keys: (coalesce keys []) }
+;
+
+rule Message =
+  | MessageObject
+  | Expression
+;
+
+# One value stays that expression. Two or more become a sequence array.
+rule MessageSeq =
+  m:(first:Message rest:Message* -> (flat [[first] (flat rest)]))
+  -> (one m { kind: "sequence", items: m })
+;
+
+rule Complete =
+  "complete" e:MessageSeq ";"
+  -> { kind: "complete", message: e }
+;
+
+rule Print =
+  "print" e:MessageSeq ";"
+  -> { kind: "print", expression: e }
+;
+
+rule Goto =
+  "goto" n:Identifier ";"
+  -> { kind: "goto", state: n }
+;
+
+rule ComponentStatement =
   | Assign
   | SendTo
   | SendUp
   | SendDown
+  | SendSelf
+  | Complete
+  | Print
+  | Goto
 ;
 
-# Group the message pattern so the handler body `{` is not a Then object.
-rule Handler =
-  "on" "(" p:Pattern ")" "{" b:Statement* "}"
-  -> { kind: "handler", pattern: p, body: b }
+# Handler patterns are Uffda Then of prefixes, stopped before the body `{`.
+# A top-level Uffda Pattern would take that `{` as another Over. Object
+# entries project Uffda Over (variable wrapping the field pattern) and MAY
+# omit commas. `{` after the first prefix is the handler body, not another
+# object; a later object is written `v:{ ... }` (a capture).
+rule OnQuotedString =
+  "\"" p:SpecifierChar* "\""
+  -> { kind: "equal", value: { kind: "value.literal", value: (join p "") } }
+;
+
+rule OnBareTokens = not "{" not "(" t:any -> [t];
+
+rule OnBarePattern = |> OnBareTokens |> PatternTokens;
+
+rule OnAtom =
+  | ("(" p:Pattern ")" -> p)
+  | OnObjectPattern
+  | OnQuotedString
+  | OnBarePattern
+;
+
+rule OnCapturePattern =
+  n:Identifier ":" p:OnAtom
+  -> { kind: "variable", name: n, pattern: p }
+;
+
+rule OnOverEntry =
+  | (
+    n:Identifier ":" p:OnAtom
+    -> { name: n, pattern: { kind: "variable", name: n, pattern: p } }
+  )
+  | (
+    n:Identifier not ":"
+    -> { name: n, pattern: { kind: "variable", name: n, pattern: { kind: "any" } } }
+  )
+;
+
+rule OnOverTail =
+  ","? more:OnOverEntry -> more
+;
+
+rule OnOverEntries =
+  first:OnOverEntry rest:OnOverTail* ","?
+  -> (flat (pack first rest))
+;
+
+rule OnObjectPattern =
+  "{" keys:OnOverEntries? "}"
+  -> { kind: "over", keys: (from_entries (coalesce keys [])), rest: null }
+;
+
+# Rest items cannot start with `{`, or `on "Tick" {}` would eat the body.
+rule OnThenItem =
+  | ("(" p:Pattern ")" -> p)
+  | OnQuotedString
+  | OnCapturePattern
+  | OnBarePattern
+;
+
+rule OnThenFirst =
+  | OnObjectPattern
+  | OnThenItem
+;
+
+rule OnThen =
+  m:(
+    first:OnThenFirst rest:OnThenItem*
+    -> (flat [[first] (flat rest)])
+  )
+  -> (one m { kind: "then", patterns: m })
+;
+
+rule RouteName =
+  | ("up" -> "up")
+  | ("down" -> "down")
+  | ("self" -> "self")
+;
+
+rule RouteOrMore =
+  "or" n:RouteName -> n
+;
+
+rule HandlerRoutes =
+  first:RouteName rest:RouteOrMore*
+  -> (flat [[first] (flat rest)])
+;
+
+rule ComponentHandler =
+  | (
+    "on" "init" "{" b:ComponentStatement* "}"
+    -> { kind: "handler", route: (flat [["init"]]), pattern: { kind: "any" }, body: b }
+  )
+  | (
+    "on" r:HandlerRoutes p:OnThen "{" b:ComponentStatement* "}"
+    -> { kind: "handler", route: r, pattern: p, body: b }
+  )
+  | (
+    "on" p:OnThen "{" b:ComponentStatement* "}"
+    -> { kind: "handler", route: (flat [["up"] ["down"] ["self"]]), pattern: p, body: b }
+  )
+;
+
+# Default clause, last in the state. Same tree as `on any` (up or down or self).
+rule ElseHandler =
+  | (
+    "else" "{" b:ComponentStatement* "}"
+    -> [{ kind: "handler", route: (flat [["up"] ["down"] ["self"]]), pattern: { kind: "any" }, body: b }]
+  )
+  | (
+    "else" s:ComponentStatement
+    -> [{ kind: "handler", route: (flat [["up"] ["down"] ["self"]]), pattern: { kind: "any" }, body: [s] }]
+  )
 ;
 
 rule StartState =
-  "start" n:Identifier "{" h:Handler* "}"
-  -> { kind: "state", name: n, start: true, handlers: h }
+  | (
+    "start" "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: "Start", start: true, named: false, handlers: (flat [h (coalesce e [])]) }
+  )
+  | (
+    "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: n, start: true, named: true, handlers: (flat [h (coalesce e [])]) }
+  )
 ;
 
 rule NamedState =
-  "state" n:Identifier "{" h:Handler* "}"
-  -> { kind: "state", name: n, start: false, handlers: h }
+  "state" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+  -> { kind: "state", name: n, start: false, named: true, handlers: (flat [h (coalesce e [])]) }
 ;
 
 rule State =
@@ -104,6 +315,89 @@ rule ComponentDeclaration =
     s:State+
   "}"
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
+;
+
+rule FlowTarget =
+  | ("succeed" -> { kind: "succeed" })
+  | ("fail" e:Expression -> { kind: "fail", error: e })
+  | (n:Identifier -> { kind: "goto", step: n })
+;
+
+rule FlowThen = "then" t:FlowTarget -> t;
+
+rule ChoiceClause =
+  | (
+    "else" "-" ">" n:Identifier ";"
+    -> { pattern: { kind: "any" }, step: n }
+  )
+  | (
+    "(" p:Pattern ")" "-" ">" n:Identifier ";"
+    -> { pattern: p, step: n }
+  )
+;
+
+rule MapInit =
+  "(" keys:MessageObjectEntries? ")"
+  -> { kind: "object", keys: (coalesce keys []) }
+;
+
+# Same Then as `on`: an Over `{ items: any orderId: any }`, a grouped
+# `(Pattern)`, or a capture. `->` is Kith's edge, so the pattern is not a
+# top-level Uffda Then (that would eat `->` / `{`).
+rule StepHead =
+  | (p:OnThen "-" ">" -> p)
+  | (ok -> null)
+;
+
+rule StepBody =
+  | (
+    "fanout" e:Expression "with" k:Identifier "into" r:Identifier i:MapInit?
+    -> { kind: "map", items: e, component: k, reduce: r, init: i }
+  )
+  | ("run" p:Identifier -> { kind: "run", path: p })
+  | ("pass" e:Expression -> { kind: "pass", value: e })
+  | ("pick" "{" c:ChoiceClause* "}" -> { kind: "choice", clauses: c })
+  | ("succeed" -> { kind: "succeed" })
+  | ("fail" e:Expression -> { kind: "fail", error: e })
+  | (k:Identifier -> { kind: "task", component: k })
+;
+
+rule FlowStep =
+  | (
+    "start" n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
+    -> {
+      name: n,
+      start: true,
+      pattern: h,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
+  | (
+    "start" h:StepHead b:StepBody t:FlowThen? ";"
+    -> {
+      name: "Start",
+      start: true,
+      pattern: h,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
+  | (
+    n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
+    -> {
+      name: n,
+      start: false,
+      pattern: h,
+      body: b,
+      next: (coalesce t { kind: "succeed" })
+    }
+  )
+;
+
+rule WorkflowDeclaration =
+  "workflow" n:Identifier "{" s:FlowStep+ "}"
+  -> { kind: "workflow", name: n, start: "Start", steps: s }
 ;
 
 rule NamedChild =
@@ -134,7 +428,7 @@ rule ChildConstruction =
 rule InstanceBody = "{" c:ChildConstruction* "}" -> c;
 
 rule Construction =
-  n:Identifier "(" ")" b:InstanceBody?
+  n:Identifier "(" ")" b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
@@ -163,12 +457,13 @@ rule ScenePart =
   | BareScene
 ;
 
-func ProgramFrom<i:any e:any c:any s:any> =
+func ProgramFrom<i:any e:any c:any w:any s:any> =
   {
     kind: "program",
     imports: i,
     exports: (flat [(flat e) (flat (pluck s "exports"))]),
     components: c,
+    workflows: w,
     scenes: (flat (pluck s "scenes"))
   }
 ;
@@ -177,9 +472,10 @@ rule Program =
   i:Import*
   e:ExportList*
   c:ComponentDeclaration*
+  w:WorkflowDeclaration*
   s:ScenePart*
   end
-  -> (ProgramFrom i e c s)
+  -> (ProgramFrom i e c w s)
 ;
 
 [Language { id: "kith", name: "Kith", extensions: [".kith"] }]
