@@ -367,15 +367,12 @@ export scene Main { Box(); }
     .expect("parse or list");
     let box_kind = program.component("Box").expect("Box");
     assert_eq!(box_kind.states[0].handlers[0].route, ["up", "down"]);
-    assert_eq!(
-        box_kind.states[0].handlers[1].route,
-        ["up", "down", "self"]
-    );
+    assert_eq!(box_kind.states[0].handlers[1].route, ["up", "down", "self"]);
     World::check(&program).expect("or list checks");
 }
 
 #[test]
-// req:components-017 req:grammar-001
+// req:components-017 req:components-019 req:grammar-001
 fn message_sequences_and_object_patterns_parse() {
     let program = parse_source(
         r#"
@@ -393,7 +390,7 @@ component Box {
       send up { kind: "Done" status: 200 };
     }
     on up v:{ kind: "Done" status: number } {
-      print v;
+      (writeLine stdout v);
     }
   }
 }
@@ -405,7 +402,10 @@ export scene Main { Box(); }
     let handlers = &box_kind.states[0].handlers;
     assert_eq!(handlers[0].pattern["kind"], "then");
     assert_eq!(
-        handlers[0].pattern["patterns"].as_array().expect("then").len(),
+        handlers[0].pattern["patterns"]
+            .as_array()
+            .expect("then")
+            .len(),
         4
     );
     match &handlers[0].body[0] {
@@ -421,5 +421,54 @@ export scene Main { Box(); }
     assert_eq!(handlers[2].pattern["kind"], "variable");
     assert_eq!(handlers[2].pattern["name"], "v");
     assert_eq!(handlers[2].pattern["pattern"]["kind"], "over");
+    match &handlers[2].body[0] {
+        kith::ast::Statement::Expr { expression } => {
+            assert_eq!(expression["kind"], "invocation");
+            assert_eq!(expression["expression"]["name"], "writeLine");
+        }
+        other => panic!("expected expr, got {other:?}"),
+    }
     World::check(&program).expect("sequence program checks");
+}
+
+#[test]
+// req:components-019 req:grammar-001
+fn expression_statements_parse_and_print_is_not_a_statement() {
+    let program = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      (writeLine stdout "hi");
+      (print "hi");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse expr stmts");
+    let body = &program.component("Box").expect("Box").states[0].handlers[0].body;
+    assert!(matches!(body[0], kith::ast::Statement::Expr { .. }));
+    assert!(matches!(body[1], kith::ast::Statement::Expr { .. }));
+    World::check(&program).expect("expr stmts check");
+
+    let err = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      print "hi";
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect_err("print statement is gone");
+    assert!(!err.to_string().is_empty());
 }

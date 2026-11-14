@@ -10,7 +10,8 @@ spec_ref: .agents/specifications/components.spec.md#terminal-statements
 
 Preconditions:
 
-- A component handler body may assign, print, send, `goto`, and `complete`.
+- A component handler body may assign, evaluate an expression statement,
+  send, `goto`, and `complete`.
 
 Expected behavior:
 
@@ -22,8 +23,8 @@ Expected behavior:
   `complete`.
 - `send` then `goto` MUST be accepted. The later self-send MUST match in
   the state entered by that `goto`.
-- Assign and `print` before the terminal MUST run on this turn. Sends
-  MUST NOT run the receiver on this turn.
+- Assign and expression statements before the terminal MUST run on this
+  turn. Sends MUST NOT run the receiver on this turn.
 
 Postconditions:
 

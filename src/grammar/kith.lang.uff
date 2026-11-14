@@ -45,7 +45,7 @@ rule Field =
 ;
 
 rule Port =
-  not "field" not "start" not "state" not "step" not "join" not "print" not "else" not "goto"
+  not "field" not "start" not "state" not "step" not "join" not "else" not "goto"
   not "with" not "into" not "fanout" not "after" not "self" not "init" not "or"
   k:Identifier n:Identifier ";"
   -> { kind: "port", component: k, name: n }
@@ -152,9 +152,9 @@ rule Complete =
   -> { kind: "complete", message: e }
 ;
 
-rule Print =
-  "print" e:MessageSeq ";"
-  -> { kind: "print", expression: e }
+rule ExprStmt =
+  e:Expression ";"
+  -> { kind: "expr", expression: e }
 ;
 
 rule Goto =
@@ -169,8 +169,8 @@ rule ComponentStatement =
   | SendDown
   | SendSelf
   | Complete
-  | Print
   | Goto
+  | ExprStmt
 ;
 
 # Handler patterns are Uffda Then of prefixes, stopped before the body `{`.

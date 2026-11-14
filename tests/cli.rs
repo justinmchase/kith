@@ -22,7 +22,7 @@ fn run(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-// req:cli-001 req:components-006 req:scenes-002
+// req:cli-001 req:components-006 req:scenes-002 req:runtime-004
 fn parse_check_compile_and_run_ping() {
     let ping = ping();
     let ping = ping.to_str().unwrap();
@@ -81,6 +81,7 @@ fn parse_check_compile_and_run_ping() {
     );
 
     let ran = run(&["run", ping, "--message", r#"["Ping",7]"#]);
+    // req:runtime-004 — process stdout is the run-result record, not a stream write.
     assert!(ran.status.success(), "{}", stderr(&ran));
     let stdout = String::from_utf8_lossy(&ran.stdout);
     assert!(
@@ -89,6 +90,43 @@ fn parse_check_compile_and_run_ping() {
     );
     let fields = decode(&stdout).expect("run codec");
     assert_eq!(fields["heard"], json!(7.0));
+}
+
+#[test]
+// req:runtime-004
+fn run_stream_writes_go_to_stderr_not_stdout() {
+    let dir = std::env::temp_dir().join(format!("kith-cli-write-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("write.kith");
+    std::fs::write(
+        &path,
+        r#"
+export Box;
+export Main;
+component Box {
+  field heard: number = 0;
+  start {
+    on down "Ping" n:number {
+      heard -> n;
+      (writeLine stdout "hi");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .unwrap();
+    let ran = run(&[
+        "run",
+        path.to_str().unwrap(),
+        "--message",
+        r#"["Ping",7]"#,
+    ]);
+    assert!(ran.status.success(), "{}", stderr(&ran));
+    let fields = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
+    assert_eq!(fields["heard"], json!(7.0));
+    let written = decode(&stderr(&ran)).expect("stream write codec");
+    assert_eq!(written, json!("hi"));
 }
 
 #[test]

@@ -6,7 +6,7 @@ export Main;
 component Http {
   start {
     on down "GET" url:any {
-      print "Requested" url;
+      (writeLine stdout "Requested" url);
       send after (rand 1 3) up "Response" 200 "ok";
     }
   }
@@ -58,17 +58,17 @@ component HealthCheck {
 
   state Validating {
     on self "Check" a:200 b:200 c:200 {
-      print "Healthy";
+      (writeLine stdout "Healthy");
       send after 5 self "Tick";
       goto Checking;
     }
     on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
-      print "Unhealthy";
+      (writeLine stdout "Unhealthy");
       send after 5 self "Tick";
       goto Checking;
     }
     else {
-      print "Indeterminate";
+      (writeLine stdout "Indeterminate");
       send after 5 self "Tick";
       goto Checking;
     }

@@ -20,13 +20,13 @@ Expected behavior:
 - After each Done, HealthCheck MUST shift the last three statuses,
   `send self "Check" s1 s2 s3`, then
   `goto Validating`.
-- Validating MUST `print "Healthy"` when `a`, `b`, and `c` are 200,
-  `print "Unhealthy"` when each is a number and none are 200, and
-  `print "Indeterminate"` otherwise. Each arm MUST
-  `send after 5 self "Tick"` then `goto Checking`.
-- After one or two numeric statuses it MUST print `"Indeterminate"`.
-- After three 200 responses it MUST print `"Healthy"`.
-- After three statuses that are each not 200 it MUST print `"Unhealthy"`.
+- Validating MUST `(writeLine stdout "Healthy")` when `a`, `b`, and `c`
+  are 200, `(writeLine stdout "Unhealthy")` when each is a number and
+  none are 200, and `(writeLine stdout "Indeterminate")` otherwise. Each
+  arm MUST `send after 5 self "Tick"` then `goto Checking`.
+- After one or two numeric statuses it MUST write `"Indeterminate"`.
+- After three 200 responses it MUST write `"Healthy"`.
+- After three statuses that are each not 200 it MUST write `"Unhealthy"`.
 
 Postconditions:
 

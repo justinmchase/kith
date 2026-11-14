@@ -13,7 +13,7 @@ verify it cite it with `req:{id}`.
 - [Unmatched send up and send down](./components/004-unmatched-routing.requirement.md)
 - [First matching handler](./components/005-first-match.requirement.md)
 - [Ping example](./components/006-ping-example.requirement.md)
-- [Print](./components/007-print.requirement.md)
+- [writeLine diagnostic](./components/007-print.requirement.md)
 - [Else handler](./components/008-else.requirement.md)
 - [Goto state](./components/009-goto.requirement.md)
 - [Unnamed start and else complete](./components/010-start-else-complete.requirement.md)
@@ -25,6 +25,7 @@ verify it cite it with `req:{id}`.
 - [Terminal statements](./components/016-terminal.requirement.md)
 - [Message sequences](./components/017-message-sequence.requirement.md)
 - [Field pattern match](./components/018-field-match.requirement.md)
+- [Handler expression returns](./components/019-expr-stmt.requirement.md)
 
 ## Scenes
 
@@ -49,6 +50,8 @@ verify it cite it with `req:{id}`.
 - [Rand host callable](./runtime/001-rand.requirement.md)
 - [Http mock callback](./runtime/002-http-mock.requirement.md)
 - [Health check window](./runtime/003-health-check.requirement.md)
+- [Stdlib stream functions](./runtime/004-stdlib-streams.requirement.md)
+- [Async send join](./runtime/005-async-send.requirement.md)
 
 ## Workflows
 

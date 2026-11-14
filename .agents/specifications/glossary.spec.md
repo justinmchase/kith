@@ -16,7 +16,7 @@ capitals.
 - A keyword that names one of these concepts MUST be the term itself (for
   example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `with`,
   `into`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
-  `complete`, `print`, `after`, `up`, `down`, `self`, `init`, `or`).
+  `complete`, `after`, `up`, `down`, `self`, `init`, `or`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -40,9 +40,17 @@ capitals.
 - **Pattern**: a Uffda pattern. Messages, fields, and parameters are matched by
   patterns. A value has a pattern when the pattern matches it, and the value
   used is the value the pattern produces.
-- **Expression**: a Uffda expression. Uffda expressions compute values and
-  have no side effects. Kith MAY intercept a host callable (`rand`) while
-  evaluating an expression AST; that is not a Uffda global.
+- **Expression**: a Uffda expression. Uffda globals compute values and have
+  no side effects. Kith MAY intercept a host callable (`rand`, `writeLine`,
+  `http_get`) while evaluating an expression AST; that is not a Uffda global.
+  Same-turn I/O returns `undefined`. Async I/O has no same-turn return: it is
+  a send payload whose result arrives as a message.
+- **Stream**: a capability value for a byte stream (`stdin`, `stdout`,
+  `stderr`). World binds the defaults in handler scope. A test or parent MAY
+  bind a different stream. `(write stream V)` and `(writeLine stream V)` take
+  the stream as the first argument.
+- **Stdlib**: named host functions plus the types of the handles they accept.
+  They are not keywords. `(print V…)` is `(writeLine stdout V…)`.
 
 ## Components and trees
 
@@ -129,8 +137,9 @@ capitals.
   present, exclusive with `goto`. It is not a machine state. The instance
   stays in the state that ran `complete` and MUST NOT run another
   transition.
-- **Print**: a transition statement (`print E`) that records a diagnostic
-  value. It is not an expression and MUST NOT complete the instance.
+- **Print**: the host function `(print V…)`, the same as
+  `(writeLine stdout V…)`. It is not a statement and MUST NOT complete the
+  instance.
 - **Child workflow**: a workflow instance owned by another workflow or by a
   component. Ownership is has-a.
 - **Fan-out**: a map step (`fanout Expression with Kind into Acc`) that

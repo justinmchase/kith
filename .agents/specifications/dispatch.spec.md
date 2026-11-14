@@ -59,7 +59,7 @@ capitals.
 - The only inputs to a component turn are the instance's machine state and the
   message being taken.
 - The only outputs of a component turn are the next machine state, messages
-  sent, and actors spawned or joined.
+  sent, host stream writes, and actors spawned or joined.
 
 ### Fairness and variation
 

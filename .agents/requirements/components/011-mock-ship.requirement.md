@@ -18,7 +18,7 @@ Expected behavior:
 
 - On `{ kind: "Item", ... }` Carrier MUST `send to ship` a `Dispatch` and
   `goto Shipping`.
-- MockShip MUST `print` `InTransit` and
+- MockShip MUST `(writeLine stdout { kind: "InTransit" … })` and
   `send after (rand 1 3) up { kind: "Delivered" }`.
 - After `run_until_idle`, each Carrier MUST still be in `Shipping` and MUST
   own a `MockShip` child. The Order run MUST NOT yet succeed.

@@ -45,9 +45,9 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes and the same sends.
-- A transition MAY send zero or more messages, change fields, `print`,
-  complete, and change the machine's state. It MUST NOT wait by blocking the
-  dispatcher. The
+- A transition MAY send zero or more messages, change fields, evaluate
+  expression statements, complete, and change the machine's state. It MUST
+  NOT wait by blocking the dispatcher. The
   first executable slice MUST NOT spawn or destroy children; scene-constructed
   children exist for the parent's lifetime. Dynamic spawn is a
   [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
@@ -180,17 +180,22 @@ export scene Main {
   array of those values, in order: `send self "Check" s1 s2 s3` sends
   `["Check", s1, s2, s3]`. `send self "Tick"` sends `"Tick"`. An object
   is one value: `send up { kind: "Done" status body }` still sends an
-  object. `complete` and `print` take the same value list.
+  object. `complete` takes the same value list.
 - `send after Delay Route V…` is the same send, delivered later. `Delay` is
   seconds. See [timers](./timers.spec.md). Self is written
   `send after 5 self "Tick"`. Order's `MockShip` uses
   `send after (rand 1 3) up { kind: "Delivered" }` so Carrier's `Shipping`
   state is the callback wait. A host driver for a child kind MUST deliver
   on that same up route, not by poking the parent.
-- I/O (an HTTP request, a queue, a device) is the same callback: the turn
-  MUST NOT await a response. A child receives a request down; a later
-  `send up` carries the result. `(fetch url)` MUST NOT be an expression.
-  See [runtime](./runtime.spec.md#host-io).
+- I/O that takes time is a later message: the turn MUST NOT await a
+  response. `send Route (http_get url)` starts the work this turn and
+  delivers the result on that route when the host is done. Several async
+  arguments in **one** send wait for all and deliver one message, in
+  argument order (like `Promise.all`). Two `send` statements remain two
+  messages. `goto` after that send is this turn; `on` in the entered state
+  is the switch. A child capability (MockShip, a scene-filled `Http`) MAY
+  still take a request down and `send up` later. See
+  [runtime](./runtime.spec.md#host-io).
 - `complete V` finishes this instance as a work item. It MUST send `V` up
   (the same route as `send up`) unless this instance is the root, and MUST
   mark the instance complete. Completing the root marks it done and does
@@ -204,8 +209,8 @@ export scene Main {
   root. Scene-constructed children that outlive one request (`Http`,
   `MockShip`, Ping's `Child`) MUST `send up`, not `complete`, so they can
   take another message.
-- A message object (`send`, `complete`, `print`) MAY omit commas between
-  entries. An identifier with no `:` is `name: name`.
+- A message object (`send`, `complete`) MAY omit commas between entries.
+  An identifier with no `:` is `name: name`.
   `{ kind: "Done" status body }` is `{ kind: "Done", status: status, body: body }`.
   Uffda expressions that are not these message objects keep Uffda's object
   commas. An object pattern in `on` projects a Uffda Over and MAY omit
@@ -213,10 +218,37 @@ export scene Main {
   object pattern binds that field as `any`. Field values are one prefix, so
   `{ kind: "GET" url: any }` does not need grouping. A grouped
   `(number & not 200)` is still a full Uffda pattern.
-- `print E` evaluates `E` and records the value as a diagnostic. It MUST NOT
-  be an expression. `kith run` writes those records to stderr as data codec
-  lines; stdout remains the run result. Uffda globals such as `length` MAY
-  appear in expressions because they are pure.
+
+### Handler expressions
+
+A handler body MAY contain an expression statement `E;`. There is no
+`print` keyword. Host I/O is an invocation: `(writeLine stdout "Healthy");`.
+
+What happens to the value:
+
+- **Discard.** `E;` runs the expression and ignores the result. Same-turn
+  I/O (`write`, `writeLine`, `print`) returns `undefined` this turn. The
+  statement exists for the effect.
+- **Bind this turn.** `name -> E` writes a field. Nested `E` is an
+  argument to another call. Check MUST reject same-turn I/O and async
+  callees in assign, field init, and nested argument position.
+- **Bind later.** An async callee (`http_get`) has no same-turn return.
+  It is legal only as a send argument: `send self (http_get url)`. Several
+  async args in one send (`send self (http_get u1) (http_get u2)`) wait
+  for all, then deliver one array in argument order. The switch is `on`
+  Then in the state `goto` entered this turn. There is no `{ P -> }`
+  continuation on an invocation.
+
+World binds `stdin`, `stdout`, and `stderr` as stream values in handler
+scope. `(write stream V…)`, `(writeLine stream V…)`, and `(print V…)` are
+host functions. One value after the stream (or after `print`) is that
+value. Two or more are the array of those values.
+`(print V…)` is `(writeLine stdout V…)`. They MUST NOT complete the
+instance. `kith run` writes those records to process stderr as data codec
+lines so process stdout stays the run result.
+
+Uffda globals such as `length` MAY appear in expressions because they are
+pure. An unknown callee MUST fail evaluation.
 
 A send enqueues work for the dispatcher. The sender MUST NOT observe a
 handler's result as a return value. If a later transition needs a result, the
@@ -226,9 +258,11 @@ receiver sends a message back.
 
 A handler body is a synchronous prefix followed by at most one terminal.
 
-- Assign, `print`, and `send` run on this turn, in order, before any
-  terminal. A send only enqueues: it MUST NOT run the receiver on this
-  turn. `send after` only arms a timer.
+- Assign, expression statements, and `send` run on this turn, in order,
+  before any terminal. A send only enqueues: it MUST NOT run the receiver
+  on this turn. `send after` only arms a timer. An async send argument
+  starts host work this turn and delivers later; `goto` after it is this
+  turn.
 - The terminal, if present, MUST be the last statement. It is either
   `goto Name` or `complete V`. A handler MUST NOT contain both. A handler
   MUST NOT contain more than one `goto` or more than one `complete`.
@@ -300,7 +334,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendDown", component: string | null, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "send", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "complete", message: Expression | Sequence }`
-- `{ kind: "print", expression: Expression | Sequence }`
+- `{ kind: "expr", expression: Expression }`
 - `{ kind: "sequence", items: [Expression] }`
 - `{ kind: "goto", state: string }`
 
@@ -315,9 +349,10 @@ when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
 Unqualified `on` and `else` MUST project `["up", "down", "self"]`. `on init`
 MUST project `["init"]` and pattern `any`. An omitted `route` on a
-constructed tree is the unqualified list. A send, complete, or print of
+constructed tree is the unqualified list. A send or complete of
 two or more values MUST project `{ kind: "sequence", items: [...] }`. One
-value MUST project that expression, not a sequence of length one. A
+value MUST project that expression, not a sequence of length one. An
+expression statement MUST project `{ kind: "expr", expression }`. A
 handler Then of several prefixes MUST project `{ kind: "then", patterns }`.
 One prefix MUST project that pattern, not a Then of length one.
 `handler.item` MAY still be set on a constructed tree; source uses Then.

@@ -1130,10 +1130,7 @@ fn http_parent_response_is_unmatched_down() {
     world.run_until_idle().unwrap();
     let client = world.child(world.root_id(), "client").expect("client");
     let err = world
-        .send(
-            client,
-            json!(["Response", 200.0, "ok"]),
-        )
+        .send(client, json!(["Response", 200.0, "ok"]))
         .and_then(|_| world.run_until_idle())
         .expect_err("parent Response must not match on up");
     assert!(err.message.contains("unmatched"));
@@ -1220,17 +1217,17 @@ component HealthCheck {
   }
   state Validating {
     on self "Check" a:200 b:200 c:200 {
-      print "Healthy";
+      (writeLine stdout "Healthy");
       send after 5 self "Tick";
       goto Checking;
     }
     on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
-      print "Unhealthy";
+      (writeLine stdout "Unhealthy");
       send after 5 self "Tick";
       goto Checking;
     }
     else {
-      print "Indeterminate";
+      (writeLine stdout "Indeterminate");
       send after 5 self "Tick";
       goto Checking;
     }
@@ -1275,12 +1272,12 @@ component Box {
       goto Away;
     }
     on self { kind: "Ping" } {
-      print { kind: "Home" };
+      (writeLine stdout { kind: "Home" });
     }
   }
   state Away {
     on self { kind: "Ping" } {
-      print { kind: "Away" };
+      (writeLine stdout { kind: "Away" });
     }
   }
 }
@@ -1379,10 +1376,10 @@ component Box {
       send self { kind: "Tick" };
     }
     on down { kind: "Tick" } {
-      print { kind: "Down" };
+      (writeLine stdout { kind: "Down" });
     }
     on { kind: "Tick" } {
-      print { kind: "Implied" };
+      (writeLine stdout { kind: "Implied" });
     }
   }
 }
@@ -1411,7 +1408,7 @@ component Box {
       send self { kind: "Tick" };
     }
     on down { kind: "Tick" } {
-      print { kind: "Down" };
+      (writeLine stdout { kind: "Down" });
     }
   }
 }
@@ -1439,10 +1436,10 @@ component Box {
       send self { kind: "Tick" };
     }
     on up or self { kind: "Tick" } {
-      print { kind: "Hit" };
+      (writeLine stdout { kind: "Hit" });
     }
     on down { kind: "Tick" } {
-      print { kind: "Down" };
+      (writeLine stdout { kind: "Down" });
     }
   }
 }
@@ -1501,7 +1498,7 @@ component Box {
       send self { kind: "Tick" };
     }
     on up or down { kind: "Tick" } {
-      print { kind: "Hit" };
+      (writeLine stdout { kind: "Hit" });
     }
   }
 }
@@ -1529,7 +1526,7 @@ component Box {
       send self "Check" 200 200 200;
     }
     on self "Check" a:200 b:200 c:200 {
-      print "Healthy";
+      (writeLine stdout "Healthy");
     }
   }
 }
@@ -1554,7 +1551,7 @@ component Box {
       send self { kind: "Done" status: 200 };
     }
     on self v:{ kind: "Done" status: number } {
-      print v.status;
+      (writeLine stdout v.status);
     }
   }
 }
@@ -1564,10 +1561,7 @@ export scene Main { Box(); }
     .expect("parse object capture");
     let mut world = World::start(object).expect("start object");
     world.run_until_idle().unwrap();
-    assert!(world
-        .prints()
-        .iter()
-        .any(|value| value == &json!(200.0)));
+    assert!(world.prints().iter().any(|value| value == &json!(200.0)));
 }
 
 #[test]
@@ -1650,4 +1644,273 @@ export scene Main { Box(); }
         .and_then(|mut world| world.run_until_idle())
         .expect_err("unknown field");
     assert!(err.message.contains("unknown field ghost"));
+}
+
+#[test]
+// req:components-007 req:components-019 req:runtime-004
+fn write_line_and_print_record_diagnostics() {
+    let program = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      (writeLine stdout "hi");
+      (print "Requested" "https://example.com");
+      (write stdout "no newline");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse writeLine");
+    let mut world = World::start(program).expect("start");
+    world.run_until_idle().unwrap();
+    assert_eq!(
+        world.prints(),
+        &[
+            json!("hi"),
+            json!(["Requested", "https://example.com"]),
+            json!("no newline"),
+        ]
+    );
+    assert!(!world.completed(world.root_id()));
+}
+
+#[test]
+// req:components-019
+fn check_rejects_io_and_async_in_assign_and_expr_stmt() {
+    let assign_io = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  field heard: any;
+  start {
+    on init {
+      heard -> (writeLine stdout "n");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse assign io");
+    let err = World::check(&assign_io).expect_err("assign writeLine");
+    assert!(err.message.contains("same-turn I/O"));
+
+    let init_io = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  field heard: any = (writeLine stdout "n");
+  start {
+    on init {}
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse field init io");
+    let err = World::check(&init_io).expect_err("field init writeLine");
+    assert!(err.message.contains("same-turn I/O"));
+
+    let assign_async = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  field heard: any;
+  start {
+    on init {
+      heard -> (http_get "https://example.com");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse assign async");
+    let err = World::check(&assign_async).expect_err("assign http_get");
+    assert!(err.message.contains("async callee"));
+
+    let expr_async = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      (http_get "https://example.com");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse expr async");
+    let err = World::check(&expr_async).expect_err("expr http_get");
+    assert!(err.message.contains("async callee"));
+}
+
+#[test]
+// req:runtime-004
+fn unknown_callee_fails_evaluation() {
+    let program = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      (nope 1);
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse unknown callee");
+    let err = World::start(program)
+        .and_then(|mut world| world.run_until_idle())
+        .expect_err("unknown callee");
+    assert!(!err.message.is_empty());
+}
+
+#[test]
+// req:runtime-005
+fn http_get_result_matches_on_in_the_goto_state() {
+    let program = kith::parse::parse_source(
+        r#"
+export Client;
+export Main;
+component Client {
+  start Idle {
+    on down "Go" url:any {
+      send self (http_get url);
+      goto Fetching;
+    }
+  }
+  state Fetching {
+    on { status: 200 url: any } {
+      (writeLine stdout "ok");
+      goto Idle;
+    }
+    else {
+      (writeLine stdout "unknown");
+      goto Idle;
+    }
+  }
+}
+export scene Main { Client(); }
+"#,
+    )
+    .expect("parse http_get");
+    let mut world = World::start(program).expect("start");
+    world.inject(json!(["Go", "https://example.com"])).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Fetching"));
+    assert!(world.fire_next_timer().unwrap());
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    assert_eq!(world.prints(), &[json!("ok")]);
+}
+
+#[test]
+// req:runtime-005 req:components-019
+fn http_get_send_joins_and_goto_is_this_turn() {
+    let program = kith::parse::parse_source(
+        r#"
+export Client;
+export Main;
+component Client {
+  start Idle {
+    on down "Go" url1:any url2:any {
+      send self (http_get url1) (http_get url2);
+      goto Fetching;
+    }
+  }
+  state Fetching {
+    on a:any b:any {
+      (writeLine stdout a.status);
+      (writeLine stdout b.url);
+      goto Idle;
+    }
+  }
+}
+export scene Main { Client(); }
+"#,
+    )
+    .expect("parse join");
+    let mut world = World::start(program).expect("start");
+    world
+        .inject(json!(["Go", "https://a.example", "https://b.example"]))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Fetching"));
+    assert!(world.fire_next_timer().unwrap(), "http_get join");
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    assert_eq!(world.prints(), &[json!(200.0), json!("https://b.example")]);
+}
+
+#[test]
+// req:runtime-005
+fn send_after_cannot_take_http_get() {
+    let program = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on init {
+      send after 1 self (http_get "https://example.com");
+    }
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse send after async");
+    let err = World::check(&program).expect_err("send after http_get");
+    assert!(err.message.contains("send after"));
+}
+
+#[test]
+// req:runtime-005
+fn http_get_snapshot_restore_still_delivers() {
+    let source = r#"
+export Client;
+export Main;
+component Client {
+  start Idle {
+    on down "Go" url:any {
+      send self (http_get url);
+      goto Fetching;
+    }
+  }
+  state Fetching {
+    on { status: 200 url: any } {
+      (writeLine stdout "ok");
+      goto Idle;
+    }
+  }
+}
+export scene Main { Client(); }
+"#;
+    let program = kith::parse::parse_source(source).expect("parse http_get snapshot");
+    let mut world = World::start(program.clone()).expect("start");
+    world.inject(json!(["Go", "https://example.com"])).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Fetching"));
+    let snap = world.snapshot().expect("snapshot");
+    let mut restored = World::restore(program, &snap).expect("restore");
+    assert_eq!(restored.state(restored.root_id()), Some("Fetching"));
+    assert!(restored.fire_next_timer().unwrap());
+    restored.run_until_idle().unwrap();
+    assert_eq!(restored.state(restored.root_id()), Some("Idle"));
+    assert_eq!(restored.prints(), &[json!("ok")]);
 }
