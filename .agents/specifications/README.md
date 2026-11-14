@@ -32,6 +32,9 @@ primitives rather than redefining them.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
 - [Timers](./timers.spec.md): delayed sends (`send after`); time from a clock
   the checker can replace.
+- [Built-ins](./builtins.spec.md): the `kith:` prefix and the data, stream,
+  and time modules. `Clock` there is the wall read. The dispatcher clock
+  stays in Timers.
 
 ## Planned chapters
 

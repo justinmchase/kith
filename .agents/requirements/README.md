@@ -72,3 +72,10 @@ verify it cite it with `req:{id}`.
 ## CLI
 
 - [Parse check compile run](./cli/001-commands.requirement.md)
+
+## Built-ins
+
+- [kith: import](./builtins/001-kith-import.requirement.md)
+- [Data values](./builtins/002-data.requirement.md)
+- [Stream pipe](./builtins/003-stream.requirement.md)
+- [Time values and Clock](./builtins/004-time.requirement.md)

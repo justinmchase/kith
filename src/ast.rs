@@ -14,6 +14,15 @@ pub struct Program {
     pub workflows: Vec<Workflow>,
     #[serde(default)]
     pub scenes: Vec<Scene>,
+    /// Pure functions bound from a built-in import.
+    #[serde(default)]
+    pub functions: Vec<String>,
+    /// Pattern rules bound from a built-in import.
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Component kinds whose instances are host drivers.
+    #[serde(default)]
+    pub host_kinds: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

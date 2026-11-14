@@ -1,8 +1,9 @@
 use crate::ast::{Field, FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
-use crate::codec::{decode, encode, json_u64};
+use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
+use crate::doc::{self, Doc};
 use crate::error::Error;
-use crate::host::{evaluate, match_field, match_message};
+use crate::host::{evaluate_document, match_document, match_field_document};
 use serde_json::{json, Value as Json};
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +34,7 @@ struct JoinSet {
 struct Timer {
     due: u64,
     to: ActorId,
-    message: Json,
+    message: Doc,
     route: Route,
     join: Option<u64>,
     slot: Option<usize>,
@@ -41,14 +42,14 @@ struct Timer {
 
 struct PendingJoin {
     remaining: usize,
-    slots: Vec<Option<Json>>,
+    slots: Vec<Option<Doc>>,
     to: ActorId,
     route: Route,
 }
 
 enum Slot {
-    Ready(Json),
-    Async { delay_ms: u64, value: Json },
+    Ready(Doc),
+    Async { delay_ms: u64, value: Doc },
 }
 
 enum Callee {
@@ -67,8 +68,9 @@ enum RunStatus {
 struct WorkflowRun {
     status: RunStatus,
     step: String,
-    input: Json,
-    output: Json,
+    input: Doc,
+    output: Doc,
+    output_json: Json,
     definition: Workflow,
     prototypes: Vec<Instance>,
 }
@@ -77,12 +79,15 @@ struct InstanceState {
     kind: String,
     parent: Option<ActorId>,
     children: Vec<ChildRef>,
-    fields: HashMap<String, Json>,
+    fields: HashMap<String, Doc>,
+    field_json: HashMap<String, Json>,
     state: String,
     completed: bool,
-    completion: Option<Json>,
+    completion: Option<Doc>,
+    completion_json: Option<Json>,
     join: Option<JoinSet>,
     run: Option<WorkflowRun>,
+    driver: Option<Driver>,
 }
 
 pub struct World {
@@ -98,6 +103,9 @@ pub struct World {
     timers: Vec<Timer>,
     joins: HashMap<u64, PendingJoin>,
     next_join: u64,
+    clock_zone: Doc,
+    clock_script: Option<Vec<Doc>>,
+    clock_replies: Vec<Doc>,
 }
 
 impl World {
@@ -145,6 +153,9 @@ impl World {
             timers: Vec::new(),
             joins: HashMap::new(),
             next_join: 1,
+            clock_zone: builtin::process_zone(),
+            clock_script: None,
+            clock_replies: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -156,15 +167,15 @@ impl World {
     }
 
     pub fn field(&self, id: ActorId, name: &str) -> Option<&Json> {
-        self.instances.get(&id)?.fields.get(name)
+        self.instances.get(&id)?.field_json.get(name)
     }
 
     pub fn output(&self, id: ActorId) -> Option<&Json> {
         let instance = self.instances.get(&id)?;
         if let Some(run) = &instance.run {
-            return Some(&run.output);
+            return Some(&run.output_json);
         }
-        instance.completion.as_ref()
+        instance.completion_json.as_ref()
     }
 
     pub fn child(&self, id: ActorId, port: &str) -> Option<ActorId> {
@@ -209,7 +220,7 @@ impl World {
     }
 
     pub fn completion(&self, id: ActorId) -> Option<&Json> {
-        self.instances.get(&id)?.completion.as_ref()
+        self.instances.get(&id)?.completion_json.as_ref()
     }
 
     pub fn progress(&self, id: ActorId) -> Option<Json> {
@@ -220,34 +231,63 @@ impl World {
         }))
     }
 
-    pub fn root_fields(&self) -> HashMap<String, Json> {
-        if let Some(output) = self.output(self.root_id()) {
-            if let Json::Object(map) = output {
-                return map.clone().into_iter().collect();
-            }
+    pub fn result_document(&self) -> Doc {
+        if let Some(output) = self.output_document(self.root_id()) {
+            return output;
         }
-        self.instances
+        let fields = self
+            .instances
             .get(&self.root_id())
             .map(|instance| instance.fields.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        doc::object(fields)
     }
 
-    pub fn result(&self) -> Json {
-        if let Some(output) = self.output(self.root_id()) {
-            return output.clone();
+    fn output_document(&self, id: ActorId) -> Option<Doc> {
+        let instance = self.instances.get(&id)?;
+        if let Some(run) = &instance.run {
+            return Some(run.output.clone());
         }
-        serde_json::to_value(self.root_fields()).unwrap_or(Json::Null)
+        instance.completion.clone()
     }
 
     pub fn prints(&self) -> &[Json] {
         &self.prints
     }
 
+    pub fn virtual_now(&self) -> u64 {
+        self.now
+    }
+
+    /// Replace the wall-clock script. `zone` is frozen for later `"Zone"`
+    /// replies. Each script entry is one `"Now"` instant, in order. An empty
+    /// script makes the next `"Now"` fail. This does not move the dispatcher
+    /// clock that `send after` uses.
+    pub fn replace_clock(&mut self, zone: &str, script: &[&str]) -> Result<(), Error> {
+        let zone = builtin::zone_value(zone)?;
+        let mut instants = Vec::with_capacity(script.len());
+        for text in script {
+            let millis = builtin::parse_instant(text)?;
+            instants.push(builtin::instant_doc(millis));
+        }
+        self.clock_zone = zone;
+        self.clock_script = Some(instants);
+        self.clock_replies.clear();
+        Ok(())
+    }
+
+    /// External edge: `kith run --message` and existing tests pass one JSON value.
     pub fn send(&mut self, id: ActorId, message: Json) -> Result<(), Error> {
+        self.send_document(id, doc::from_json(&message)?)
+    }
+
+    pub fn send_document(&mut self, id: ActorId, message: Doc) -> Result<(), Error> {
         self.deliver(id, message, Route::Down)
     }
 
+    /// External edge: `kith run --message` passes one JSON value.
     pub fn inject(&mut self, message: Json) -> Result<(), Error> {
+        let message = doc::from_json(&message)?;
         if self.instances[&self.root_id()].run.is_some() {
             let sends = self.start_run(self.root_id(), message)?;
             for (to, message, route) in sends {
@@ -308,153 +348,176 @@ impl World {
     }
 
     pub fn snapshot(&self) -> Result<String, Error> {
-        encode(&self.snapshot_value())
+        doc::encode(&self.snapshot_document()?)
     }
 
-    fn snapshot_value(&self) -> Json {
-        let instances: Vec<Json> = self
-            .instances
-            .iter()
-            .map(|(ActorId(id), instance)| {
-                json!({
-                    "id": id,
-                    "kind": instance.kind,
-                    "parent": instance.parent.map(|ActorId(id)| id),
-                    "children": instance.children.iter().map(|child| json!({
-                        "id": child.id.0,
-                        "key": child.key,
-                        "component": child.component,
-                    })).collect::<Vec<_>>(),
-                    "fields": instance.fields,
-                    "state": instance.state,
-                    "completed": instance.completed,
-                    "completion": instance.completion,
-                    "join": instance.join.as_ref().map(|join| json!({
-                        "remaining": join.remaining.iter().map(|ActorId(id)| *id).collect::<Vec<_>>(),
-                        "total": join.total,
-                        "completed": join.completed,
-                        "reducer": join.reducer.map(|ActorId(id)| id),
-                    })),
-                    "run": instance.run.as_ref().map(|run| json!({
-                        "status": match run.status {
-                            RunStatus::Running => "running",
-                            RunStatus::Succeeded => "succeeded",
-                            RunStatus::Failed => "failed",
-                        },
-                        "step": run.step,
-                        "input": run.input,
-                        "output": run.output,
-                        "definition": run.definition,
-                        "prototypes": run.prototypes,
-                    })),
-                })
-            })
-            .collect();
-        let routes: Vec<Json> = self
-            .routes
-            .iter()
-            .map(|((ActorId(id), seq), route)| {
-                json!({
-                    "id": id,
-                    "seq": seq,
-                    "route": snapshot_route(*route)
-                })
-            })
-            .collect();
-        json!({
-            "nextId": self.next_id,
-            "routeSeq": self.route_seq,
-            "now": self.now,
-            "rng": self.rng,
-            "instances": instances,
-            "dispatcher": self.dispatcher.snapshot(),
-            "routes": routes,
-            "prints": self.prints,
-            "nextJoin": self.next_join,
-            "joins": self.joins.iter().map(|(id, join)| json!({
-                "id": id,
-                "remaining": join.remaining,
-                "slots": join.slots,
-                "to": join.to.0,
-                "route": snapshot_route(join.route),
-            })).collect::<Vec<_>>(),
-            "timers": self.timers.iter().map(|timer| json!({
-                "due": timer.due,
-                "to": timer.to.0,
-                "message": timer.message,
-                "route": snapshot_route(timer.route),
-                "join": timer.join,
-                "slot": timer.slot,
-            })).collect::<Vec<_>>(),
-        })
+    fn snapshot_document(&self) -> Result<Doc, Error> {
+        let instances = doc::array(
+            self.instances
+                .iter()
+                .map(|(ActorId(id), instance)| instance_document(*id, instance))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        let routes = doc::array(self.routes.iter().map(|((ActorId(id), seq), route)| {
+            doc::object([
+                ("id", doc::number(*id as f64)),
+                ("seq", doc::number(*seq as f64)),
+                ("route", doc::string(snapshot_route(*route))),
+            ])
+        }));
+        let joins = doc::array(self.joins.iter().map(|(id, join)| {
+            doc::object([
+                ("id", doc::number(*id as f64)),
+                ("remaining", doc::number(join.remaining as f64)),
+                (
+                    "slots",
+                    doc::array(
+                        join.slots
+                            .iter()
+                            .map(|slot| slot.clone().unwrap_or_else(doc::null)),
+                    ),
+                ),
+                ("to", doc::number(join.to.0 as f64)),
+                ("route", doc::string(snapshot_route(join.route))),
+            ])
+        }));
+        let timers = doc::array(self.timers.iter().map(|timer| {
+            doc::object([
+                ("due", doc::number(timer.due as f64)),
+                ("to", doc::number(timer.to.0 as f64)),
+                ("message", timer.message.clone()),
+                ("route", doc::string(snapshot_route(timer.route))),
+                (
+                    "join",
+                    timer
+                        .join
+                        .map(|id| doc::number(id as f64))
+                        .unwrap_or_else(doc::null),
+                ),
+                (
+                    "slot",
+                    timer
+                        .slot
+                        .map(|slot| doc::number(slot as f64))
+                        .unwrap_or_else(doc::null),
+                ),
+            ])
+        }));
+        // The in-memory print log is the JSON observation tests already read.
+        // It is embedded in the snapshot document at this persistence edge.
+        let prints = doc::array(
+            self.prints
+                .iter()
+                .map(doc::from_json)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        Ok(doc::object([
+            ("nextId", doc::number(self.next_id as f64)),
+            ("routeSeq", doc::number(self.route_seq as f64)),
+            ("now", doc::number(self.now as f64)),
+            ("rng", doc::number(self.rng as f64)),
+            ("instances", instances),
+            ("dispatcher", self.dispatcher.snapshot()),
+            ("routes", routes),
+            ("prints", prints),
+            ("nextJoin", doc::number(self.next_join as f64)),
+            ("joins", joins),
+            ("timers", timers),
+            (
+                "clock",
+                doc::object([
+                    ("zone", self.clock_zone.clone()),
+                    (
+                        "script",
+                        self.clock_script
+                            .clone()
+                            .map(doc::array)
+                            .unwrap_or_else(doc::null),
+                    ),
+                    ("replies", doc::array(self.clock_replies.clone())),
+                ]),
+            ),
+        ]))
     }
 
     pub fn restore(program: Program, snapshot: &str) -> Result<Self, Error> {
         Self::check(&program)?;
-        let snapshot = decode(snapshot)?;
-        let next_id = snapshot
-            .get("nextId")
-            .and_then(json_u64)
+        let snapshot = doc::decode(snapshot)?;
+        let next_id = doc::as_u64(&doc::get(&snapshot, "nextId").unwrap_or_else(doc::null))
             .ok_or_else(|| Error::new("snapshot missing nextId"))?;
-        let route_seq = snapshot.get("routeSeq").and_then(json_u64).unwrap_or(0);
+        let route_seq =
+            doc::as_u64(&doc::get(&snapshot, "routeSeq").unwrap_or_else(doc::null)).unwrap_or(0);
         let dispatcher = Dispatcher::restore(
-            snapshot
-                .get("dispatcher")
+            &doc::get(&snapshot, "dispatcher")
                 .ok_or_else(|| Error::new("snapshot missing dispatcher"))?,
         )
         .map_err(Error::new)?;
         let mut instances = HashMap::new();
-        for entry in snapshot
-            .get("instances")
-            .and_then(Json::as_array)
+        for entry in doc::items(&doc::get(&snapshot, "instances").unwrap_or_else(doc::null))
             .ok_or_else(|| Error::new("snapshot missing instances"))?
         {
             let id = ActorId(
-                entry
-                    .get("id")
-                    .and_then(json_u64)
+                doc::as_u64(&doc::get(&entry, "id").unwrap_or_else(doc::null))
                     .ok_or_else(|| Error::new("instance missing id"))?,
             );
-            instances.insert(id, restore_instance(entry)?);
+            instances.insert(id, restore_instance(&entry)?);
         }
         let mut routes = HashMap::new();
-        if let Some(list) = snapshot.get("routes").and_then(Json::as_array) {
+        if let Some(list) = doc::items(&doc::get(&snapshot, "routes").unwrap_or_else(doc::null)) {
             for entry in list {
                 let id = ActorId(
-                    entry
-                        .get("id")
-                        .and_then(json_u64)
+                    doc::as_u64(&doc::get(&entry, "id").unwrap_or_else(doc::null))
                         .ok_or_else(|| Error::new("route missing id"))?,
                 );
-                let seq = entry.get("seq").and_then(json_u64).unwrap_or(0);
-                let route = restore_route(entry.get("route").and_then(Json::as_str));
+                let seq =
+                    doc::as_u64(&doc::get(&entry, "seq").unwrap_or_else(doc::null)).unwrap_or(0);
+                let route = restore_route(
+                    doc::as_str(&doc::get(&entry, "route").unwrap_or_else(doc::null)).as_deref(),
+                );
                 routes.insert((id, seq), route);
             }
         }
-        let prints = snapshot
-            .get("prints")
-            .and_then(Json::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let now = snapshot.get("now").and_then(json_u64).unwrap_or(0);
-        let rng = snapshot.get("rng").and_then(json_u64).unwrap_or(1);
-        let next_join = snapshot.get("nextJoin").and_then(json_u64).unwrap_or(1);
+        let prints = doc::items(&doc::get(&snapshot, "prints").unwrap_or_else(doc::null))
+            .unwrap_or_default()
+            .iter()
+            .map(doc::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let now = doc::as_u64(&doc::get(&snapshot, "now").unwrap_or_else(doc::null)).unwrap_or(0);
+        let rng = doc::as_u64(&doc::get(&snapshot, "rng").unwrap_or_else(doc::null)).unwrap_or(1);
+        let next_join =
+            doc::as_u64(&doc::get(&snapshot, "nextJoin").unwrap_or_else(doc::null)).unwrap_or(1);
         let mut timers = Vec::new();
-        if let Some(list) = snapshot.get("timers").and_then(Json::as_array) {
+        if let Some(list) = doc::items(&doc::get(&snapshot, "timers").unwrap_or_else(doc::null)) {
             for entry in list {
-                timers.push(restore_timer(entry)?);
+                timers.push(restore_timer(&entry)?);
             }
         }
         let mut joins = HashMap::new();
-        if let Some(list) = snapshot.get("joins").and_then(Json::as_array) {
+        if let Some(list) = doc::items(&doc::get(&snapshot, "joins").unwrap_or_else(doc::null)) {
             for entry in list {
-                let id = entry
-                    .get("id")
-                    .and_then(json_u64)
+                let id = doc::as_u64(&doc::get(&entry, "id").unwrap_or_else(doc::null))
                     .ok_or_else(|| Error::new("join missing id"))?;
-                joins.insert(id, restore_join(entry)?);
+                joins.insert(id, restore_join(&entry)?);
             }
         }
+        let clock = doc::get(&snapshot, "clock");
+        let clock_zone = clock
+            .as_ref()
+            .and_then(|clock| doc::get(clock, "zone"))
+            .unwrap_or_else(|| doc::object([("kind", doc::string("utc"))]));
+        let clock_script = clock.as_ref().and_then(|clock| {
+            let script = doc::get(clock, "script")?;
+            if doc::is_null(&script) {
+                None
+            } else {
+                doc::items(&script)
+            }
+        });
+        let clock_replies = clock
+            .as_ref()
+            .and_then(|clock| doc::get(clock, "replies"))
+            .and_then(|replies| doc::items(&replies))
+            .unwrap_or_default();
         Ok(Self {
             program,
             instances,
@@ -468,6 +531,9 @@ impl World {
             timers,
             joins,
             next_join,
+            clock_zone,
+            clock_script,
+            clock_replies,
         })
     }
 
@@ -509,7 +575,7 @@ impl World {
             .collect();
         ids.sort_by_key(|id| id.0);
         for id in ids {
-            self.deliver(id, Json::Null, Route::Init)?;
+            self.deliver(id, doc::null(), Route::Init)?;
         }
         Ok(())
     }
@@ -536,11 +602,12 @@ impl World {
             let value = if let Some(init) = &field.init {
                 self.eval(init, &HashMap::new())?
             } else {
-                Json::Null
+                doc::null()
             };
             self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
+        let field_json = project_map(&fields)?;
         self.instances.insert(
             id,
             InstanceState {
@@ -548,14 +615,26 @@ impl World {
                 parent,
                 children: Vec::new(),
                 fields,
+                field_json,
                 state: start,
                 completed: false,
                 completion: None,
+                completion_json: None,
                 join: None,
                 run: None,
+                driver: self.driver_for(kind),
             },
         );
         Ok(id)
+    }
+
+    fn driver_for(&self, kind: &str) -> Option<Driver> {
+        self.program
+            .host_kinds
+            .iter()
+            .any(|name| name == kind)
+            .then(|| builtin::initial_driver(kind))
+            .flatten()
     }
 
     fn spawn_workflow(
@@ -578,41 +657,42 @@ impl World {
                 parent,
                 children: Vec::new(),
                 fields: HashMap::new(),
+                field_json: HashMap::new(),
                 state: start.clone(),
                 completed: false,
                 completion: None,
+                completion_json: None,
                 join: None,
                 run: Some(WorkflowRun {
                     status: RunStatus::Running,
                     step: start,
-                    input: Json::Null,
-                    output: Json::Null,
+                    input: doc::null(),
+                    output: doc::null(),
+                    output_json: Json::Null,
                     definition: workflow,
                     prototypes: Vec::new(),
                 }),
+                driver: None,
             },
         );
         Ok(id)
     }
 
-    fn start_run(
-        &mut self,
-        id: ActorId,
-        input: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn start_run(&mut self, id: ActorId, input: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         if let Some(run) = self
             .instances
             .get_mut(&id)
             .and_then(|instance| instance.run.as_mut())
         {
             run.input = input.clone();
-            run.output = input;
+            run.output = input.clone();
+            run.output_json = project(&input)?;
             run.status = RunStatus::Running;
         }
         self.enter_current(id)
     }
 
-    fn enter_current(&mut self, id: ActorId) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn enter_current(&mut self, id: ActorId) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let (step, output) = {
             let run = self.instances[&id]
                 .run
@@ -632,8 +712,8 @@ impl World {
         &mut self,
         id: ActorId,
         step: &FlowStep,
-        working: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        working: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         if let Some(run) = self
             .instances
             .get_mut(&id)
@@ -643,7 +723,7 @@ impl World {
             run.output = working.clone();
         }
         let bindings = match &step.pattern {
-            Some(pattern) => bind_step(pattern, &working)?,
+            Some(pattern) => bind_step(pattern, &working, &self.program.rules)?,
             None => bindings_from(&working),
         };
         match &step.body {
@@ -658,7 +738,7 @@ impl World {
             }
             StepBody::Choice { clauses } => {
                 for clause in clauses {
-                    if match_message(&clause.pattern, &working)?.is_some() {
+                    if match_program(&clause.pattern, &working, &self.program.rules)?.is_some() {
                         return self.goto_named(id, &clause.step);
                     }
                 }
@@ -672,11 +752,10 @@ impl World {
                 init,
             } => self.spawn_map(id, items, component, reduce, init.as_ref(), &bindings),
             StepBody::Run { path } => {
-                let plan = working
-                    .get(path)
-                    .cloned()
+                let plan = doc::get(&working, path)
                     .ok_or_else(|| Error::new(format!("run path {path} missing")))?;
-                let definition = workflow_from_value(plan)?;
+                // A dynamic workflow plan is a Kith syntax tree.
+                let definition = workflow_from_value(doc::to_json(&plan)?)?;
                 let child = self.spawn_workflow(definition, Some(id))?;
                 let kind = self.instances[&child].kind.clone();
                 self.instances
@@ -698,8 +777,8 @@ impl World {
         &mut self,
         id: ActorId,
         component: &str,
-        working: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        working: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let child = self.spawn_work(id, component)?;
         self.arm_join(id, [child].into_iter().collect(), 1, None);
         self.start_work(child, working)
@@ -712,28 +791,25 @@ impl World {
         component: &str,
         reduce: &str,
         init: Option<&Json>,
-        bindings: &HashMap<String, Json>,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let reducer = self.spawn_work(id, reduce)?;
         if let Some(init) = init {
             let value = self.eval(init, bindings)?;
             self.apply_fields(reducer, value)?;
         }
         let items = self.eval(items_expr, bindings)?;
-        let items = items
-            .as_array()
-            .ok_or_else(|| Error::new("fanout expects a list"))?
-            .clone();
+        let items = doc::items(&items).ok_or_else(|| Error::new("fanout expects a list"))?;
         let mut children = Vec::new();
-        for (index, item) in items.iter().enumerate() {
+        for (index, item) in items.into_iter().enumerate() {
             let child = self.spawn_work(id, component)?;
             children.push((
                 child,
-                json!({
-                    "kind": "Item",
-                    "item": item,
-                    "index": index as f64,
-                }),
+                doc::object([
+                    ("kind", doc::string("Item")),
+                    ("item", item),
+                    ("index", doc::number(index as f64)),
+                ]),
             ));
         }
         let remaining: HashSet<_> = children.iter().map(|(child, _)| *child).collect();
@@ -752,8 +828,8 @@ impl World {
     fn start_work(
         &mut self,
         child: ActorId,
-        message: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        message: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         if self.instances[&child].run.is_some() {
             self.start_run(child, message)
         } else {
@@ -761,8 +837,8 @@ impl World {
         }
     }
 
-    fn end_accumulator(&mut self, child: ActorId) -> Result<Vec<(ActorId, Json, Route)>, Error> {
-        Ok(vec![(child, Json::Null, Route::Join)])
+    fn end_accumulator(&mut self, child: ActorId) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        Ok(vec![(child, doc::null(), Route::Join)])
     }
 
     fn spawn_work(&mut self, parent: ActorId, kind: &str) -> Result<ActorId, Error> {
@@ -798,12 +874,7 @@ impl World {
         Ok(child)
     }
 
-    fn match_declared_field(
-        &self,
-        fields: &[Field],
-        name: &str,
-        value: &Json,
-    ) -> Result<(), Error> {
+    fn match_declared_field(&self, fields: &[Field], name: &str, value: &Doc) -> Result<(), Error> {
         let field = fields
             .iter()
             .find(|field| field.name == name)
@@ -811,14 +882,14 @@ impl World {
         let Some(pattern) = &field.pattern else {
             return Ok(());
         };
-        if match_field(pattern, value)? {
+        if self.field_matches(pattern, value)? {
             Ok(())
         } else {
             Err(Error::new(format!("field {name} did not match")))
         }
     }
 
-    fn write_field(&mut self, id: ActorId, name: &str, value: Json) -> Result<(), Error> {
+    fn write_field(&mut self, id: ActorId, name: &str, value: Doc) -> Result<(), Error> {
         let kind = self.instances[&id].kind.clone();
         let fields = self
             .program
@@ -827,17 +898,16 @@ impl World {
             .fields
             .clone();
         self.match_declared_field(&fields, name, &value)?;
-        self.instances
-            .get_mut(&id)
-            .expect("actor")
-            .fields
-            .insert(name.to_string(), value);
+        let projected = project(&value)?;
+        let instance = self.instances.get_mut(&id).expect("actor");
+        instance.field_json.insert(name.to_string(), projected);
+        instance.fields.insert(name.to_string(), value);
         Ok(())
     }
 
-    fn apply_fields(&mut self, id: ActorId, value: Json) -> Result<(), Error> {
+    fn apply_fields(&mut self, id: ActorId, value: Doc) -> Result<(), Error> {
         let kind = self.instances[&id].kind.clone();
-        let Json::Object(map) = value else {
+        let Some(map) = doc::entries(&value) else {
             return Err(Error::new(format!(
                 "into {kind} expected an object of fields"
             )));
@@ -871,11 +941,7 @@ impl World {
         run.definition.step(&run.step)?.next.clone()
     }
 
-    fn goto_named(
-        &mut self,
-        id: ActorId,
-        name: &str,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn goto_named(&mut self, id: ActorId, name: &str) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let (step, output) = {
             let run = self.instances[&id]
                 .run
@@ -894,15 +960,16 @@ impl World {
     fn advance(
         &mut self,
         id: ActorId,
-        output: Json,
+        output: Doc,
         next: Option<&Next>,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         if let Some(run) = self
             .instances
             .get_mut(&id)
             .and_then(|instance| instance.run.as_mut())
         {
             run.output = output.clone();
+            run.output_json = project(&output)?;
         }
         match next {
             None | Some(Next::Succeed {}) => self.succeed(id, output),
@@ -914,37 +981,44 @@ impl World {
         }
     }
 
-    fn succeed(&mut self, id: ActorId, output: Json) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn succeed(&mut self, id: ActorId, output: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         {
             let instance = self.instances.get_mut(&id).expect("actor");
             instance.completed = true;
             instance.completion = Some(output.clone());
+            instance.completion_json = Some(project(&output)?);
             if let Some(run) = instance.run.as_mut() {
                 run.status = RunStatus::Succeeded;
                 run.output = output.clone();
+                run.output_json = project(&output)?;
             }
         }
         self.finish_to_parent(id, output)
     }
 
-    fn fail(&mut self, id: ActorId, error: Json) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    fn fail(&mut self, id: ActorId, error: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         {
             let instance = self.instances.get_mut(&id).expect("actor");
             instance.completed = true;
             instance.completion = Some(error.clone());
+            instance.completion_json = Some(project(&error)?);
             if let Some(run) = instance.run.as_mut() {
                 run.status = RunStatus::Failed;
                 run.output = error.clone();
+                run.output_json = project(&error)?;
             }
         }
-        Err(Error::new(format!("workflow failed: {error}")))
+        Err(Error::new(format!(
+            "workflow failed: {}",
+            doc::encode(&error).unwrap_or_else(|_| "error".to_string())
+        )))
     }
 
     fn finish_to_parent(
         &mut self,
         id: ActorId,
-        output: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        output: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let Some(parent) = self.instances[&id].parent else {
             return Ok(vec![]);
         };
@@ -957,9 +1031,15 @@ impl World {
     fn handle(
         &mut self,
         id: ActorId,
-        message: &Json,
+        message: &Doc,
         route: Route,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        if self.instances[&id].driver.is_some() {
+            if route == Route::Init {
+                return Ok(vec![]);
+            }
+            return self.drive(id, message);
+        }
         if self.instances[&id].run.is_some() {
             return match route {
                 Route::Join => {
@@ -1017,7 +1097,7 @@ impl World {
             if !route_matches(&handler.route, route) {
                 continue;
             }
-            if let Some(mut bindings) = match_handler(handler, message)? {
+            if let Some(mut bindings) = match_handler(handler, message, &self.program.rules)? {
                 for (name, value) in &fields {
                     bindings.entry(name.clone()).or_insert(value.clone());
                 }
@@ -1032,8 +1112,8 @@ impl World {
         &mut self,
         id: ActorId,
         statements: &[Statement],
-        bindings: &HashMap<String, Json>,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let mut sends = Vec::new();
         let mut bindings = bindings.clone();
         for statement in statements {
@@ -1128,6 +1208,7 @@ impl World {
                         let instance = self.instances.get_mut(&id).expect("actor");
                         instance.completed = true;
                         instance.completion = Some(value.clone());
+                        instance.completion_json = Some(project(&value)?);
                     }
                     sends.extend(self.finish_to_parent(id, value)?);
                     break;
@@ -1141,8 +1222,8 @@ impl World {
         &mut self,
         parent: ActorId,
         child: ActorId,
-        payload: Json,
-    ) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+        payload: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let Some(join) = self
             .instances
             .get(&parent)
@@ -1216,8 +1297,8 @@ impl World {
         message: &Json,
         after: Option<&Json>,
         route: Route,
-        bindings: &HashMap<String, Json>,
-        sends: &mut Vec<(ActorId, Json, Route)>,
+        bindings: &HashMap<String, Doc>,
+        sends: &mut Vec<(ActorId, Doc, Route)>,
     ) -> Result<(), Error> {
         let items = send_items(message);
         let mut slots = Vec::with_capacity(items.len());
@@ -1290,7 +1371,7 @@ impl World {
         Ok(())
     }
 
-    fn fill_join(&mut self, join_id: u64, slot: usize, value: Json) -> Result<Option<Json>, Error> {
+    fn fill_join(&mut self, join_id: u64, slot: usize, value: Doc) -> Result<Option<Doc>, Error> {
         let Some(join) = self.joins.get_mut(&join_id) else {
             return Err(Error::new("unknown async join"));
         };
@@ -1306,7 +1387,7 @@ impl World {
             return Ok(None);
         }
         let join = self.joins.remove(&join_id).expect("join");
-        let values: Vec<Json> = join
+        let values: Vec<Doc> = join
             .slots
             .into_iter()
             .map(|slot| slot.expect("filled join"))
@@ -1314,11 +1395,11 @@ impl World {
         Ok(Some(if values.len() == 1 {
             values.into_iter().next().expect("one")
         } else {
-            Json::Array(values)
+            doc::array(values)
         }))
     }
 
-    fn eval(&mut self, expression: &Json, bindings: &HashMap<String, Json>) -> Result<Json, Error> {
+    fn eval(&mut self, expression: &Json, bindings: &HashMap<String, Doc>) -> Result<Doc, Error> {
         match self.eval_slot(expression, bindings)? {
             Slot::Ready(value) => Ok(value),
             Slot::Async { .. } => Err(Error::new("async callee is only legal as a send payload")),
@@ -1328,7 +1409,7 @@ impl World {
     fn eval_slot(
         &mut self,
         expression: &Json,
-        bindings: &HashMap<String, Json>,
+        bindings: &HashMap<String, Doc>,
     ) -> Result<Slot, Error> {
         if expression.get("kind").and_then(Json::as_str) == Some("sequence") {
             let items = expression
@@ -1339,7 +1420,7 @@ impl World {
             for item in items {
                 values.push(self.eval(item, bindings)?);
             }
-            return Ok(Slot::Ready(Json::Array(values)));
+            return Ok(Slot::Ready(doc::array(values)));
         }
         if let Some(name) = invocation_name(expression) {
             let args = invocation_args(expression);
@@ -1362,21 +1443,126 @@ impl World {
                     let url = self.eval(url, bindings)?;
                     return Ok(Slot::Async {
                         delay_ms: 1000,
-                        value: json!({ "status": 200, "url": url }),
+                        value: doc::object([("status", doc::number(200.0)), ("url", url)]),
                     });
+                }
+                name if self.program.functions.iter().any(|item| item == name) => {
+                    let mut values = Vec::with_capacity(args.len());
+                    for arg in args {
+                        values.push(self.eval(arg, bindings)?);
+                    }
+                    return Ok(Slot::Ready(builtin::call(name, &values)?));
                 }
                 _ => {}
             }
         }
-        Ok(Slot::Ready(evaluate(expression, bindings)?))
+        let (expression, extras) = self.lower_hosts(expression, bindings)?;
+        let mut bindings = bindings.clone();
+        bindings.extend(extras);
+        Ok(Slot::Ready(evaluate_document(&expression, &bindings)?))
+    }
+
+    fn lower_hosts(
+        &mut self,
+        expression: &Json,
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<(Json, HashMap<String, Doc>), Error> {
+        let mut extras = HashMap::new();
+        let mut seq = 0u32;
+        let lowered = self.lower_node(expression, bindings, &mut extras, &mut seq)?;
+        Ok((lowered, extras))
+    }
+
+    fn lower_node(
+        &mut self,
+        expression: &Json,
+        bindings: &HashMap<String, Doc>,
+        extras: &mut HashMap<String, Doc>,
+        seq: &mut u32,
+    ) -> Result<Json, Error> {
+        if let Some(name) = invocation_name(expression) {
+            if self.program.functions.iter().any(|item| item == name) {
+                let value = self.eval(expression, bindings)?;
+                let key = format!("$k{seq}");
+                *seq += 1;
+                extras.insert(key.clone(), value);
+                return Ok(json!({"kind": "reference", "name": key}));
+            }
+        }
+        match expression {
+            Json::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(self.lower_node(item, bindings, extras, seq)?);
+                }
+                Ok(Json::Array(out))
+            }
+            Json::Object(map) => {
+                let mut out = serde_json::Map::new();
+                for (key, value) in map {
+                    out.insert(key.clone(), self.lower_node(value, bindings, extras, seq)?);
+                }
+                Ok(Json::Object(out))
+            }
+            other => Ok(other.clone()),
+        }
+    }
+
+    fn field_matches(&self, pattern: &Json, value: &Doc) -> Result<bool, Error> {
+        if builtin::uses_rule(pattern, &self.program.rules) {
+            return Ok(builtin::match_with_rules(pattern, value, &self.program.rules)?.is_some());
+        }
+        match_field_document(pattern, value)
+    }
+
+    fn drive(&mut self, id: ActorId, message: &Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        let parent = self.instances[&id].parent;
+        let driver = self.instances[&id]
+            .driver
+            .clone()
+            .ok_or_else(|| Error::new("missing driver"))?;
+        let replies = match driver {
+            Driver::Pipe(pipe) => {
+                let (pipe, replies) = builtin::drive_pipe(pipe, message);
+                self.instances.get_mut(&id).expect("actor").driver = Some(Driver::Pipe(pipe));
+                replies
+            }
+            Driver::Clock => vec![self.clock_reply(message)],
+        };
+        let Some(parent) = parent else {
+            return Ok(vec![]);
+        };
+        Ok(replies
+            .into_iter()
+            .map(|reply| (parent, reply, Route::Up))
+            .collect())
+    }
+
+    fn clock_reply(&mut self, message: &Doc) -> Doc {
+        match doc::as_str(message).as_deref() {
+            Some("Now") => {
+                if self.clock_script.as_ref().is_some_and(Vec::is_empty) {
+                    return doc::array([doc::string("Error"), doc::string("clock")]);
+                }
+                let instant = if let Some(script) = self.clock_script.as_mut() {
+                    script.remove(0)
+                } else {
+                    builtin::instant_doc(builtin::wall_millis())
+                };
+                self.clock_replies.push(instant.clone());
+                doc::array([doc::string("Instant"), instant])
+            }
+            Some("Zone") => doc::array([doc::string("Zone"), self.clock_zone.clone()]),
+            _ => doc::array([doc::string("Error"), doc::string("unknown")]),
+        }
     }
 
     fn eval_write(
         &mut self,
         name: &str,
         args: &[Json],
-        bindings: &HashMap<String, Json>,
-    ) -> Result<Json, Error> {
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Doc, Error> {
         let payload = if name == "print" {
             self.eval_payload(args, bindings)?
         } else {
@@ -1387,36 +1573,33 @@ impl World {
             check_stream(&stream, name)?;
             self.eval_payload(args.get(1..).unwrap_or(&[]), bindings)?
         };
-        eprint!("{}", encode(&payload)?);
-        self.prints.push(payload);
-        Ok(Json::Null)
+        // `print` records the JSON observation tests read, and writes codec text.
+        eprint!("{}", doc::encode(&payload)?);
+        self.prints.push(project(&payload)?);
+        Ok(doc::null())
     }
 
     fn eval_payload(
         &mut self,
         args: &[Json],
-        bindings: &HashMap<String, Json>,
-    ) -> Result<Json, Error> {
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Doc, Error> {
         match args {
-            [] => Ok(Json::Null),
+            [] => Ok(doc::null()),
             [one] => self.eval(one, bindings),
             many => {
                 let mut values = Vec::with_capacity(many.len());
                 for arg in many {
                     values.push(self.eval(arg, bindings)?);
                 }
-                Ok(Json::Array(values))
+                Ok(doc::array(values))
             }
         }
     }
 
-    fn rand_between(&mut self, lo: &Json, hi: &Json) -> Result<Json, Error> {
-        let lo = lo
-            .as_f64()
-            .ok_or_else(|| Error::new("rand expected numbers"))?;
-        let hi = hi
-            .as_f64()
-            .ok_or_else(|| Error::new("rand expected numbers"))?;
+    fn rand_between(&mut self, lo: &Doc, hi: &Doc) -> Result<Doc, Error> {
+        let lo = doc::as_number(lo).ok_or_else(|| Error::new("rand expected numbers"))?;
+        let hi = doc::as_number(hi).ok_or_else(|| Error::new("rand expected numbers"))?;
         if lo > hi {
             return Err(Error::new("rand low bound is greater than high bound"));
         }
@@ -1424,24 +1607,23 @@ impl World {
         if lo.fract() == 0.0 && hi.fract() == 0.0 {
             let width = (hi as i64 - lo as i64 + 1) as u64;
             let pick = lo as i64 + (self.rng % width) as i64;
-            return Ok(json!(pick as f64));
+            return Ok(doc::number(pick as f64));
         }
         let t = (self.rng as f64) / (u64::MAX as f64);
-        Ok(json!(lo + (hi - lo) * t))
+        Ok(doc::number(lo + (hi - lo) * t))
     }
 
-    fn delay_ms(&mut self, after: &Json, bindings: &HashMap<String, Json>) -> Result<u64, Error> {
+    fn delay_ms(&mut self, after: &Json, bindings: &HashMap<String, Doc>) -> Result<u64, Error> {
         let value = self.eval(after, bindings)?;
-        let seconds = value
-            .as_f64()
-            .ok_or_else(|| Error::new("send after expected seconds"))?;
+        let seconds =
+            doc::as_number(&value).ok_or_else(|| Error::new("send after expected seconds"))?;
         if seconds < 0.0 {
             return Err(Error::new("send after delay must not be negative"));
         }
         Ok((seconds * 1000.0) as u64)
     }
 
-    fn deliver(&mut self, to: ActorId, value: Json, route: Route) -> Result<(), Error> {
+    fn deliver(&mut self, to: ActorId, value: Doc, route: Route) -> Result<(), Error> {
         self.route_seq += 1;
         self.routes.insert((to, self.route_seq), route);
         self.dispatcher.send(to, Message { value });
@@ -1520,7 +1702,7 @@ fn send_items(message: &Json) -> Vec<&Json> {
     }
 }
 
-fn assemble_slots(slots: Vec<Slot>) -> Json {
+fn assemble_slots(slots: Vec<Slot>) -> Doc {
     let mut values = Vec::with_capacity(slots.len());
     for slot in slots {
         match slot {
@@ -1531,15 +1713,15 @@ fn assemble_slots(slots: Vec<Slot>) -> Json {
     if values.len() == 1 {
         values.pop().expect("one")
     } else {
-        Json::Array(values)
+        doc::array(values)
     }
 }
 
-fn stream(name: &str) -> Json {
-    json!({ "kind": "stream", "name": name })
+fn stream(name: &str) -> Doc {
+    doc::object([("kind", doc::string("stream")), ("name", doc::string(name))])
 }
 
-fn bind_world(bindings: &mut HashMap<String, Json>) {
+fn bind_world(bindings: &mut HashMap<String, Doc>) {
     for name in ["stdin", "stdout", "stderr"] {
         bindings
             .entry(name.to_string())
@@ -1547,11 +1729,12 @@ fn bind_world(bindings: &mut HashMap<String, Json>) {
     }
 }
 
-fn check_stream(value: &Json, name: &str) -> Result<(), Error> {
-    if value.get("kind").and_then(Json::as_str) != Some("stream") {
+fn check_stream(value: &Doc, name: &str) -> Result<(), Error> {
+    if doc::as_str(&doc::get(value, "kind").unwrap_or_else(doc::null)).as_deref() != Some("stream")
+    {
         return Err(Error::new(format!("{name} expected a stream")));
     }
-    match value.get("name").and_then(Json::as_str) {
+    match doc::as_str(&doc::get(value, "name").unwrap_or_else(doc::null)).as_deref() {
         Some("stdout") | Some("stderr") => Ok(()),
         Some("stdin") => Err(Error::new(format!("{name} cannot write stdin"))),
         _ => Err(Error::new(format!("{name} expected stdout or stderr"))),
@@ -1692,35 +1875,54 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
     Ok(())
 }
 
-fn bind_step(pattern: &Json, working: &Json) -> Result<HashMap<String, Json>, Error> {
-    match_message(pattern, working)?.ok_or_else(|| Error::new("step pattern missed"))
+fn bind_step(
+    pattern: &Json,
+    working: &Doc,
+    rules: &[String],
+) -> Result<HashMap<String, Doc>, Error> {
+    match_program(pattern, working, rules)?.ok_or_else(|| Error::new("step pattern missed"))
+}
+
+fn match_program(
+    pattern: &Json,
+    message: &Doc,
+    rules: &[String],
+) -> Result<Option<HashMap<String, Doc>>, Error> {
+    if builtin::uses_rule(pattern, rules) {
+        builtin::match_with_rules(pattern, message, rules)
+    } else {
+        match_document(pattern, message)
+    }
 }
 
 fn match_handler(
     handler: &crate::ast::Handler,
-    message: &Json,
-) -> Result<Option<HashMap<String, Json>>, Error> {
+    message: &Doc,
+    rules: &[String],
+) -> Result<Option<HashMap<String, Doc>>, Error> {
     let Some(item_pattern) = &handler.item else {
-        return match_message(&handler.pattern, message);
+        return match_program(&handler.pattern, message, rules);
     };
-    let Some([acc, item]) = message.as_array().map(Vec::as_slice) else {
+    let Some(items) = doc::items(message) else {
         return Ok(None);
     };
-    let Some(mut bindings) = match_message(&handler.pattern, acc)? else {
+    let [acc, item] = items.as_slice() else {
         return Ok(None);
     };
-    let Some(item_bindings) = match_message(item_pattern, item)? else {
+    let Some(mut bindings) = match_program(&handler.pattern, acc, rules)? else {
+        return Ok(None);
+    };
+    let Some(item_bindings) = match_program(item_pattern, item, rules)? else {
         return Ok(None);
     };
     bindings.extend(item_bindings);
     Ok(Some(bindings))
 }
 
-fn bindings_from(value: &Json) -> HashMap<String, Json> {
-    match value {
-        Json::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-        _ => HashMap::new(),
-    }
+fn bindings_from(value: &Doc) -> HashMap<String, Doc> {
+    doc::entries(value)
+        .map(|entries| entries.into_iter().collect())
+        .unwrap_or_default()
 }
 
 fn workflow_from_value(value: Json) -> Result<Workflow, Error> {
@@ -1750,8 +1952,8 @@ fn unmatched(
     route: Route,
     kind: &str,
     parent: Option<ActorId>,
-    message: &Json,
-) -> Result<Vec<(ActorId, Json, Route)>, Error> {
+    message: &Doc,
+) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
     match route {
         Route::Up => {
             if let Some(parent) = parent {
@@ -1981,6 +2183,105 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
     Ok(())
 }
 
+fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
+    let children = doc::array(instance.children.iter().map(|child| {
+        doc::object([
+            ("id", doc::number(child.id.0 as f64)),
+            (
+                "key",
+                child.key.clone().map(doc::string).unwrap_or_else(doc::null),
+            ),
+            ("component", doc::string(&child.component)),
+        ])
+    }));
+    let join = match &instance.join {
+        None => doc::null(),
+        Some(join) => doc::object([
+            (
+                "remaining",
+                doc::array(
+                    join.remaining
+                        .iter()
+                        .map(|ActorId(id)| doc::number(*id as f64)),
+                ),
+            ),
+            ("total", doc::number(join.total as f64)),
+            ("completed", doc::number(join.completed as f64)),
+            (
+                "reducer",
+                join.reducer
+                    .map(|ActorId(id)| doc::number(id as f64))
+                    .unwrap_or_else(doc::null),
+            ),
+        ]),
+    };
+    let run = match &instance.run {
+        None => doc::null(),
+        Some(run) => run_document(run)?,
+    };
+    Ok(doc::object([
+        ("id", doc::number(id as f64)),
+        ("kind", doc::string(&instance.kind)),
+        (
+            "parent",
+            instance
+                .parent
+                .map(|ActorId(id)| doc::number(id as f64))
+                .unwrap_or_else(doc::null),
+        ),
+        ("children", children),
+        (
+            "fields",
+            doc::object(
+                instance
+                    .fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            ),
+        ),
+        ("state", doc::string(&instance.state)),
+        ("completed", doc::boolean(instance.completed)),
+        (
+            "completion",
+            instance.completion.clone().unwrap_or_else(doc::null),
+        ),
+        ("join", join),
+        ("run", run),
+        (
+            "driver",
+            instance
+                .driver
+                .as_ref()
+                .map(builtin::driver_document)
+                .unwrap_or_else(doc::null),
+        ),
+    ]))
+}
+
+fn run_document(run: &WorkflowRun) -> Result<Doc, Error> {
+    Ok(doc::object([
+        (
+            "status",
+            doc::string(match run.status {
+                RunStatus::Running => "running",
+                RunStatus::Succeeded => "succeeded",
+                RunStatus::Failed => "failed",
+            }),
+        ),
+        ("step", doc::string(&run.step)),
+        ("input", run.input.clone()),
+        ("output", run.output.clone()),
+        // Workflow syntax trees are JSON. They are embedded in the snapshot here.
+        ("definition", syntax_document(&run.definition)?),
+        ("prototypes", syntax_document(&run.prototypes)?),
+    ]))
+}
+
+fn syntax_document(value: &impl serde::Serialize) -> Result<Doc, Error> {
+    let json = serde_json::to_value(value).map_err(|error| Error::new(error.to_string()))?;
+    doc::from_json(&json)
+}
+
 fn snapshot_route(route: Route) -> &'static str {
     match route {
         Route::Inject => "inject",
@@ -2003,46 +2304,38 @@ fn restore_route(value: Option<&str>) -> Route {
     }
 }
 
-fn restore_timer(entry: &Json) -> Result<Timer, Error> {
+fn restore_timer(entry: &Doc) -> Result<Timer, Error> {
     Ok(Timer {
-        due: entry
-            .get("due")
-            .and_then(json_u64)
+        due: doc::as_u64(&required(entry, "due")?)
             .ok_or_else(|| Error::new("timer missing due"))?,
         to: ActorId(
-            entry
-                .get("to")
-                .and_then(json_u64)
-                .ok_or_else(|| Error::new("timer missing to"))?,
+            doc::as_u64(&required(entry, "to")?).ok_or_else(|| Error::new("timer missing to"))?,
         ),
-        message: entry
-            .get("message")
-            .cloned()
-            .ok_or_else(|| Error::new("timer missing message"))?,
-        route: restore_route(entry.get("route").and_then(Json::as_str)),
-        join: entry.get("join").and_then(json_u64),
-        slot: entry
-            .get("slot")
-            .and_then(json_u64)
+        message: required(entry, "message")?,
+        route: restore_route(
+            doc::as_str(&doc::get(entry, "route").unwrap_or_else(doc::null)).as_deref(),
+        ),
+        join: doc::get(entry, "join")
+            .filter(|value| !doc::is_null(value))
+            .and_then(|value| doc::as_u64(&value)),
+        slot: doc::get(entry, "slot")
+            .filter(|value| !doc::is_null(value))
+            .and_then(|value| doc::as_u64(&value))
             .map(|slot| slot as usize),
     })
 }
 
-fn restore_join(entry: &Json) -> Result<PendingJoin, Error> {
-    let remaining = entry
-        .get("remaining")
-        .and_then(json_u64)
+fn restore_join(entry: &Doc) -> Result<PendingJoin, Error> {
+    let remaining = doc::as_u64(&required(entry, "remaining")?)
         .ok_or_else(|| Error::new("join missing remaining"))? as usize;
-    let slots = entry
-        .get("slots")
-        .and_then(Json::as_array)
+    let slots = doc::items(&required(entry, "slots")?)
         .ok_or_else(|| Error::new("join missing slots"))?
-        .iter()
+        .into_iter()
         .map(|slot| {
-            if slot.is_null() {
+            if doc::is_null(&slot) {
                 None
             } else {
-                Some(slot.clone())
+                Some(slot)
             }
         })
         .collect();
@@ -2050,118 +2343,124 @@ fn restore_join(entry: &Json) -> Result<PendingJoin, Error> {
         remaining,
         slots,
         to: ActorId(
-            entry
-                .get("to")
-                .and_then(json_u64)
-                .ok_or_else(|| Error::new("join missing to"))?,
+            doc::as_u64(&required(entry, "to")?).ok_or_else(|| Error::new("join missing to"))?,
         ),
-        route: restore_route(entry.get("route").and_then(Json::as_str)),
+        route: restore_route(
+            doc::as_str(&doc::get(entry, "route").unwrap_or_else(doc::null)).as_deref(),
+        ),
     })
 }
 
-fn restore_instance(entry: &Json) -> Result<InstanceState, Error> {
-    let kind = entry
-        .get("kind")
-        .and_then(Json::as_str)
-        .ok_or_else(|| Error::new("instance missing kind"))?
-        .to_string();
-    let parent = entry.get("parent").and_then(json_u64).map(ActorId);
+fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
+    let kind = doc::as_str(&required(entry, "kind")?)
+        .ok_or_else(|| Error::new("instance missing kind"))?;
+    let parent = doc::get(entry, "parent")
+        .filter(|value| !doc::is_null(value))
+        .and_then(|value| doc::as_u64(&value))
+        .map(ActorId);
     let mut children = Vec::new();
-    if let Some(list) = entry.get("children").and_then(Json::as_array) {
+    if let Some(list) = doc::get(entry, "children").and_then(|value| doc::items(&value)) {
         for child in list {
             children.push(ChildRef {
                 id: ActorId(
-                    child
-                        .get("id")
-                        .and_then(json_u64)
+                    doc::as_u64(&required(&child, "id")?)
                         .ok_or_else(|| Error::new("child missing id"))?,
                 ),
-                key: child.get("key").and_then(Json::as_str).map(str::to_string),
-                component: child
-                    .get("component")
-                    .and_then(Json::as_str)
-                    .unwrap_or("")
-                    .to_string(),
+                key: doc::as_str(&doc::get(&child, "key").unwrap_or_else(doc::null)),
+                component: doc::as_str(&doc::get(&child, "component").unwrap_or_else(doc::null))
+                    .unwrap_or_default(),
             });
         }
     }
-    let fields = entry
-        .get("fields")
-        .and_then(Json::as_object)
-        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-        .unwrap_or_default();
-    let join = entry
-        .get("join")
-        .filter(|value| !value.is_null())
+    let fields =
+        doc::entries(&doc::get(entry, "fields").unwrap_or_else(|| doc::object::<&str>([])))
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+    let field_json = project_map(&fields)?;
+    let join = doc::get(entry, "join")
+        .filter(|value| !doc::is_null(value))
         .map(|value| {
-            let remaining = value
-                .get("remaining")
-                .and_then(Json::as_array)
-                .map(|ids| ids.iter().filter_map(json_u64).map(ActorId).collect())
-                .unwrap_or_default();
+            let remaining = doc::items(&doc::get(&value, "remaining").unwrap_or_else(doc::null))
+                .unwrap_or_default()
+                .iter()
+                .filter_map(doc::as_u64)
+                .map(ActorId)
+                .collect();
             JoinSet {
                 remaining,
-                total: value.get("total").and_then(json_u64).unwrap_or(0),
-                completed: value.get("completed").and_then(json_u64).unwrap_or(0),
-                reducer: value.get("reducer").and_then(json_u64).map(ActorId),
+                total: doc::as_u64(&doc::get(&value, "total").unwrap_or_else(doc::null))
+                    .unwrap_or(0),
+                completed: doc::as_u64(&doc::get(&value, "completed").unwrap_or_else(doc::null))
+                    .unwrap_or(0),
+                reducer: doc::get(&value, "reducer")
+                    .filter(|item| !doc::is_null(item))
+                    .and_then(|item| doc::as_u64(&item))
+                    .map(ActorId),
             }
         });
-    let run = match entry.get("run") {
-        Some(value) if !value.is_null() => Some(restore_run(value)?),
+    let run = match doc::get(entry, "run") {
+        Some(value) if !doc::is_null(&value) => Some(restore_run(&value)?),
         _ => None,
     };
+    let completion = doc::get(entry, "completion").filter(|value| !doc::is_null(value));
+    let completion_json = completion.as_ref().map(project).transpose()?;
     Ok(InstanceState {
         kind,
         parent,
         children,
         fields,
-        state: entry
-            .get("state")
-            .and_then(Json::as_str)
-            .unwrap_or("")
-            .to_string(),
-        completed: entry
-            .get("completed")
-            .and_then(Json::as_bool)
+        field_json,
+        state: doc::as_str(&doc::get(entry, "state").unwrap_or_else(doc::null)).unwrap_or_default(),
+        completed: doc::as_bool(&doc::get(entry, "completed").unwrap_or_else(doc::null))
             .unwrap_or(false),
-        completion: entry
-            .get("completion")
-            .cloned()
-            .filter(|value| !value.is_null()),
+        completion,
+        completion_json,
         join,
         run,
+        driver: doc::get(entry, "driver")
+            .filter(|value| !doc::is_null(value))
+            .as_ref()
+            .and_then(builtin::driver_from),
     })
 }
 
-fn restore_run(value: &Json) -> Result<WorkflowRun, Error> {
-    let definition: Workflow = serde_json::from_value(
-        value
-            .get("definition")
-            .cloned()
-            .ok_or_else(|| Error::new("run missing definition"))?,
-    )
+fn restore_run(value: &Doc) -> Result<WorkflowRun, Error> {
+    let definition: Workflow =
+        serde_json::from_value(doc::to_json(&required(value, "definition")?)?)
+            .map_err(|error| Error::new(error.to_string()))?;
+    let prototypes = serde_json::from_value(doc::to_json(
+        &doc::get(value, "prototypes").unwrap_or_else(|| doc::array([])),
+    )?)
     .map_err(|error| Error::new(error.to_string()))?;
-    let prototypes = serde_json::from_value(
-        value
-            .get("prototypes")
-            .cloned()
-            .unwrap_or_else(|| json!([])),
-    )
-    .map_err(|error| Error::new(error.to_string()))?;
+    let input = doc::get(value, "input").unwrap_or_else(doc::null);
+    let output = doc::get(value, "output").unwrap_or_else(doc::null);
     Ok(WorkflowRun {
-        status: match value.get("status").and_then(Json::as_str) {
+        status: match doc::as_str(&doc::get(value, "status").unwrap_or_else(doc::null)).as_deref() {
             Some("succeeded") => RunStatus::Succeeded,
             Some("failed") => RunStatus::Failed,
             _ => RunStatus::Running,
         },
-        step: value
-            .get("step")
-            .and_then(Json::as_str)
-            .unwrap_or("")
-            .to_string(),
-        input: value.get("input").cloned().unwrap_or(Json::Null),
-        output: value.get("output").cloned().unwrap_or(Json::Null),
+        step: doc::as_str(&doc::get(value, "step").unwrap_or_else(doc::null)).unwrap_or_default(),
+        input,
+        output: output.clone(),
+        output_json: project(&output)?,
         definition,
         prototypes,
     })
+}
+
+fn required(doc: &Doc, key: &str) -> Result<Doc, Error> {
+    doc::get(doc, key).ok_or_else(|| Error::new(format!("snapshot missing {key}")))
+}
+
+fn project(doc: &Doc) -> Result<Json, Error> {
+    doc::to_json(doc)
+}
+
+fn project_map(fields: &HashMap<String, Doc>) -> Result<HashMap<String, Json>, Error> {
+    fields
+        .iter()
+        .map(|(name, value)| Ok((name.clone(), project(value)?)))
+        .collect()
 }

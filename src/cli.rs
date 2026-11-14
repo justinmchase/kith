@@ -1,5 +1,6 @@
 use crate::ast::Program;
 use crate::codec::encode;
+use crate::doc;
 use crate::error::Error;
 use crate::interpreter::World;
 use crate::parse::{artifact_document, load_program, parse_file};
@@ -105,7 +106,7 @@ pub fn run_program(program: Program, message: Option<Json>) -> Result<String, Er
         world.inject(message)?;
     }
     world.run()?;
-    encode(&world.result())
+    doc::encode(&world.result_document())
 }
 
 fn artifact_path(source: &Path) -> PathBuf {
