@@ -429,6 +429,14 @@ fn bytes_arg(args: &[Doc], index: usize) -> Option<Vec<u8>> {
     doc::as_bytes(args.get(index)?)
 }
 
+/// A server push body is raw bytes, or text encoded as UTF-8.
+fn push_body(args: &[Doc], index: usize) -> Option<Vec<u8>> {
+    if let Some(bytes) = bytes_arg(args, index) {
+        return Some(bytes);
+    }
+    text_arg(args, index).map(String::into_bytes)
+}
+
 fn headers_arg(value: &Doc) -> Result<Vec<(String, String)>, ()> {
     if doc::is_null(value) {
         return Ok(Vec::new());
@@ -790,7 +798,21 @@ fn parse_url(url: &str) -> Result<Target, ()> {
 fn server(mut edge: Edge, command: Command) -> Outcome {
     match command.name.as_str() {
         "Listen" => {
-            let Some(port) = doc::as_u64(command.args.first().unwrap_or(&doc::null())) else {
+            let (host, port_doc) = if command.args.len() >= 2 {
+                let Some(host) = text_arg(&command.args, 0) else {
+                    return done(edge, vec![failure(None, "host")]);
+                };
+                if host.is_empty() {
+                    return done(edge, vec![failure(None, "host")]);
+                }
+                (host, command.args.get(1).cloned().unwrap_or_else(doc::null))
+            } else {
+                (
+                    "127.0.0.1".into(),
+                    command.args.first().cloned().unwrap_or_else(doc::null),
+                )
+            };
+            let Some(port) = doc::as_u64(&port_doc) else {
                 return done(edge, vec![failure(None, "port")]);
             };
             if port > u16::MAX as u64 {
@@ -799,7 +821,7 @@ fn server(mut edge: Edge, command: Command) -> Outcome {
             edge.listening = true;
             let mut outcome = done(edge, vec![]);
             outcome.listen = Some(ListenOn {
-                host: "127.0.0.1".into(),
+                host,
                 port: port as u16,
                 server: true,
             });
@@ -844,7 +866,7 @@ fn server(mut edge: Edge, command: Command) -> Outcome {
             let Some(id) = text_arg(&command.args, 0) else {
                 return done(edge, vec![failure(None, "id")]);
             };
-            let Some(bytes) = bytes_arg(&command.args, 1) else {
+            let Some(bytes) = push_body(&command.args, 1) else {
                 return done(edge, vec![failure(Some(&id), "bytes")]);
             };
             let Some((_, response)) = edge.responses.iter_mut().find(|(name, _)| name == &id)

@@ -91,12 +91,23 @@ string to string, or null. `"Pull"` then yields `Chunk` of `Bytes` and
 `"Pushed"`. `"BodyEnd"` finishes the request body and replies `"Status"`;
 it is not `"Close"`.
 
-`Server` is multiplexed by id. `"Listen" port` replies `"Listening" port`
-with the bound port. An accepted request is `"Request" id method path headers`.
-`path` is the raw path and query. A GET has no body: the first `"Pull" id`
-is `"End" id`. `"Status" id status headers` allows `"Push" id bytes` and
-`"BodyEnd" id`, which replies `"Responded" id`. `"Stop"` replies `"Stopped"`.
-Request ids are `r1`, `r2`, … in accept order.
+`Server` is multiplexed by id. `"Listen" port` binds `127.0.0.1` and replies
+`"Listening" port` with the bound port. `"Listen" host port` binds that host
+and replies the same way. An accepted request is `"Request" id method path
+headers`. `path` is the raw path and query. A GET has no body: the first
+`"Pull" id` is `"End" id`. `"Status" id status headers` allows `"Push" id
+bytes`, `"Push" id text`, and `"BodyEnd" id`. `"Push" id text` appends the
+UTF-8 bytes of `text`. `"BodyEnd" id` replies `"Responded" id`. `"Stop"`
+replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
+
+## Hello world
+
+`examples/hello-world.kith` is the Node.js synopsis server. It imports
+`Server` from `kith:http`. On init it sends `"Listen" "127.0.0.1" 3000`.
+On `"Listening"` it prints `Server running at http://127.0.0.1:3000/`.
+Every `"Request"` gets `"Status"` 200 with header `Content-Type` `text/plain`,
+`"Push"` of the text `Hello, World!\n`, and `"BodyEnd"`. `examples/http.kith`
+stays the user mock and MUST NOT import `kith:http`.
 
 ## Stdio
 

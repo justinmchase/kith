@@ -22,10 +22,12 @@ Expected behavior:
 - `"POST" url headers` MUST reply `"Ready"`. `"Push" bytes` MUST reply
   `"Pushed"`. `"BodyEnd"` MUST reply `"Status"` and MUST NOT be treated as
   `"Close"`. A method other than GET or POST MUST reply `"Error"`.
-- `"Listen" port` MUST reply `"Listening" port` with the bound port. A
-  request MUST be `"Request" id method path headers` with the raw path. The
-  first `"Pull" id` of a GET MUST be `"End" id`. `"BodyEnd" id` MUST reply
-  `"Responded" id`.
+- `"Listen" port` MUST reply `"Listening" port` with the bound port and MUST
+  bind `127.0.0.1`. `"Listen" host port` MUST bind that host and reply
+  `"Listening" port`. A request MUST be `"Request" id method path headers`
+  with the raw path. The first `"Pull" id` of a GET MUST be `"End" id`.
+  `"Push" id text` MUST append the UTF-8 bytes of `text`. `"BodyEnd" id`
+  MUST reply `"Responded" id`.
 - `https:` MUST be TLS inside this driver. The host MUST NOT follow a
   redirect.
 

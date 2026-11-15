@@ -213,6 +213,8 @@ export scene Main {
 - A message object (`send`, `complete`) MAY omit commas between entries.
   An identifier with no `:` is `name: name`.
   `{ kind: "Done" status body }` is `{ kind: "Done", status: status, body: body }`.
+  A key MAY be a string, so a name that is not an identifier can be written
+  `{ "Content-Type": "text/plain" }`.
   Uffda expressions that are not these message objects keep Uffda's object
   commas. An object pattern in `on` projects a Uffda Over and MAY omit
   commas the same way: `{ kind: "GET" url: any }`. A bare identifier in an

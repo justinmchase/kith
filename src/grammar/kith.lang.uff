@@ -111,8 +111,13 @@ rule SendSelf =
 ;
 
 # `{ kind: "Done" status body }` is `kind: "Done"` plus shorthand `status` / `body`.
-# Commas between entries are optional.
+# Commas between entries are optional. A quoted key keeps names such as
+# `Content-Type`.
 rule MessageObjectEntry =
+  | (
+    "\"" n:SpecifierChar* "\"" ":" v:Expression
+    -> { kind: "objectKey", name: (join n ""), expression: v }
+  )
   | (
     n:Identifier ":" v:Expression
     -> { kind: "objectKey", name: n, expression: v }

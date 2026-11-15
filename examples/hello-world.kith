@@ -1,0 +1,28 @@
+import "kith:http" Server;
+
+export Hello;
+export Main;
+
+component Hello {
+  server: Server;
+
+  start {
+    on init {
+      send to server "Listen" "127.0.0.1" 3000;
+    }
+    on up "Listening" port:number {
+      (print "Server running at http://127.0.0.1:3000/");
+    }
+    on up "Request" id:string method:string path:string headers:any {
+      send to server "Status" id 200 { "Content-Type": "text/plain" };
+      send to server "Push" id "Hello, World!\n";
+      send to server "BodyEnd" id;
+    }
+  }
+}
+
+export scene Main {
+  Hello() {
+    server = Server();
+  }
+}

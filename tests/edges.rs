@@ -407,6 +407,144 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(&mut world, "Server", doc::string("Stop"));
 }
 
+#[test]
+// req:edges-002
+fn server_listens_on_a_host_and_pushes_text() {
+    let mut world = start(HTTP);
+    send(
+        &mut world,
+        "Server",
+        down("Listen", [doc::string("127.0.0.1"), doc::number(0.0)]),
+    );
+    let listening = doc::items(&got(&world)).unwrap();
+    assert_eq!(doc::as_str(&listening[0]).as_deref(), Some("Listening"));
+    let port = doc::as_u64(&listening[1]).unwrap();
+    let client = std::thread::spawn(move || {
+        let mut sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        sock.write_all(b"GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut buf = Vec::new();
+        let _ = sock.read_to_end(&mut buf);
+        buf
+    });
+    until_got(
+        &mut world,
+        &down(
+            "Request",
+            [
+                doc::string("r1"),
+                doc::string("GET"),
+                doc::string("/"),
+                doc::object([
+                    ("Host", doc::string("h")),
+                    ("Connection", doc::string("close")),
+                ]),
+            ],
+        ),
+    );
+    send(
+        &mut world,
+        "Server",
+        down(
+            "Status",
+            [
+                doc::string("r1"),
+                doc::number(200.0),
+                doc::object([("Content-Type", doc::string("text/plain"))]),
+            ],
+        ),
+    );
+    send(
+        &mut world,
+        "Server",
+        down("Push", [doc::string("r1"), doc::string("Hello, World!\n")]),
+    );
+    assert_eq!(got(&world), down("Pushed", [doc::string("r1")]));
+    send(&mut world, "Server", down("BodyEnd", [doc::string("r1")]));
+    settle(&mut world);
+    let response = String::from_utf8_lossy(&client.join().unwrap()).to_string();
+    assert!(response.contains("HTTP/1.1 200"), "{response}");
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("content-type: text/plain"),
+        "{response}"
+    );
+    assert!(response.contains("Hello, World!\n"), "{response}");
+    send(&mut world, "Server", doc::string("Stop"));
+}
+
+#[test]
+// req:edges-009
+fn hello_world_serves_plain_text_on_port_3000() {
+    let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
+    assert!(source.contains("import \"kith:http\" Server"));
+    assert!(source.contains("\"Listen\" \"127.0.0.1\" 3000"));
+    assert!(source.contains("Server running at http://127.0.0.1:3000/"));
+    assert!(source.contains("Hello, World!\\n"));
+    let mock = std::fs::read_to_string("examples/http.kith").unwrap();
+    assert!(mock.contains("component Http"));
+    assert!(!mock.contains("kith:http"));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
+        .arg("run")
+        .arg("examples/hello-world.kith")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 512];
+        loop {
+            match stderr.read(&mut tmp) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    buf.extend_from_slice(&tmp[..count]);
+                    if buf
+                        .windows(b"Server running at http://127.0.0.1:3000/".len())
+                        .any(|window| window == b"Server running at http://127.0.0.1:3000/")
+                    {
+                        let _ = tx.send(buf);
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let log = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("hello-world did not log that it is listening");
+    let log = String::from_utf8_lossy(&log);
+    assert!(
+        log.contains("Server running at http://127.0.0.1:3000/"),
+        "{log}"
+    );
+
+    let mut sock = TcpStream::connect("127.0.0.1:3000").unwrap();
+    sock.write_all(
+        b"POST /hi HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )
+    .unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let mut buf = Vec::new();
+    let _ = sock.read_to_end(&mut buf);
+    let _ = child.kill();
+    let _ = child.wait();
+    let response = String::from_utf8_lossy(&buf).to_string();
+    assert!(response.contains("HTTP/1.1 200"), "{response}");
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("content-type: text/plain"),
+        "{response}"
+    );
+    assert!(response.ends_with("Hello, World!\n"), "{response}");
+}
+
 const STDIO: &str = r#"
 import "kith:stdio" Stdin Stdout Stderr;
 export Probe;
