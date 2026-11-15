@@ -35,6 +35,8 @@ primitives rather than redefining them.
 - [Built-ins](./builtins.spec.md): the `kith:` prefix and the data, stream,
   and time modules. `Clock` there is the wall read. The dispatcher clock
   stays in Timers.
+- [Edges](./edges.spec.md): net, http, stdio, fs, encoding, crypto, path,
+  and process.
 
 ## Planned chapters
 

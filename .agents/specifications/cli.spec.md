@@ -46,7 +46,12 @@ The executable name MUST be `kith`. The initial surface MUST be:
   workflow succeed output when the root is a workflow. Writes to the
   program's `stdout` stream (`(writeLine stdout V)`, `(print V)`) MUST go
   to process stderr as data codec records so process stdout stays the run
-  result. That is a stream binding, not a keyword.
+  result. That is a stream binding, not a keyword. Constructing `Stdout`
+  from `kith:stdio` takes over process stdout: pushed bytes are the process
+  stdout, and `kith run` MUST NOT also write the result record. `print`
+  stays on process stderr. `"Exit" code` on `kith:process` sets the process
+  status after the turn and MUST NOT print a reply. Arguments after the
+  program path, and after `kith run`'s own flags, are the frozen argv.
   `--message` remains JSON for this slice (an object, a string, or an
   array of send arguments). `run` MUST drain mailboxes and
   advance pending `send after` timers ([timers](./timers.spec.md)).

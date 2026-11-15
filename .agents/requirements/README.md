@@ -79,3 +79,14 @@ verify it cite it with `req:{id}`.
 - [Data values](./builtins/002-data.requirement.md)
 - [Stream pipe](./builtins/003-stream.requirement.md)
 - [Time values and Clock](./builtins/004-time.requirement.md)
+
+## Edges
+
+- [Net](./edges/001-net.requirement.md)
+- [Http](./edges/002-http.requirement.md)
+- [Stdio](./edges/003-stdio.requirement.md)
+- [Fs](./edges/004-fs.requirement.md)
+- [Encoding](./edges/005-encoding.requirement.md)
+- [Crypto](./edges/006-crypto.requirement.md)
+- [Path](./edges/007-path.requirement.md)
+- [Process](./edges/008-process.requirement.md)

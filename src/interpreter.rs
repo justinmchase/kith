@@ -106,6 +106,39 @@ pub struct World {
     clock_zone: Doc,
     clock_script: Option<Vec<Doc>>,
     clock_replies: Vec<Doc>,
+    crypto_rng: u64,
+    argv: Vec<String>,
+    env: HashMap<String, String>,
+    exit_code: Option<u8>,
+    suppress_result: bool,
+    hub: IoHub,
+}
+
+struct IoHub {
+    tx: std::sync::mpsc::Sender<builtin::IoDone>,
+    rx: std::sync::mpsc::Receiver<builtin::IoDone>,
+    outstanding: usize,
+    shared: std::sync::Arc<builtin::IoShared>,
+    listening: usize,
+}
+
+impl IoHub {
+    fn new() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self {
+            tx,
+            rx,
+            outstanding: 0,
+            shared: std::sync::Arc::new(builtin::IoShared::new()),
+            listening: 0,
+        }
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        self.hub.shared.stop_all();
+    }
 }
 
 impl World {
@@ -156,6 +189,12 @@ impl World {
             clock_zone: builtin::process_zone(),
             clock_script: None,
             clock_replies: Vec::new(),
+            crypto_rng: 0x00c0_ffee,
+            argv: Vec::new(),
+            env: std::env::vars().collect(),
+            exit_code: None,
+            suppress_result: false,
+            hub: IoHub::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -253,6 +292,94 @@ impl World {
 
     pub fn prints(&self) -> &[Json] {
         &self.prints
+    }
+
+    pub fn field_document(&self, id: ActorId, name: &str) -> Option<Doc> {
+        self.instances.get(&id)?.fields.get(name).cloned()
+    }
+
+    pub fn set_argv(&mut self, argv: Vec<String>) {
+        self.argv = argv;
+    }
+
+    /// Replace the frozen argv and env. Later messages see this copy.
+    pub fn replace_process(&mut self, argv: Vec<String>, env: &[(&str, &str)]) {
+        self.argv = argv;
+        self.env = env
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+    }
+
+    pub fn exit_code(&self) -> Option<u8> {
+        self.exit_code
+    }
+
+    pub fn suppress_result(&self) -> bool {
+        self.suppress_result
+    }
+
+    pub fn outstanding(&self) -> usize {
+        self.hub.outstanding
+    }
+
+    pub fn listening(&self) -> bool {
+        self.hub.listening > 0
+    }
+
+    /// Install reply batches on an edge driver. An empty batch leaves the
+    /// next command in flight.
+    pub fn script_driver(&mut self, id: ActorId, batches: Vec<Vec<Doc>>) {
+        if let Some(builtin::Driver::Edge(edge)) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.driver.as_mut())
+        {
+            edge.install_script(batches);
+        }
+    }
+
+    /// Deliver replies for a command a script left in flight.
+    pub fn answer(&mut self, id: ActorId, replies: Vec<Doc>) -> Result<(), Error> {
+        if let Some(builtin::Driver::Edge(edge)) = self
+            .instances
+            .get_mut(&id)
+            .and_then(|instance| instance.driver.as_mut())
+        {
+            edge.clear_busy();
+        }
+        let Some(parent) = self.instances.get(&id).and_then(|instance| instance.parent) else {
+            return Ok(());
+        };
+        for reply in replies {
+            self.deliver(parent, reply, Route::Up)?;
+        }
+        Ok(())
+    }
+
+    pub fn poll_io(&mut self) -> Result<(), Error> {
+        loop {
+            match self.hub.rx.try_recv() {
+                Ok(done) => self.apply_io(done)?,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return Ok(()),
+            }
+        }
+    }
+
+    pub fn wait_io(&mut self, timeout: std::time::Duration) -> Result<(), Error> {
+        self.poll_io()?;
+        if self.hub.outstanding == 0 && self.hub.listening == 0 {
+            return Ok(());
+        }
+        match self.hub.rx.recv_timeout(timeout) {
+            Ok(done) => {
+                self.apply_io(done)?;
+                self.poll_io()
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Ok(()),
+        }
     }
 
     pub fn virtual_now(&self) -> u64 {
@@ -437,6 +564,26 @@ impl World {
                     ("replies", doc::array(self.clock_replies.clone())),
                 ]),
             ),
+            ("cryptoRng", doc::number(self.crypto_rng as f64)),
+            (
+                "argv",
+                doc::array(self.argv.iter().cloned().map(doc::string)),
+            ),
+            (
+                "env",
+                doc::object(
+                    self.env
+                        .iter()
+                        .map(|(key, value)| (key.clone(), doc::string(value))),
+                ),
+            ),
+            (
+                "exit",
+                self.exit_code
+                    .map(|code| doc::number(code as f64))
+                    .unwrap_or_else(doc::null),
+            ),
+            ("suppress", doc::boolean(self.suppress_result)),
         ]))
     }
 
@@ -534,6 +681,27 @@ impl World {
             clock_zone,
             clock_script,
             clock_replies,
+            crypto_rng: doc::as_u64(&doc::get(&snapshot, "cryptoRng").unwrap_or_else(doc::null))
+                .unwrap_or(0x00c0_ffee),
+            argv: doc::items(&doc::get(&snapshot, "argv").unwrap_or_else(doc::null))
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|item| doc::as_str(item))
+                .collect(),
+            env: doc::entries(
+                &doc::get(&snapshot, "env").unwrap_or_else(|| doc::object::<&str>([])),
+            )
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(key, value)| doc::as_str(&value).map(|value| (key, value)))
+            .collect(),
+            exit_code: doc::as_u64(&doc::get(&snapshot, "exit").unwrap_or_else(doc::null))
+                .and_then(|code| u8::try_from(code).ok()),
+            suppress_result: doc::as_bool(
+                &doc::get(&snapshot, "suppress").unwrap_or_else(doc::null),
+            )
+            .unwrap_or(false),
+            hub: IoHub::new(),
         })
     }
 
@@ -625,6 +793,9 @@ impl World {
                 driver: self.driver_for(kind),
             },
         );
+        if kind == "Stdout" {
+            self.suppress_result = true;
+        }
         Ok(id)
     }
 
@@ -1528,6 +1699,7 @@ impl World {
                 replies
             }
             Driver::Clock => vec![self.clock_reply(message)],
+            Driver::Edge(driver) => self.drive_edge(id, driver, message)?,
         };
         let Some(parent) = parent else {
             return Ok(vec![]);
@@ -1536,6 +1708,169 @@ impl World {
             .into_iter()
             .map(|reply| (parent, reply, Route::Up))
             .collect())
+    }
+
+    fn drive_edge(
+        &mut self,
+        id: ActorId,
+        driver: builtin::Edge,
+        message: &Doc,
+    ) -> Result<Vec<Doc>, Error> {
+        let argv = self.argv.clone();
+        let env = self.env.clone();
+        let shared = std::sync::Arc::clone(&self.hub.shared);
+        let mut rng = self.crypto_rng;
+        let mut host = builtin::Host {
+            argv: &argv,
+            env: &env,
+            rng: &mut rng,
+        };
+        let mut outcome = builtin::step(driver, id.0, message, &mut host, &shared);
+        self.crypto_rng = rng;
+        if let Some(code) = outcome.exit {
+            self.exit_code = Some(code);
+        }
+        if let Some(bytes) = outcome.stdout.take() {
+            let mut out = std::io::stdout().lock();
+            let _ = std::io::Write::write_all(&mut out, &bytes);
+            let _ = std::io::Write::flush(&mut out);
+        }
+        if let Some(bytes) = outcome.stderr.take() {
+            let mut err = std::io::stderr().lock();
+            let _ = std::io::Write::write_all(&mut err, &bytes);
+            let _ = std::io::Write::flush(&mut err);
+        }
+        let response = match &outcome.job {
+            Some(builtin::Job::WriteResponse { id }) => outcome.edge.take_response(id),
+            _ => None,
+        };
+        if let Some(listen) = outcome.listen.take() {
+            match builtin::begin_listen(
+                &listen.host,
+                listen.port,
+                listen.server,
+                id.0,
+                self.hub.tx.clone(),
+                &self.hub.shared,
+            ) {
+                Ok(port) => {
+                    self.hub.listening += 1;
+                    outcome.replies.push(doc::array([
+                        doc::string("Listening"),
+                        doc::number(port as f64),
+                    ]));
+                }
+                Err(reason) => {
+                    outcome.edge.set_listening(false);
+                    outcome
+                        .replies
+                        .push(doc::array([doc::string("Error"), doc::string(reason)]));
+                }
+            }
+        }
+        if outcome.stop_listen {
+            builtin::stop_listen(id.0, &self.hub.shared);
+            self.hub.listening = self.hub.listening.saturating_sub(1);
+        }
+        if let Some(job) = outcome.job.take() {
+            self.hub.outstanding += 1;
+            builtin::spawn_job(
+                job,
+                id.0,
+                self.hub.tx.clone(),
+                std::sync::Arc::clone(&self.hub.shared),
+                response,
+            );
+        }
+        self.instances.get_mut(&id).expect("actor").driver = Some(Driver::Edge(outcome.edge));
+        Ok(outcome.replies)
+    }
+
+    fn apply_io(&mut self, mut done: builtin::IoDone) -> Result<(), Error> {
+        let actor = ActorId(done.actor);
+        if done.track {
+            self.hub.outstanding = self.hub.outstanding.saturating_sub(1);
+        }
+        if let Some(stream) = done.sock.take() {
+            self.hub.shared.insert_sock(done.actor, stream);
+        }
+        if let Some(body) = done.body.take() {
+            self.hub.shared.insert_body(done.actor, body);
+            if let Some(Driver::Edge(edge)) = self
+                .instances
+                .get_mut(&actor)
+                .and_then(|instance| instance.driver.as_mut())
+            {
+                edge.open_body();
+            }
+        }
+        if let Some(stream) = done.accepted.take() {
+            let id = self.alloc_edge_id(actor, "c");
+            self.hub.shared.insert_conn(done.actor, id.clone(), stream);
+            done.replies
+                .push(doc::array([doc::string("Connection"), doc::string(id)]));
+        }
+        if let Some(incoming) = done.request.take() {
+            let id = self.alloc_edge_id(actor, "r");
+            let method = incoming.method;
+            let path = incoming.path;
+            let headers = doc::object(
+                incoming
+                    .headers
+                    .iter()
+                    .map(|(name, value)| (name.clone(), doc::string(value))),
+            );
+            self.hub
+                .shared
+                .insert_conn(done.actor, id.clone(), incoming.stream);
+            if method.eq_ignore_ascii_case("GET") {
+                if let Some(Driver::Edge(edge)) = self
+                    .instances
+                    .get_mut(&actor)
+                    .and_then(|instance| instance.driver.as_mut())
+                {
+                    edge.note_get(id.clone());
+                }
+            }
+            done.replies.push(doc::array([
+                doc::string("Request"),
+                doc::string(&id),
+                doc::string(method),
+                doc::string(path),
+                headers,
+            ]));
+        }
+        if done.clear_busy {
+            if let Some(Driver::Edge(edge)) = self
+                .instances
+                .get_mut(&actor)
+                .and_then(|instance| instance.driver.as_mut())
+            {
+                edge.clear_one(done.busy_id.as_deref());
+            }
+        }
+        let Some(parent) = self
+            .instances
+            .get(&actor)
+            .and_then(|instance| instance.parent)
+        else {
+            return Ok(());
+        };
+        for reply in done.replies {
+            self.deliver(parent, reply, Route::Up)?;
+        }
+        Ok(())
+    }
+
+    fn alloc_edge_id(&mut self, actor: ActorId, prefix: &str) -> String {
+        match self
+            .instances
+            .get_mut(&actor)
+            .and_then(|instance| instance.driver.as_mut())
+        {
+            Some(Driver::Edge(edge)) => edge.next_id(prefix),
+            _ => format!("{prefix}0"),
+        }
     }
 
     fn clock_reply(&mut self, message: &Doc) -> Doc {

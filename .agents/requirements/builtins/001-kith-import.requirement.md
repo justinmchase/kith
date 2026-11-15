@@ -12,7 +12,7 @@ Preconditions:
 
 - The host has registered `kith:data`, `kith:stream`, and `kith:time`.
 - A program imports one of those specifiers, a malformed `kith:` specifier,
-  or `kith:net`.
+  or `kith:dns`.
 
 Expected behavior:
 
@@ -24,7 +24,7 @@ Expected behavior:
   component, or rule. A missing name MUST fail. A name that collides with a
   local component, workflow, scene, function, or rule MUST fail.
 - `kith:Data`, `kith:`, and `kith:fs/promises` MUST fail as an invalid kith
-  import specifier. `kith:net` MUST fail as an unknown built-in module.
+  import specifier. `kith:dns` MUST fail as an unknown built-in module.
   A `jsr:` specifier MUST still fail as an unsupported import specifier.
 - `kith parse` MUST NOT load the module. A relative re-export of `Pipe`,
   `bytes`, or `Bytes` MUST stay that kind in the importing file.
