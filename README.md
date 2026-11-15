@@ -37,3 +37,13 @@ kith check app.kith
 kith compile app.kith
 kith run app.kith --message '["Ping", 7]'
 ```
+
+## Install
+
+GitHub Releases ship the `kith` binary. A language links `kith-runtime`
+once that library is published; it does not shell out to this binary.
+
+```sh
+curl -fsSL https://github.com/justinmchase/kith/releases/latest/download/install.sh | bash
+kith --version
+```

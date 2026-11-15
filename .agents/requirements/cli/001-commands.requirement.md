@@ -22,6 +22,7 @@ Expected behavior:
 - `kith compile` MUST write a `.kith.ast` data codec artifact.
 - `kith run examples/ping.kith --message '["Ping",7]'` MUST print
   a data codec record with `heard` `7` and exit 0.
+- `kith --version` MUST print the CLI package version and exit 0.
 
 Postconditions:
 

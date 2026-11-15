@@ -22,6 +22,17 @@ fn run(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+// req:cli-001
+fn version_prints_the_package_version() {
+    let output = run(&["--version"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
 // req:cli-001 req:components-006 req:scenes-002 req:runtime-004
 fn parse_check_compile_and_run_ping() {
     let ping = ping();

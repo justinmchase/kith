@@ -1,0 +1,220 @@
+name: Release Binaries
+
+# Compile the kith CLI and attach it to a GitHub Release. The grammar is
+# compiled by a released uffda CLI during the build. Libraries stay off
+# crates.io until kith-runtime is extracted; see runtime.spec.md Packages.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: SemVer tag without a leading v. Empty uses Cargo.toml on the selected ref.
+        required: false
+        type: string
+        default: ""
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+  repository_dispatch:
+    types: [release-binaries]
+
+concurrency:
+  group: release-binaries
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Resolve release target
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.target.outputs.tag }}
+      version: ${{ steps.target.outputs.version }}
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve release target
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag || github.event.client_payload.version || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            tag="${INPUT_TAG#v}"
+          else
+            tag="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          file_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ "${file_version}" != "${tag}" ]]; then
+            echo "Cargo.toml version ${file_version} does not match release tag ${tag}" >&2
+            exit 1
+          fi
+          if ! gh release view "${tag}" --json tagName >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --target "${sha}" \
+              --draft \
+              --title "${tag}" \
+              --notes "Kith CLI ${tag}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+  compile:
+    name: Compile kith ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            suffix: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            suffix: ""
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            suffix: ".exe"
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            suffix: ".exe"
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: ""
+          - os: macos-15
+            target: aarch64-apple-darwin
+            suffix: ""
+    steps:
+      - name: Checkout build commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Uffda CLI
+        uses: justinmchase/uffda/.github/actions/uffda-setup@main
+        with:
+          version: 0.10.8
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build kith
+        run: cargo build --locked --release --target ${{ matrix.target }} --bin kith
+
+      - name: Package CLI binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          target="${{ matrix.target }}"
+          suffix="${{ matrix.suffix }}"
+          mkdir -p dist/cli
+          if [[ "${target}" == *windows* ]]; then
+            asset="kith-${version}-${target}.exe"
+          else
+            asset="kith-${version}-${target}"
+          fi
+          cp "target/${target}/release/kith${suffix}" "dist/cli/${asset}"
+          if [[ "${target}" != *windows* ]]; then
+            chmod +x "dist/cli/${asset}"
+          fi
+
+      - name: Upload kith artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kith-${{ matrix.target }}
+          path: dist/cli/*
+          if-no-files-found: error
+
+  attach:
+    name: Attach assets and publish
+    needs: [prepare, compile]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout build commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Download compiled binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: kith-*
+          path: dist/cli
+          merge-multiple: true
+
+      - name: Assemble checksums and install script
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          cd dist/cli
+          : > SHA256SUMS
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc \
+            aarch64-pc-windows-msvc \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin
+          do
+            if [[ "${target}" == *windows* ]]; then
+              asset="kith-${version}-${target}.exe"
+            else
+              asset="kith-${version}-${target}"
+            fi
+            if [[ ! -f "${asset}" ]]; then
+              echo "Missing required asset ${asset}" >&2
+              exit 1
+            fi
+            sha256sum "${asset}" >> SHA256SUMS
+          done
+          cp "${GITHUB_WORKSPACE}/scripts/install.sh" ./install.sh
+          chmod +x ./install.sh
+          sha256sum install.sh >> SHA256SUMS
+
+      - name: Upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          gh release upload "${tag}" dist/cli/* --clobber
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          gh release edit "${tag}" --draft=false --latest
+
+      - name: Smoke install
+        uses: ./.github/actions/kith-setup
+        with:
+          version: ${{ needs.prepare.outputs.tag }}
+
+      - name: Verify installed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${{ needs.prepare.outputs.version }}"
+          actual="$(kith --version | tr -d '[:space:]')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "kith --version is ${actual}, release tag is ${expected}" >&2
+            exit 1
+          fi

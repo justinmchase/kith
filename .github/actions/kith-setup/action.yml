@@ -1,0 +1,100 @@
+name: Setup Kith CLI
+description: Install the Kith CLI binary from GitHub Releases for the runner OS/arch.
+inputs:
+  version:
+    description: >
+      Release tag or SemVer to install (for example 0.1.0).
+      Use latest to install the newest published GitHub Release.
+    required: false
+    default: latest
+  repository:
+    description: GitHub repository that publishes Kith release binaries.
+    required: false
+    default: justinmchase/kith
+  github-token:
+    description: Token for GitHub API rate limits and draft releases.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  version:
+    description: Installed CLI version without a leading v.
+    value: ${{ steps.install.outputs.version }}
+  target:
+    description: Rust target triple that was installed.
+    value: ${{ steps.install.outputs.target }}
+  path:
+    description: Absolute path to the installed kith binary.
+    value: ${{ steps.install.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Install Kith CLI
+      id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64) target="x86_64-unknown-linux-gnu" ;;
+          Linux-ARM64) target="aarch64-unknown-linux-gnu" ;;
+          Windows-X64) target="x86_64-pc-windows-msvc" ;;
+          Windows-ARM64) target="aarch64-pc-windows-msvc" ;;
+          macOS-X64) target="x86_64-apple-darwin" ;;
+          macOS-ARM64) target="aarch64-apple-darwin" ;;
+          *)
+            echo "Unsupported runner platform: ${RUNNER_OS}/${RUNNER_ARCH}" >&2
+            exit 1
+            ;;
+        esac
+
+        version="${INPUT_VERSION#v}"
+        if [[ "${version}" == "latest" ]]; then
+          tag="$(gh api "repos/${INPUT_REPOSITORY}/releases/latest" --jq .tag_name)"
+        else
+          tag="$(gh release view "${version}" --repo "${INPUT_REPOSITORY}" --json tagName --jq .tagName)"
+        fi
+        version="${tag#v}"
+        if [[ "${target}" == *windows* ]]; then
+          asset="kith-${version}-${target}.exe"
+        else
+          asset="kith-${version}-${target}"
+        fi
+
+        tmpdir="$(mktemp -d)"
+        gh release download "${tag}" --repo "${INPUT_REPOSITORY}" --dir "${tmpdir}" \
+          --pattern "${asset}" --pattern SHA256SUMS
+        expected="$(awk -v name="${asset}" '$2 == name { print $1; exit }' "${tmpdir}/SHA256SUMS")"
+        if [[ -z "${expected}" ]]; then
+          echo "No checksum entry for ${asset}" >&2
+          exit 1
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+          actual="$(sha256sum "${tmpdir}/${asset}" | awk '{ print $1 }')"
+        else
+          actual="$(shasum -a 256 "${tmpdir}/${asset}" | awk '{ print $1 }')"
+        fi
+        if [[ "${actual}" != "${expected}" ]]; then
+          echo "Checksum mismatch for ${asset}" >&2
+          exit 1
+        fi
+
+        bin_dir="${RUNNER_TEMP}/kith/bin"
+        mkdir -p "${bin_dir}"
+        if [[ "${target}" == *windows* ]]; then
+          install_path="${bin_dir}/kith.exe"
+        else
+          install_path="${bin_dir}/kith"
+        fi
+        cp "${tmpdir}/${asset}" "${install_path}"
+        chmod +x "${install_path}"
+        echo "${bin_dir}" >> "${GITHUB_PATH}"
+        echo "version=${version}" >> "${GITHUB_OUTPUT}"
+        echo "target=${target}" >> "${GITHUB_OUTPUT}"
+        echo "path=${install_path}" >> "${GITHUB_OUTPUT}"
+        echo "Installed kith ${version} (${target}) from ${tag} at ${install_path}"
