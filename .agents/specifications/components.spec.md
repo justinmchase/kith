@@ -134,7 +134,9 @@ export scene Main {
 - `on pattern { ... }` is a transition in that state. The pattern is a
   Uffda Then of prefixes up to the handler `{`: a quoted string, a
   capture (`n:number`, `v:{ kind: "Done" status body }`), a single atom
-  (`any`, a type name), or one object. Several prefixes match a sequence
+  (`any`, a type name), or one object. A non-empty `{ ... }` after another
+  prefix is that object. `on "Tick" {}` is an empty body, not an empty
+  object pattern. Several prefixes match a sequence
   (`on self "Check" a:200 b:200 c:200`). One prefix is that pattern, not
   wrapped. `on (pattern) { ... }` groups a full Uffda pattern (Or / Then /
   Pipe) so `|` and juxtaposition cannot eat the handler body. Bindings from
@@ -378,7 +380,8 @@ workflow is in [workflows](./workflows.spec.md#example).
 - **Pattern-matched receives.** Uffda already matches values: a Then of
   prefixes is an iterable match, an Over is an object match. A separate
   switch language would duplicate it. Kith only stops Then before the
-  handler `{` (a Uffda Then would take `{` as another object) and allows
+  handler `{`. A non-empty object may still be a later prefix, and an empty
+  `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
   a kind. `to` names the port; `down` names the kind; `up` is the ancestor

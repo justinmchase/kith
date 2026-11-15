@@ -11,10 +11,12 @@ spec_ref: .agents/specifications/edges.spec.md#http-example
 Preconditions:
 
 - `examples/http.kith` imports `Server` from `kith:http` and `Process`
-  from `kith:process`.
+  and `OptionalValue` from `kith:process`.
 - It does not declare `component Http`.
-- `HOST_NAME` and `PORT` are read together with one `"Env"`. A null
-  `HOST_NAME` is `127.0.0.1`. A null `PORT` is `3000`.
+- `HOST_NAME` and `PORT` are read together with one `"Env"`. The reply
+  handler is `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }`
+  and does not name the object. A null `HOST_NAME` is `127.0.0.1`. A null
+  `PORT` is `3000`.
 
 Expected behavior:
 

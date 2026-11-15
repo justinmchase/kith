@@ -102,23 +102,26 @@ replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
 
 ## Http example
 
-`examples/http.kith` imports `Server` from `kith:http` and `Process` from
-`kith:process`. It does not declare `component Http`. On init it sends one
-`"Env"` for `["HOST_NAME", "PORT"]`. The reply is one `"Env" values`
-object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is `3000`. It
-MUST NOT `"Listen"` until that reply is loaded, and it MUST NOT exit when
-either name is null. `"Listening"` `goto`s `Listening` before any request
-is handled. Every `"Request"` in that state is answered with status 200,
-header `Content-Type` `text/plain`, `"Push"` of the text `ok\n`, and
-`"BodyEnd"`.
+`examples/http.kith` imports `Server` from `kith:http` and `Process` and
+`OptionalValue` from `kith:process`. It does not declare `component Http`.
+On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is
+matched by `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }`
+with no name on the object. A null `HOST_NAME` is `127.0.0.1`. A null
+`PORT` is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and
+it MUST NOT exit when either name is null. `"Listening"` `goto`s
+`Listening` before any request is handled. Every `"Request"` in that state
+is answered with status 200, header `Content-Type` `text/plain`, `"Push"`
+of the text `ok\n`, and `"BodyEnd"`.
 
 ## Hello world
 
 `examples/hello-world.kith` is the Node.js synopsis server. It imports
-`Server` from `kith:http` and `Process` from `kith:process`. On init it
-sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is one
-`"Env" values` object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT`
-is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
+`Server` from `kith:http` and `Process` and `OptionalValue` from
+`kith:process`. On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`.
+The reply is matched by
+`on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }` with no
+name on the object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is
+`3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
 NOT exit when either name is null. On `"Listening"` it prints
 `Server running at http://{host}:{port}/` and `goto`s `Listening`.
 Request handling is that state's `on up "Request"`. Every request gets
@@ -204,7 +207,10 @@ the filesystem. `..` is not normalized.
 
 ## Process
 
-`import "kith:process" Process;`
+`import "kith:process" Process OptionalValue RequiredValue;`
+
+`OptionalValue` matches a string or null. `RequiredValue` matches a
+string. Both are pattern rules. They do not read the process environment.
 
 Argv and env are frozen at `World::start`. A later message sees the same
 values. The checker replaces them. Argv is the program arguments after

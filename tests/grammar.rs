@@ -429,6 +429,35 @@ export scene Main { Box(); }
         other => panic!("expected expr, got {other:?}"),
     }
     World::check(&program).expect("sequence program checks");
+
+    let later = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on up "Env" { HOST_NAME: string PORT: string } {
+      send self "Ready";
+    }
+    on "Tick" {}
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse later object");
+    let start = &later.component("Box").expect("Box").states[0];
+    assert_eq!(start.handlers[0].pattern["kind"], "then");
+    let prefixes = start.handlers[0].pattern["patterns"]
+        .as_array()
+        .expect("prefixes");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[1]["kind"], "over");
+    assert!(prefixes[1].get("name").is_none());
+    assert!(start.handlers[0].body.len() == 1);
+    assert!(start.handlers[1].body.is_empty());
+    assert_eq!(start.handlers[1].pattern["kind"], "equal");
+    World::check(&later).expect("later object checks");
 }
 
 #[test]

@@ -246,6 +246,7 @@ fn harness(
         ("kith:data", &["Bytes", "Blob", "Buffer"][..]),
         ("kith:stream", &["Chunk", "End"][..]),
         ("kith:time", &["Instant", "DateTime", "Zone"][..]),
+        ("kith:process", &["OptionalValue", "RequiredValue"][..]),
     ] {
         let used: Vec<_> = module_names
             .iter()

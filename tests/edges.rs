@@ -533,7 +533,9 @@ fn pattern_text(pattern: &serde_json::Value) -> String {
 fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
-    assert!(source.contains("import \"kith:process\" Process"));
+    assert!(source.contains("import \"kith:process\" Process OptionalValue"));
+    assert!(source.contains("on up \"Env\" { HOST_NAME: OptionalValue PORT: OptionalValue }"));
+    assert!(!source.contains("values:"));
     assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
     assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
     assert!(source.contains("127.0.0.1"));
@@ -557,10 +559,18 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     assert!(init_body.contains("HOST_NAME"), "{init_body}");
     assert!(init_body.contains("PORT"), "{init_body}");
     assert!(!init_body.contains("Listen"), "{init_body}");
-    assert!(start.handlers.iter().any(|handler| {
-        let body = format!("{:?}", handler.body);
-        pattern_text(&handler.pattern).contains("PORT") && body.contains("Listen")
-    }));
+    let env = start
+        .handlers
+        .iter()
+        .find(|handler| pattern_text(&handler.pattern).contains("HOST_NAME"))
+        .expect("env handler");
+    assert_eq!(env.pattern["kind"], "then");
+    let prefixes = env.pattern["patterns"].as_array().expect("prefixes");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[1]["kind"], "over");
+    assert!(prefixes[1]["keys"].get("HOST_NAME").is_some());
+    assert!(prefixes[1]["keys"].get("PORT").is_some());
+    assert!(format!("{:?}", env.body).contains("Listen"));
     assert!(start
         .handlers
         .iter()
@@ -643,7 +653,9 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
 fn http_example_imports_kith_http_and_serves_on_port() {
     let source = std::fs::read_to_string("examples/http.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
-    assert!(source.contains("import \"kith:process\" Process"));
+    assert!(source.contains("import \"kith:process\" Process OptionalValue"));
+    assert!(source.contains("on up \"Env\" { HOST_NAME: OptionalValue PORT: OptionalValue }"));
+    assert!(!source.contains("values:"));
     assert!(!source.contains("component Http"));
     assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
     assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
@@ -1121,7 +1133,7 @@ fn paths_are_pure_slashes() {
 // req:edges-008
 fn process_freezes_argv_env_and_exit() {
     let source = r#"
-        import "kith:process" Process;
+        import "kith:process" Process OptionalValue RequiredValue;
         export Probe;
         export Main;
         component Probe {
@@ -1130,6 +1142,8 @@ fn process_freezes_argv_env_and_exit() {
           start {
             on down "Argv" { send to proc "Argv"; }
             on down "Env" names:any { send to proc "Env" names; }
+            on down "Opt" value:OptionalValue { got -> value; }
+            on down "Req" value:RequiredValue { got -> value; }
             on down "Stop" { send to proc "Exit" 4; }
             on up message:any { got -> message; }
           }
@@ -1218,6 +1232,30 @@ fn process_freezes_argv_env_and_exit() {
         down("Env", [doc::array([doc::number(1.0)])]),
     );
     assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    let root = world.root_id();
+    world
+        .send_document(root, down("Opt", [doc::string("yes")]))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(got(&world), doc::string("yes"));
+    world
+        .send_document(root, down("Opt", [doc::null()]))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert!(doc::is_null(&got(&world)));
+    world
+        .send_document(root, down("Req", [doc::string("yes")]))
+        .unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(got(&world), doc::string("yes"));
+    world
+        .send_document(root, down("Opt", [doc::number(1.0)]))
+        .unwrap();
+    assert!(world.run_until_idle().is_err());
+    world
+        .send_document(root, down("Req", [doc::null()]))
+        .unwrap();
+    assert!(world.run_until_idle().is_err());
     let snap = world.snapshot().unwrap();
     let mut restored = World::restore(program, &snap).unwrap();
     send(&mut restored, "Process", doc::string("Argv"));

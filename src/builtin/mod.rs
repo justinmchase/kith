@@ -49,6 +49,9 @@ const PATH: &str = r#"{imports:[] exports:[{kind:"func" name:"join"} {kind:"func
 const CRYPTO: &str = r#"{imports:[] exports:[{kind:"func" name:"hmac_sha256"} {kind:"func" name:"sha256_bytes"}] rules:[] funcs:[{name:"hmac_sha256" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"sha256_bytes" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
 "#;
 
+const PROCESS: &str = r#"{imports:[] exports:[{kind:"rule" name:"OptionalValue"} {kind:"rule" name:"RequiredValue"}] rules:[{name:"OptionalValue" parameters:[] pattern:{kind:"or" patterns:[{kind:"type" type:"string"} {kind:"type" type:"null"}]}} {name:"RequiredValue" parameters:[] pattern:{kind:"type" type:"string"}}] funcs:[] decorators:[]}
+"#;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Driver {
     Pipe(Pipe),
@@ -189,7 +192,7 @@ fn install(resolver: &mut Resolver) -> Result<(), Error> {
         ("kith:encoding", ENCODING),
         ("kith:crypto", CRYPTO),
         ("kith:path", PATH),
-        ("kith:process", EMPTY),
+        ("kith:process", PROCESS),
     ] {
         let url = Url::parse(specifier).map_err(|error| Error::new(error.to_string()))?;
         resolver.insert_declaration_codec_source(url, source);

@@ -1,5 +1,5 @@
 import "kith:http" Server;
-import "kith:process" Process;
+import "kith:process" Process OptionalValue;
 
 export Hello;
 export Main;
@@ -13,7 +13,7 @@ component Hello {
     on init {
       send to proc "Env" ["HOST_NAME" "PORT"];
     }
-    on up "Env" values:{ HOST_NAME: (string | null) PORT: (string | null) } {
+    on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue } {
       host -> (coalesce HOST_NAME "127.0.0.1");
       send to server "Listen" host (int (coalesce PORT "3000"));
     }

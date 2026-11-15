@@ -12,6 +12,7 @@ Preconditions:
 
 - A program imports `Process` from `kith:process` and constructs one
   `Process`.
+- `OptionalValue` and `RequiredValue` are rules exported by `kith:process`.
 
 Expected behavior:
 
@@ -24,6 +25,8 @@ Expected behavior:
   the operating system.
 - An empty array, or a call that is not one array of strings, MUST reply
   `"Error" "name"`.
+- `OptionalValue` MUST match a string or null and MUST NOT match a number.
+  `RequiredValue` MUST match a string and MUST NOT match null.
 - `"Exit" code` MUST set the process status and MUST NOT reply. The run
   MUST end with that status.
 - Snapshot MUST restore the frozen argv and env.

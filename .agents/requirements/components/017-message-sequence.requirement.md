@@ -25,6 +25,10 @@ Expected behavior:
   MUST send an object. `on v:{ kind: "Done" status body }` MUST bind `v`
   to that object. `on { kind: "GET" url: any }` MUST match an object
   without commas between entries.
+- A later non-empty `{ ... }` MUST be an object prefix.
+  `on up "Env" { HOST_NAME: string PORT: string }` MUST project a Then
+  whose second pattern is an Over, and MUST NOT bind that object under a
+  name. `on "Tick" {}` MUST stay an empty body.
 - A Then of N prefixes MUST NOT match an array of a different length.
 - `complete` MUST take the same value list as `send`.
 

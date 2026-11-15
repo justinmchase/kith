@@ -182,8 +182,8 @@ rule ComponentStatement =
 # Handler patterns are Uffda Then of prefixes, stopped before the body `{`.
 # A top-level Uffda Pattern would take that `{` as another Over. Object
 # entries project Uffda Over (variable wrapping the field pattern) and MAY
-# omit commas. `{` after the first prefix is the handler body, not another
-# object; a later object is written `v:{ ... }` (a capture).
+# omit commas. A later non-empty `{ ... }` is an object prefix. An empty
+# `{}` is the handler body, so `on "Tick" {}` is not an empty Over.
 rule OnQuotedString =
   "\"" p:SpecifierChar* "\""
   -> { kind: "equal", value: { kind: "value.literal", value: (join p "") } }
@@ -230,11 +230,18 @@ rule OnObjectPattern =
   -> { kind: "over", keys: (from_entries (coalesce keys [])), rest: null }
 ;
 
-# Rest items cannot start with `{`, or `on "Tick" {}` would eat the body.
+# A non-empty object is a later prefix. Empty `{}` fails this rule and
+# stays the handler body.
+rule OnThenObject =
+  "{" keys:OnOverEntries "}"
+  -> { kind: "over", keys: (from_entries keys), rest: null }
+;
+
 rule OnThenItem =
   | ("(" p:Pattern ")" -> p)
   | OnQuotedString
   | OnCapturePattern
+  | OnThenObject
   | OnBarePattern
 ;
 
