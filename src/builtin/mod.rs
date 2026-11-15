@@ -12,98 +12,22 @@ use crate::doc::{self, Doc};
 use crate::error::Error;
 use std::collections::HashMap;
 use uffda_runtime::codec::data::DataDocument;
-use uffda_runtime::resolver::{decode_declaration, Resolver};
+use uffda_runtime::resolver::Resolver;
 use url::Url;
 
 pub use rules::{match_with_rules, uses_rule};
 pub use stream::Pipe;
 pub use time::{instant_doc, instant_text, parse_instant, process_zone, wall_millis, zone_value};
 
-const DATA: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"rule","name":"Bytes"},
-    {"kind":"rule","name":"Blob"},
-    {"kind":"rule","name":"Buffer"},
-    {"kind":"func","name":"bytes"},
-    {"kind":"func","name":"byte_at"},
-    {"kind":"func","name":"byte_length"},
-    {"kind":"func","name":"bytes_concat"},
-    {"kind":"func","name":"bytes_slice"},
-    {"kind":"func","name":"blob"},
-    {"kind":"func","name":"blob_bytes"},
-    {"kind":"func","name":"blob_type"},
-    {"kind":"func","name":"buffer"},
-    {"kind":"func","name":"buffer_slice"},
-    {"kind":"func","name":"buffer_bytes"}
-  ],
-  "rules": [
-    {"name":"Bytes","parameters":[],"pattern":{"kind":"any"}},
-    {"name":"Blob","parameters":[],"pattern":{"kind":"over","keys":{"type":{"kind":"type","type":"string"},"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]}}}},
-    {"name":"Buffer","parameters":[],"pattern":{"kind":"over","keys":{"bytes":{"kind":"resolve","targetKind":"reference","name":"Bytes","args":[]},"start":{"kind":"type","type":"number"},"end":{"kind":"type","type":"number"}}}}
-  ],
-  "funcs": [
-    {"name":"bytes","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"byte_at","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"byte_length","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"bytes_concat","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"bytes_slice","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"blob","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"blob_bytes","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"blob_type","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"buffer","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"buffer_slice","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"buffer_bytes","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}}
-  ],
-  "decorators": []
-}"#;
+/// Uffda data-codec records for the built-in module declarations.
+const DATA: &str = r#"{imports:[] exports:[{kind:"rule" name:"Bytes"} {kind:"rule" name:"Blob"} {kind:"rule" name:"Buffer"} {kind:"func" name:"bytes"} {kind:"func" name:"byte_at"} {kind:"func" name:"byte_length"} {kind:"func" name:"bytes_concat"} {kind:"func" name:"bytes_slice"} {kind:"func" name:"blob"} {kind:"func" name:"blob_bytes"} {kind:"func" name:"blob_type"} {kind:"func" name:"buffer"} {kind:"func" name:"buffer_slice"} {kind:"func" name:"buffer_bytes"}] rules:[{name:"Bytes" parameters:[] pattern:{kind:"any"}} {name:"Blob" parameters:[] pattern:{kind:"over" keys:{type:{kind:"type" type:"string"} bytes:{kind:"resolve" targetKind:"reference" name:"Bytes" args:[]}}}} {name:"Buffer" parameters:[] pattern:{kind:"over" keys:{bytes:{kind:"resolve" targetKind:"reference" name:"Bytes" args:[]} start:{kind:"type" type:"number"} end:{kind:"type" type:"number"}}}}] funcs:[{name:"bytes" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"byte_at" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"byte_length" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"bytes_concat" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"bytes_slice" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"blob" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"blob_bytes" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"blob_type" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"buffer" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"buffer_slice" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"buffer_bytes" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
+"#;
 
-const STREAM: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"rule","name":"Chunk"},
-    {"kind":"rule","name":"End"}
-  ],
-  "rules": [
-    {"name":"Chunk","parameters":[],"pattern":{"kind":"equal","value":{"kind":"value.literal","value":"Chunk"}}},
-    {"name":"End","parameters":[],"pattern":{"kind":"equal","value":{"kind":"value.literal","value":"End"}}}
-  ],
-  "funcs": [],
-  "decorators": []
-}"#;
+const STREAM: &str = r#"{imports:[] exports:[{kind:"rule" name:"Chunk"} {kind:"rule" name:"End"}] rules:[{name:"Chunk" parameters:[] pattern:{kind:"equal" value:{kind:"value.literal" value:"Chunk"}}} {name:"End" parameters:[] pattern:{kind:"equal" value:{kind:"value.literal" value:"End"}}}] funcs:[] decorators:[]}
+"#;
 
-const TIME: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"rule","name":"Instant"},
-    {"kind":"rule","name":"DateTime"},
-    {"kind":"rule","name":"Zone"},
-    {"kind":"func","name":"instant"},
-    {"kind":"func","name":"instant_text"},
-    {"kind":"func","name":"zone"},
-    {"kind":"func","name":"date_time"},
-    {"kind":"func","name":"instant_at"},
-    {"kind":"func","name":"add_seconds"},
-    {"kind":"func","name":"diff_seconds"},
-    {"kind":"func","name":"offset_seconds"}
-  ],
-  "rules": [
-    {"name":"Instant","parameters":[],"pattern":{"kind":"type","type":"date"}},
-    {"name":"DateTime","parameters":[],"pattern":{"kind":"over","keys":{"year":{"kind":"type","type":"number"},"month":{"kind":"type","type":"number"},"day":{"kind":"type","type":"number"},"hour":{"kind":"type","type":"number"},"minute":{"kind":"type","type":"number"},"second":{"kind":"type","type":"number"},"millisecond":{"kind":"type","type":"number"}}}},
-    {"name":"Zone","parameters":[],"pattern":{"kind":"or","patterns":[{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"utc"}}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"fixed"}},"seconds":{"kind":"type","type":"number"}}},{"kind":"over","keys":{"kind":{"kind":"equal","value":{"kind":"value.literal","value":"iana"}},"id":{"kind":"type","type":"string"}}}]}}
-  ],
-  "funcs": [
-    {"name":"instant","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"instant_text","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"zone","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"date_time","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"instant_at","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"add_seconds","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"diff_seconds","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"offset_seconds","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}}
-  ],
-  "decorators": []
-}"#;
+const TIME: &str = r#"{imports:[] exports:[{kind:"rule" name:"Instant"} {kind:"rule" name:"DateTime"} {kind:"rule" name:"Zone"} {kind:"func" name:"instant"} {kind:"func" name:"instant_text"} {kind:"func" name:"zone"} {kind:"func" name:"date_time"} {kind:"func" name:"instant_at"} {kind:"func" name:"add_seconds"} {kind:"func" name:"diff_seconds"} {kind:"func" name:"offset_seconds"}] rules:[{name:"Instant" parameters:[] pattern:{kind:"type" type:"date"}} {name:"DateTime" parameters:[] pattern:{kind:"over" keys:{year:{kind:"type" type:"number"} month:{kind:"type" type:"number"} day:{kind:"type" type:"number"} hour:{kind:"type" type:"number"} minute:{kind:"type" type:"number"} second:{kind:"type" type:"number"} millisecond:{kind:"type" type:"number"}}}} {name:"Zone" parameters:[] pattern:{kind:"or" patterns:[{kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"utc"}}}} {kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"fixed"}} seconds:{kind:"type" type:"number"}}} {kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"iana"}} id:{kind:"type" type:"string"}}}]}}] funcs:[{name:"instant" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"instant_text" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"zone" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"date_time" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"instant_at" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"add_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"diff_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"offset_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
+"#;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Driver {
@@ -225,9 +149,7 @@ fn install(resolver: &mut Resolver) -> Result<(), Error> {
         ("kith:time", TIME),
     ] {
         let url = Url::parse(specifier).map_err(|error| Error::new(error.to_string()))?;
-        let declaration =
-            decode_declaration(&url, source).map_err(|error| Error::new(error.to_string()))?;
-        resolver.insert_declaration(url, declaration);
+        resolver.insert_declaration_codec_source(url, source);
     }
     Ok(())
 }
