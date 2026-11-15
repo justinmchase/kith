@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: justinmchase/uffda/.github/actions/uffda-setup@main
+      - uses: ./.github/actions/install-uffda
         with:
           version: 0.10.8
       - uses: dtolnay/rust-toolchain@stable
