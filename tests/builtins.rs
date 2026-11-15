@@ -62,8 +62,8 @@ component Probe {
   field saw: any;
   field err: any;
   field n: number = 0;
-  Pipe pipe;
-  Clock clock;
+  pipe: Pipe;
+  clock: Clock;
 
   start {
     on down "Len" { n -> (byte_length (bytes [1 2 3])); }
@@ -221,7 +221,7 @@ fn kith_prefix_binds_exports_and_rejects_the_other_shapes() {
             export Main;
             component Probe {
               field raw: any = (bytes [1]);
-              Pipe pipe;
+              pipe: Pipe;
               start { on down { } }
             }
             export scene Main { Probe() { pipe = Pipe(); } }

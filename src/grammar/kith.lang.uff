@@ -44,10 +44,11 @@ rule Field =
   )
 ;
 
+# A member that names a child component or workflow: `name: Kind;`.
 rule Port =
   not "field" not "start" not "state" not "step" not "join" not "else" not "goto"
   not "with" not "into" not "fanout" not "after" not "self" not "init" not "or"
-  k:Identifier n:Identifier ";"
+  n:Identifier ":" k:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
 

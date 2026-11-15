@@ -38,8 +38,9 @@ capitals.
   the top-level instance of its exported scene (a component or a workflow).
 - **Scene**: a named instance tree that constructs workflow and component
   kinds, fills ports, and may add unnamed children.
-- **Port**: a typed named slot on a component or workflow for one child
-  (`Kind name;`). The scene fills it. `send to name` addresses that instance.
+- **Port**: a typed named slot on a component for one child
+  (`name: Kind;`). `Kind` is a component or a workflow. The scene fills it.
+  `send to name` addresses that instance.
 
 ## Uffda
 

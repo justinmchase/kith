@@ -41,7 +41,7 @@ capitals.
 - Check MUST fail if two children under one parent use the same port name.
 - Check MUST fail if a parent instance omits a declared port.
 - Check MUST fail if `name = Kind()` does not match the port's declared kind
-  (`A a` filled with `a = B()`).
+  (`a: A` filled with `a = B()`).
 - Check MUST fail if `name = Kind()` names a port the parent kind does not
   declare.
 - `kith run` and `World::start` MUST run the unique exported scene of the
@@ -92,7 +92,7 @@ map names that kind; see [workflows](./workflows.spec.md#declaration).
 
 ## Why this design
 
-- **Ports versus the graph.** `Child child;` on a component is a Unity-style
+- **Ports versus the graph.** `child: Child;` on a component is a Unity-style
   serialized field: a typed collaborator the scene must fill. Unnamed
   `Logger()` children are extra hierarchy, reached by kind, not extra ports.
 - **Scene still builds the tree.** The kind names the ports; the scene says

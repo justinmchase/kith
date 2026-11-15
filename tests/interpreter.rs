@@ -1180,7 +1180,7 @@ component Http {
 }
 
 component Client {
-  Http http;
+  http: Http;
   start Idle {
     on down "Go" url:any {
       send to http "GET" url;
@@ -1199,7 +1199,7 @@ component HealthCheck {
   field s1: number?;
   field s2: number?;
   field s3: number?;
-  Client client;
+  client: Client;
   start Checking {
     on init {
       send self "Tick";
