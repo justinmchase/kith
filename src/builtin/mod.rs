@@ -37,69 +37,17 @@ const STREAM: &str = r#"{imports:[] exports:[{kind:"rule" name:"Chunk"} {kind:"r
 const TIME: &str = r#"{imports:[] exports:[{kind:"rule" name:"Instant"} {kind:"rule" name:"DateTime"} {kind:"rule" name:"Zone"} {kind:"func" name:"instant"} {kind:"func" name:"instant_text"} {kind:"func" name:"zone"} {kind:"func" name:"date_time"} {kind:"func" name:"instant_at"} {kind:"func" name:"add_seconds"} {kind:"func" name:"diff_seconds"} {kind:"func" name:"offset_seconds"}] rules:[{name:"Instant" parameters:[] pattern:{kind:"type" type:"date"}} {name:"DateTime" parameters:[] pattern:{kind:"over" keys:{year:{kind:"type" type:"number"} month:{kind:"type" type:"number"} day:{kind:"type" type:"number"} hour:{kind:"type" type:"number"} minute:{kind:"type" type:"number"} second:{kind:"type" type:"number"} millisecond:{kind:"type" type:"number"}}}} {name:"Zone" parameters:[] pattern:{kind:"or" patterns:[{kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"utc"}}}} {kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"fixed"}} seconds:{kind:"type" type:"number"}}} {kind:"over" keys:{kind:{kind:"equal" value:{kind:"value.literal" value:"iana"}} id:{kind:"type" type:"string"}}}]}}] funcs:[{name:"instant" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"instant_text" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"zone" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"date_time" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"instant_at" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"add_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"diff_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"offset_seconds" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
 "#;
 
-const EMPTY: &str = r#"{
-  "imports": [],
-  "exports": [],
-  "rules": [],
-  "funcs": [],
-  "decorators": []
-}"#;
+const EMPTY: &str = r#"{imports:[] exports:[] rules:[] funcs:[] decorators:[]}
+"#;
 
-const ENCODING: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"func","name":"utf8_encode"},
-    {"kind":"func","name":"utf8_decode"},
-    {"kind":"func","name":"base64_encode"},
-    {"kind":"func","name":"base64_decode"},
-    {"kind":"func","name":"hex_encode"},
-    {"kind":"func","name":"hex_decode"}
-  ],
-  "rules": [],
-  "funcs": [
-    {"name":"utf8_encode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"utf8_decode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"base64_encode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"base64_decode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"hex_encode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"hex_decode","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}}
-  ],
-  "decorators": []
-}"#;
+const ENCODING: &str = r#"{imports:[] exports:[{kind:"func" name:"utf8_encode"} {kind:"func" name:"utf8_decode"} {kind:"func" name:"base64_encode"} {kind:"func" name:"base64_decode"} {kind:"func" name:"hex_encode"} {kind:"func" name:"hex_decode"}] rules:[] funcs:[{name:"utf8_encode" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"utf8_decode" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"base64_encode" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"base64_decode" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"hex_encode" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"hex_decode" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
+"#;
 
-const PATH: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"func","name":"join"},
-    {"kind":"func","name":"dirname"},
-    {"kind":"func","name":"basename"},
-    {"kind":"func","name":"extname"},
-    {"kind":"func","name":"resolve"}
-  ],
-  "rules": [],
-  "funcs": [
-    {"name":"join","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"dirname","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"basename","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"extname","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"resolve","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}}
-  ],
-  "decorators": []
-}"#;
+const PATH: &str = r#"{imports:[] exports:[{kind:"func" name:"join"} {kind:"func" name:"dirname"} {kind:"func" name:"basename"} {kind:"func" name:"extname"} {kind:"func" name:"resolve"}] rules:[] funcs:[{name:"join" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"dirname" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"basename" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"extname" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"resolve" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
+"#;
 
-const CRYPTO: &str = r#"{
-  "imports": [],
-  "exports": [
-    {"kind":"func","name":"hmac_sha256"},
-    {"kind":"func","name":"sha256_bytes"}
-  ],
-  "rules": [],
-  "funcs": [
-    {"name":"hmac_sha256","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}},
-    {"name":"sha256_bytes","pattern":{"kind":"end"},"expression":{"kind":"value","value":null}}
-  ],
-  "decorators": []
-}"#;
+const CRYPTO: &str = r#"{imports:[] exports:[{kind:"func" name:"hmac_sha256"} {kind:"func" name:"sha256_bytes"}] rules:[] funcs:[{name:"hmac_sha256" pattern:{kind:"end"} expression:{kind:"value" value:null}} {name:"sha256_bytes" pattern:{kind:"end"} expression:{kind:"value" value:null}}] decorators:[]}
+"#;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Driver {
