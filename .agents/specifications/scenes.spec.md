@@ -84,6 +84,11 @@ map names that kind; see [workflows](./workflows.spec.md#declaration).
 - Relative `.kith` specifiers MUST load that file and take the named exports
   from it. The imported components and scenes MUST have been exported by that
   file. Package and `jsr:` specifiers are not required of this slice.
+- A `kith:` specifier MUST resolve to a built-in module, as
+  [built-ins](./builtins.spec.md#registration) defines. It is registered with
+  the resolver, not fetched, and not a lockfile entry. The import binds a
+  function, a component, or a rule. Relative `.kith` imports stay this
+  chapter's module graph.
 
 ## Why this design
 

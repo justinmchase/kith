@@ -46,6 +46,14 @@ pub fn from_uffda_value(value: Value<'_>) -> Result<Json, Error> {
                 .map(from_uffda_value)
                 .collect::<Result<Vec<_>, _>>()?,
         )),
+        Value::Bytes(_) | Value::Date(_) => {
+            let document = uffda_runtime::codec::data::DataDocument::from_value(
+                value,
+                uffda_runtime::codec::data::DataLimits::default(),
+            )
+            .map_err(|error| Error::new(error.to_string()))?;
+            crate::doc::to_json(&document)
+        }
         Value::Object(object) => {
             let mut map = serde_json::Map::new();
             for (key, value) in object.borrow().entries() {

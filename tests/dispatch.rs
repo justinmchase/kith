@@ -1,5 +1,5 @@
 use kith::dispatch::{ActorId, Dispatcher, Message};
-use serde_json::json;
+use kith::doc;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -11,9 +11,24 @@ fn serial_fifo_runs_one_ready_actor_per_turn() {
     let second = ActorId(2);
     dispatcher.register(first);
     dispatcher.register(second);
-    dispatcher.send(first, Message { value: json!("a") });
-    dispatcher.send(second, Message { value: json!("b") });
-    dispatcher.send(first, Message { value: json!("c") });
+    dispatcher.send(
+        first,
+        Message {
+            value: doc::string("a"),
+        },
+    );
+    dispatcher.send(
+        second,
+        Message {
+            value: doc::string("b"),
+        },
+    );
+    dispatcher.send(
+        first,
+        Message {
+            value: doc::string("c"),
+        },
+    );
 
     let order = Rc::new(RefCell::new(Vec::new()));
     let observed = order.clone();
@@ -27,9 +42,9 @@ fn serial_fifo_runs_one_ready_actor_per_turn() {
     assert_eq!(
         *order.borrow(),
         vec![
-            (first, json!("a")),
-            (second, json!("b")),
-            (first, json!("c")),
+            (first, doc::string("a")),
+            (second, doc::string("b")),
+            (first, doc::string("c")),
         ]
     );
 }
@@ -43,7 +58,7 @@ fn self_send_is_taken_on_a_later_turn() {
     dispatcher.send(
         actor,
         Message {
-            value: json!("start"),
+            value: doc::string("start"),
         },
     );
 
@@ -52,11 +67,11 @@ fn self_send_is_taken_on_a_later_turn() {
     dispatcher
         .run_until_idle(|id, message| {
             observed.borrow_mut().push(message.value.clone());
-            if message.value == json!("start") {
+            if doc::as_str(&message.value).as_deref() == Some("start") {
                 Ok::<_, ()>(vec![(
                     id,
                     Message {
-                        value: json!("self"),
+                        value: doc::string("self"),
                     },
                 )])
             } else {
@@ -65,5 +80,8 @@ fn self_send_is_taken_on_a_later_turn() {
         })
         .unwrap();
 
-    assert_eq!(*turns.borrow(), vec![json!("start"), json!("self")]);
+    assert_eq!(
+        *turns.borrow(),
+        vec![doc::string("start"), doc::string("self")]
+    );
 }

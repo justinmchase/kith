@@ -110,7 +110,10 @@ everything outside a machine's control. The language MUST stay checkable.
   same transition and send the same messages.
 - A feature that would hide a source of variation inside a machine, such as
   reading a wall clock or generating an identity other than through a declared
-  service of a higher language, MUST NOT be added here.
+  service of a higher language, MUST NOT be added here. A wall read that is a
+  message to the `Clock` component in [built-ins](./builtins.spec.md#time) is
+  that declared edge: the checker replaces the driver, and the dispatcher
+  clock stays unread.
 
 ## Open questions
 

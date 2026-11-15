@@ -203,8 +203,11 @@ state and matches `on up`.
 
 A host driver MUST NOT run Kith `on` handlers for a child instance it
 replaces. Same-turn stream writes are not Uffda `HostCallable` returns
-that wait; they return `undefined` now. How the operator binds a child
-`Http` kind to curl versus the mock is a later slice.
+that wait; they return `undefined` now. The real driver for a kind this
+runtime provides is the built-in import in
+[built-ins](./builtins.spec.md#registration). `Pipe` and `Clock` are those
+drivers. The scene-filled `Http` in `examples/http.kith` remains the user
+mock and still replies with one `"Response"`. `kith:http` is not this slice.
 
 The normative program is `examples/http.kith`: a HealthCheck that probes
 through Checking, Waiting, and Validating, then waits 5 seconds before the
@@ -311,5 +314,6 @@ two named states; a component MUST NOT declare three `start` states.
   on that.
 - **Closed object patterns** for message shapes. That is an Uffda pattern
   gap, not an actor gap; track it upstream if Kith messages need it.
-- **Host I/O adapters.** How a scene-filled `Http` kind is bound to a real
-  client process (a native driver registered for that kind).
+- **Host I/O adapters.** A built-in module binds its driver by import.
+  Binding a user-declared `Http` kind to a native client, and `kith:http`
+  itself, are not this slice. The example mock stays the user component.

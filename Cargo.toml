@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+time = "0.3.55"
 uffda-heap = { version = "0.10.8", default-features = false }
 uffda-runtime = { version = "0.10.8", default-features = false }
 url = "2"

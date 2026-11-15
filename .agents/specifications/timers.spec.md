@@ -16,7 +16,9 @@ capitals.
 ## Definitions
 
 - **Clock**: the dispatcher's current time, in seconds. It is virtual. A
-  checker MAY replace it.
+  checker MAY replace it. It is not the `Clock` component in
+  [built-ins](./builtins.spec.md#time). A program MUST NOT read this clock.
+  The only wall read is a message to that component.
 - **Timer**: a send that is due at a clock time and has not yet been delivered.
 - **After**: a delay on a send (`send after Expression`). Expression evaluates
   to seconds.
@@ -25,8 +27,10 @@ capitals.
 
 - A turn MUST NOT sleep, wait on a thread, or otherwise block the dispatcher
   to implement a delay.
-- Time is an input to the dispatcher, like the ready queue. Programs do not
-  read a wall clock.
+- Time is an input to the dispatcher, like the ready queue. The dispatcher
+  clock is not a wall clock, and a program MUST NOT read it. The only wall
+  read is a `"Now"` or `"Zone"` message to a `Clock` child. `send after`
+  stays a number of seconds on the dispatcher clock.
 - When a timer is due, it becomes an ordinary send: the message is appended to
   a mailbox and taken on a later turn.
 

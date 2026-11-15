@@ -153,6 +153,10 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
     let mut program = parse_file(path)?;
     let imports = program.imports.clone();
     for import in imports {
+        if crate::builtin::classify(&import.module_url)? {
+            crate::builtin::bind(&mut program, &import.module_url, &import.names)?;
+            continue;
+        }
         if import.module_url.contains(':') && !import.module_url.starts_with('.') {
             return Err(Error::new(format!(
                 "unsupported import specifier {}",
@@ -172,12 +176,28 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
                     import.module_url
                 )));
             }
+            let had_component = program.component(name).is_some();
+            let had_binding = had_component
+                || program.workflow(name).is_some()
+                || program.scene(name).is_some()
+                || program.functions.iter().any(|item| item == name)
+                || program.rules.iter().any(|item| item == name);
             if let Some(component) = dep.component(name).cloned() {
                 merge_component(&mut program, component);
+                if !had_component && dep.host_kinds.iter().any(|kind| kind == name) {
+                    crate::builtin::reexport(&mut program, name, &[], &[], true);
+                }
             } else if let Some(workflow) = dep.workflow(name).cloned() {
                 merge_workflow(&mut program, workflow);
             } else if let Some(scene) = dep.scene(name).cloned() {
                 merge_scene(&mut program, scene);
+            } else if !had_binding
+                && (dep.functions.iter().any(|item| item == name)
+                    || dep.rules.iter().any(|item| item == name))
+            {
+                crate::builtin::reexport(&mut program, name, &dep.functions, &dep.rules, false);
+            } else if had_binding {
+                continue;
             } else {
                 return Err(Error::new(format!(
                     "{name} is exported by {} but is not a component, workflow, or scene",

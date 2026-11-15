@@ -130,6 +130,9 @@ fn scene_program(workflows: Vec<Workflow>, components: Vec<Component>, root: Ins
             name: "Main".into(),
             root,
         }],
+        functions: vec![],
+        rules: vec![],
+        host_kinds: vec![],
     }
 }
 

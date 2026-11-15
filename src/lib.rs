@@ -1,7 +1,9 @@
 pub mod ast;
+pub mod builtin;
 pub mod cli;
 pub mod codec;
 pub mod dispatch;
+pub mod doc;
 pub mod error;
 pub mod host;
 pub mod interpreter;
