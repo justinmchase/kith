@@ -104,23 +104,26 @@ replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
 
 `examples/http.kith` imports `Server` from `kith:http` and `Process` from
 `kith:process`. It does not declare `component Http`. On init it sends
-`"Env" "PORT"`. `"Env" "PORT" value` listens with `"Listen" "127.0.0.1"`
-and `(int value)`. The host stays `127.0.0.1`. `"Missing" "PORT"` sends
-`"Exit" 1`. `"Listening"` `goto`s `Listening` before any request is handled.
-Every `"Request"` in that state is answered with status 200, header
-`Content-Type` `text/plain`, `"Push"` of the text `ok\n`, and `"BodyEnd"`.
+`"Env" "HOST_NAME"`, then `"Env" "PORT"` after that reply. A missing
+`HOST_NAME` is `127.0.0.1`. A missing `PORT` is `3000`. It MUST NOT
+`"Listen"` until both the host and the port are loaded, and it MUST NOT
+exit when either name is missing. `"Listening"` `goto`s `Listening` before
+any request is handled. Every `"Request"` in that state is answered with
+status 200, header `Content-Type` `text/plain`, `"Push"` of the text
+`ok\n`, and `"BodyEnd"`.
 
 ## Hello world
 
 `examples/hello-world.kith` is the Node.js synopsis server. It imports
-`Server` from `kith:http` and `Process` from `kith:process`. The host is
-`127.0.0.1`. The port is the number in the environment variable `PORT`,
-read with `"Env" "PORT"` and passed as `(int value)`. It MUST NOT listen
-on a literal port. `"Missing" "PORT"` sends `"Exit" 1`. On `"Listening"`
-it prints `Server running at http://127.0.0.1:{port}/` and `goto`s
-`Listening`. Request handling is that state's `on up "Request"`. Every
-request gets `"Status"` 200 with header `Content-Type` `text/plain`,
-`"Push"` of the text `Hello, World!\n`, and `"BodyEnd"`.
+`Server` from `kith:http` and `Process` from `kith:process`. On init it
+sends `"Env" "HOST_NAME"`, then `"Env" "PORT"` after that reply. A missing
+`HOST_NAME` is `127.0.0.1`. A missing `PORT` is `3000`. It MUST NOT
+`"Listen"` until both the host and the port are loaded, and it MUST NOT
+exit when either name is missing. On `"Listening"` it prints
+`Server running at http://{host}:{port}/` and `goto`s `Listening`.
+Request handling is that state's `on up "Request"`. Every request gets
+`"Status"` 200 with header `Content-Type` `text/plain`, `"Push"` of the
+text `Hello, World!\n`, and `"BodyEnd"`.
 
 ## Stdio
 

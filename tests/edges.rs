@@ -87,6 +87,52 @@ fn free_port() -> u16 {
     port
 }
 
+fn wait_log(mut stderr: impl Read + Send + 'static, needle: &str) -> String {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let needle = needle.to_string();
+    let waiting = needle.clone();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 512];
+        loop {
+            match stderr.read(&mut tmp) {
+                Ok(0) | Err(_) => {
+                    let _ = tx.send(buf);
+                    break;
+                }
+                Ok(count) => {
+                    buf.extend_from_slice(&tmp[..count]);
+                    if buf
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes())
+                    {
+                        let _ = tx.send(buf);
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let log = rx
+        .recv_timeout(Duration::from_secs(20))
+        .unwrap_or_else(|_| panic!("timed out waiting for {waiting}"));
+    String::from_utf8_lossy(&log).into_owned()
+}
+
+fn read_http(child: &mut std::process::Child, addr: &str, request: &str) -> String {
+    let mut sock = TcpStream::connect(addr).unwrap();
+    sock.write_all(
+        format!("{request} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes(),
+    )
+    .unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let mut buf = Vec::new();
+    let _ = sock.read_to_end(&mut buf);
+    let _ = child.kill();
+    let _ = child.wait();
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn down(name: &str, args: impl IntoIterator<Item = Doc>) -> Doc {
     let mut items = vec![doc::string(name)];
     items.extend(args);
@@ -488,10 +534,12 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process"));
+    assert!(source.contains("\"Env\" \"HOST_NAME\""));
     assert!(source.contains("\"Env\" \"PORT\""));
-    assert!(source.contains("\"Listen\" \"127.0.0.1\""));
-    assert!(!source.contains("3000"));
-    assert!(source.contains("Server running at http://127.0.0.1:{port}/"));
+    assert!(source.contains("127.0.0.1"));
+    assert!(source.contains("3000"));
+    assert!(!source.contains("\"Exit\""));
+    assert!(source.contains("Server running at http://{host}:{port}/"));
     assert!(source.contains("Hello, World!\\n"));
     let program = kith::parse::parse_source(&source).expect("parse hello-world");
     let hello = program.component("Hello").expect("Hello");
@@ -500,6 +548,18 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
         .iter()
         .find(|state| state.start)
         .expect("start");
+    let init = start
+        .handlers
+        .iter()
+        .find(|handler| handler.route == ["init"])
+        .expect("init");
+    let init_body = format!("{:?}", init.body);
+    assert!(init_body.contains("HOST_NAME"), "{init_body}");
+    assert!(!init_body.contains("Listen"), "{init_body}");
+    assert!(start.handlers.iter().any(|handler| {
+        let body = format!("{:?}", handler.body);
+        pattern_text(&handler.pattern).contains("PORT") && body.contains("Listen")
+    }));
     assert!(start
         .handlers
         .iter()
@@ -521,55 +581,39 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     });
     assert!(entered, "Listening handler must goto Listening");
 
-    let missing = Command::new(env!("CARGO_BIN_EXE_kith"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/hello-world.kith")
+        .env_remove("HOST_NAME")
         .env_remove("PORT")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
-    assert_eq!(missing.status.code(), Some(1));
+    let log = wait_log(
+        child.stderr.take().unwrap(),
+        "Server running at http://127.0.0.1:3000/",
+    );
+    assert!(
+        log.contains("Server running at http://127.0.0.1:3000/"),
+        "{log}"
+    );
+    let response = read_http(&mut child, "127.0.0.1:3000", "POST /hi");
+    assert!(response.contains("HTTP/1.1 200"), "{response}");
+    assert!(response.ends_with("Hello, World!\n"), "{response}");
 
     let port = free_port();
     let ready = format!("Server running at http://127.0.0.1:{port}/");
     let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/hello-world.kith")
+        .env("HOST_NAME", "127.0.0.1")
         .env("PORT", port.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let needle = ready.clone();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let mut tmp = [0u8; 512];
-        loop {
-            match stderr.read(&mut tmp) {
-                Ok(0) | Err(_) => {
-                    let _ = tx.send(buf);
-                    break;
-                }
-                Ok(count) => {
-                    buf.extend_from_slice(&tmp[..count]);
-                    if buf
-                        .windows(needle.len())
-                        .any(|window| window == needle.as_bytes())
-                    {
-                        let _ = tx.send(buf);
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    let log = rx
-        .recv_timeout(Duration::from_secs(20))
-        .expect("hello-world did not log that it is listening");
-    let log = String::from_utf8_lossy(&log);
+    let log = wait_log(child.stderr.take().unwrap(), &ready);
     assert!(log.contains(&ready), "{log}");
 
     let mut sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
@@ -600,8 +644,11 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process"));
     assert!(!source.contains("component Http"));
+    assert!(source.contains("\"Env\" \"HOST_NAME\""));
     assert!(source.contains("\"Env\" \"PORT\""));
-    assert!(source.contains("\"Listen\" \"127.0.0.1\""));
+    assert!(source.contains("127.0.0.1"));
+    assert!(source.contains("3000"));
+    assert!(!source.contains("\"Exit\""));
     let program = kith::parse::parse_source(&source).expect("parse http.kith");
     assert!(program.component("Http").is_none());
     let service = program.component("Service").expect("Service");
@@ -634,6 +681,7 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/http.kith")
+        .env_remove("HOST_NAME")
         .env("PORT", port.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

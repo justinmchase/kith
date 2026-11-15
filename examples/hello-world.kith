@@ -5,21 +5,30 @@ export Hello;
 export Main;
 
 component Hello {
+  field host: string?;
   server: Server;
   proc: Process;
 
   start {
     on init {
+      send to proc "Env" "HOST_NAME";
+    }
+    on up "Env" name:"HOST_NAME" value:string {
+      host -> value;
+      send to proc "Env" "PORT";
+    }
+    on up "Missing" name:"HOST_NAME" {
+      host -> "127.0.0.1";
       send to proc "Env" "PORT";
     }
     on up "Env" name:"PORT" value:string {
-      send to server "Listen" "127.0.0.1" (int value);
+      send to server "Listen" host (int value);
     }
     on up "Missing" name:"PORT" {
-      send to proc "Exit" 1;
+      send to server "Listen" host 3000;
     }
     on up "Listening" port:number {
-      (print "Server running at http://127.0.0.1:{port}/");
+      (print "Server running at http://{host}:{port}/");
       goto Listening;
     }
   }
