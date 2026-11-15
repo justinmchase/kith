@@ -28,6 +28,7 @@ The executable name MUST be `kith`. The initial surface MUST be:
 | `check`   | Resolve and check a program without constructing actors or running turns. |
 | `compile` | Write a versioned program artifact and print its path. |
 | `run`     | Execute a source file or a compiled artifact. |
+| `--version` | Print the CLI package version and exit 0. |
 
 - Invalid input and runtime failures MUST produce diagnostics and a nonzero
   exit.
@@ -55,6 +56,24 @@ The executable name MUST be `kith`. The initial surface MUST be:
   `--message` remains JSON for this slice (an object, a string, or an
   array of send arguments). `run` MUST drain mailboxes and
   advance pending `send after` timers ([timers](./timers.spec.md)).
+
+## Distribution
+
+The executable is a GitHub Release asset, the same shape as the `uffda`
+CLI. It is not the crates.io package a higher-level language depends on.
+That library is `kith-runtime`, defined in [runtime](./runtime.spec.md#packages).
+
+- A release tag is the SemVer in the CLI package version, with no leading
+  `v`.
+- Each release MUST attach `kith-{version}-{target}` for the host targets
+  below, `SHA256SUMS`, and `install.sh`. Windows assets use a `.exe` suffix.
+- Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`,
+  `x86_64-apple-darwin`, `aarch64-apple-darwin`.
+- `install.sh` installs the Linux asset for the host architecture after
+  checking `SHA256SUMS`.
+- The grammar embedded in that binary MUST have been compiled by a released
+  `uffda` CLI during the release build.
 
 ## Deferred commands
 

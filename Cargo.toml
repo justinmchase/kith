@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 description = "Kith runtime and CLI: components, message dispatch, and workflows on Uffda"
 repository = "https://github.com/justinmchase/kith"
+# GitHub Releases ship this binary. crates.io waits for kith-runtime.
 publish = false
 
 [[bin]]

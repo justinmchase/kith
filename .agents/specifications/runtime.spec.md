@@ -47,9 +47,9 @@ capitals.
 - Grammar sources MUST import Uffda's published tokenizer, pattern, and
   expression grammars rather than copying them.
 - Compiling those `.uff` grammar sources MUST use a released `uffda` CLI. The
-  `kith` crate MUST embed the resulting artifacts (the `uffda-build` consumer
+  CLI package MUST embed the resulting artifacts (the `uffda-build` consumer
   path) and MUST NOT enable Uffda's product `embed-languages` feature, which
-  is Uffda's own grammars.
+  is Uffda's own grammars. The library crate MUST NOT embed that grammar.
 
 ### Do not extend Uffda for actors
 
@@ -71,6 +71,38 @@ capitals.
   Uffda data codec records with the **`.kith.ast`** extension. They are
   outputs of `kith compile`. They MUST NOT be Uffda module declarations, and
   they MUST NOT be JSON.
+
+## Packages
+
+Higher-level languages link a library. Operators install a binary. Those are
+different packages, on the same split Uffda uses: libraries on crates.io, the
+product CLI on GitHub Releases.
+
+The repository still builds as one Cargo package named `kith`. The first
+crates.io publish MUST be the library crates below, extracted on these
+boundaries. That publish MUST leave `publish = false` on the CLI package.
+The combined package MUST NOT be published to crates.io.
+
+| Package | Ships as | A language uses it to |
+| --- | --- | --- |
+| `kith-runtime` | crates.io | check and run a `Program`: the instance tree, mailboxes, turns, host boundary, and the `kith:` modules |
+| `kith` | GitHub Release assets `kith-{version}-{target}` | parse `.kith` source. It embeds the grammar and depends on `kith-runtime` |
+
+`kith-runtime` holds `ast`, `doc`, `codec`, `dispatch`, `host`, `interpreter`,
+and `builtin`. It depends on released `uffda-runtime`. It accepts a `Program`
+value. Parsing `.kith` text and embedding `kith.lang.uff` stay in the CLI
+package.
+
+The CLI package holds `main`, argument parsing, `parse` / `compile`, and the
+grammar build. `kith --version` prints that package version.
+
+These stay inside `kith-runtime` until a later host needs a narrower link:
+
+- A `kith-build` crate. Embedding is `uffda-build` plus the CLI's `build.rs`.
+- A codec crate. `doc` is a thin helper over Uffda's data codec.
+- A builtins crate. The `kith:` modules are part of the runtime a language
+  reuses. Splitting them waits until a host replaces one driver without
+  linking the others.
 
 ## Mechanism
 

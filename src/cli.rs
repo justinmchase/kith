@@ -23,6 +23,7 @@ pub enum Command {
         message: Option<Json>,
         argv: Vec<String>,
     },
+    Version,
 }
 
 pub struct RunResult {
@@ -36,6 +37,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
         .next()
         .ok_or_else(|| Error::new("usage: kith <parse|check|compile|run> <file>"))?;
     match command.as_str() {
+        "--version" | "-V" => return Ok(Command::Version),
         "parse" | "check" | "compile" => {
             let path = args
                 .next()
@@ -84,6 +86,10 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
 
 pub fn run(command: Command) -> Result<RunResult, Error> {
     match command {
+        Command::Version => Ok(RunResult {
+            text: format!("{}\n", env!("CARGO_PKG_VERSION")),
+            code: 0,
+        }),
         Command::Parse { path } => {
             let program = parse_file(&path)?;
             let tree =
