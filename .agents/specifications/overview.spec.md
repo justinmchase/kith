@@ -117,9 +117,10 @@ everything outside a machine's control. The language MUST stay checkable.
 
 ## Open questions
 
-- **Uffda version.** Kith will target a released Uffda from crates.io (`uffda-runtime`
-  0.10.x or later). Coleslaw currently pins 0.9.2 JSR APIs; it SHOULD follow
-  Kith's Uffda rather than the other way around.
+- **Uffda version.** Library crates are pinned to commit
+  `61c06f3eb2dff9f9f399e110754691024b06e468`, not a branch and not `@main`.
+  A crates.io release that contains that commit SHOULD replace the pin.
+  Coleslaw SHOULD follow Kith's Uffda rather than the other way around.
 - **Shared machines chapter.** Components and workflows both have state
   machines. Whether their rules should be one chapter, once the two primitives
   have settled.

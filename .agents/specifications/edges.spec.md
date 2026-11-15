@@ -46,6 +46,12 @@ capitals.
   remaining script and which commands are in flight. An operating-system
   handle MUST NOT resume across snapshot.
 - `kith:dns` is not a module. It is the unknown-module example.
+- Message names in `kith:net`, `kith:stdio`, `kith:fs`, and `kith:crypto`
+  are strings, and so are the stream tags those modules share. `kith:http`
+  and `kith:process` speak those words as registry symbols (`@Error`,
+  `@Chunk`, `@Listen`, `@Env`). A string of the same spelling is an unknown
+  command on those two modules and MUST reply `@Error`. Where a shared rule
+  writes `"Error"`, those two modules use `@Error` with the same arguments.
 
 ## Net
 
@@ -85,55 +91,55 @@ stream protocol. The host follows no redirects. `https:` is TLS inside this
 driver. The program does not import `kith:net` to use HTTP. Methods are
 `GET` and `POST` only.
 
-`Http` has one in-flight request. `"GET" url` or `"GET" url headers` replies
-`"Status" status headers` or `"Error" reason`. `headers` is an object of
-string to string, or null. `"Pull"` then yields `Chunk` of `Bytes` and
-`End`. `"POST" url headers` replies `"Ready"`. `"Push" bytes` replies
-`"Pushed"`. `"BodyEnd"` finishes the request body and replies `"Status"`;
-it is not `"Close"`.
+`Http` has one in-flight request. `@GET url` or `@GET url headers` replies
+`@Status status headers` or `@Error reason`. `headers` is an object of
+string to string, or null. `@Pull` then yields `@Chunk` of `Bytes` and
+`@End`. `@POST url headers` replies `@Ready`. `@Push bytes` replies
+`@Pushed`. `@BodyEnd` finishes the request body and replies `@Status`;
+it is not `@Close`.
 
-`Server` is multiplexed by id. `"Listen" port` binds `127.0.0.1` and replies
-`"Listening" host port` with that host and the bound port. `"Listen" host
-port` binds that host and replies `"Listening" host port` for that listen.
-A second `"Listen"` replies with that listen's host and port. An accepted
-request is `"Request" id method path headers`. `path` is the raw path and
+`Server` is multiplexed by id. `@Listen port` binds `127.0.0.1` and replies
+`@Listening host port` with that host and the bound port. `@Listen host
+port` binds that host and replies `@Listening host port` for that listen.
+A second `@Listen` replies with that listen's host and port. An accepted
+request is `@Request id method path headers`. `path` is the raw path and
 query. A GET has no body: the first
-`"Pull" id` is `"End" id`. `"Status" id status headers` allows `"Push" id
-bytes`, `"Push" id text`, and `"BodyEnd" id`. `"Push" id text` appends the
-UTF-8 bytes of `text`. `"BodyEnd" id` replies `"Responded" id`. `"Stop"`
-replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
+`@Pull id` is `@End id`. `@Status id status headers` allows `@Push id
+bytes`, `@Push id text`, and `@BodyEnd id`. `@Push id text` appends the
+UTF-8 bytes of `text`. `@BodyEnd id` replies `@Responded id`. `@Stop`
+replies `@Stopped`. Request ids are `r1`, `r2`, … in accept order.
 
 ## Http example
 
 `examples/http.kith` imports `Server` from `kith:http` and `Process` and
 `OptionalValue` from `kith:process`. It does not declare `component Http`.
-On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is
-matched by `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }`
+On init it sends one `@Env` for `["HOST_NAME", "PORT"]`. The reply is
+matched by `on up @Env { HOST_NAME: OptionalValue PORT: OptionalValue }`
 with no name on the object. A null `HOST_NAME` is `127.0.0.1`. A null
-`PORT` is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and
-it MUST NOT exit when either name is null. The `"Listen"` host and port
+`PORT` is `3000`. It MUST NOT `@Listen` until that reply is loaded, and
+it MUST NOT exit when either name is null. The `@Listen` host and port
 arguments are on their own lines. It MUST NOT store the host or port in
-a field. `"Listening" host port` `goto`s `Listening` before any
-request is handled. Every `"Request"` in that state is answered with
-status 200, header `Content-Type` `text/plain`, `"Push"` of the text
-`ok\n`, and `"BodyEnd"`.
+a field. `@Listening host port` `goto`s `Listening` before any
+request is handled. Every `@Request` in that state is answered with
+status 200, header `Content-Type` `text/plain`, `@Push` of the text
+`ok\n`, and `@BodyEnd`.
 
 ## Hello world
 
 `examples/hello-world.kith` is the Node.js synopsis server. It imports
 `Server` from `kith:http` and `Process` and `OptionalValue` from
-`kith:process`. On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`.
+`kith:process`. On init it sends one `@Env` for `["HOST_NAME", "PORT"]`.
 The reply is matched by
-`on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }` with no
+`on up @Env { HOST_NAME: OptionalValue PORT: OptionalValue }` with no
 name on the object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is
-`3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
-NOT exit when either name is null. The `"Listen"` host and port
+`3000`. It MUST NOT `@Listen` until that reply is loaded, and it MUST
+NOT exit when either name is null. The `@Listen` host and port
 arguments are on their own lines. It MUST NOT store the host or port in
-a field. On `"Listening" host port` it prints
+a field. On `@Listening host port` it prints
 `Server running at http://{host}:{port}/` from that message and `goto`s
-`Listening`. Request handling is that state's `on up "Request"`. Every request gets
-`"Status"` 200 with header `Content-Type` `text/plain`, `"Push"` of the
-text `Hello, World!\n`, and `"BodyEnd"`.
+`Listening`. Request handling is that state's `on up @Request`. Every request gets
+`@Status` 200 with header `Content-Type` `text/plain`, `@Push` of the
+text `Hello, World!\n`, and `@BodyEnd`.
 
 ## Stdio
 
@@ -221,20 +227,20 @@ string. Both are pattern rules. They do not read the process environment.
 
 Argv and env are frozen at `World::start`. A later message sees the same
 values. The checker replaces them. Argv is the program arguments after
-`kith run`'s own flags and the program path. `"Exit" code` ends the run
+`kith run`'s own flags and the program path. `@Exit code` ends the run
 with that status after the turn and MUST NOT reply.
 
 | Down | Later up |
 | --- | --- |
-| `"Argv"` | `"Argv" args` |
-| `"Env" names` | `"Env" values` |
-| `"Exit" code` | no reply |
+| `@Argv` | `@Argv args` |
+| `@Env names` | `@Env values` |
+| `@Exit code` | no reply |
 
 `names` is an array of one or more strings. `values` is one object. Each
 requested name is a key, in request order, and a repeated name appears
 once. A name in the frozen map is its string. A missing name is null. The
 reply is that one object, not one message per name. An empty array, or a
-call that is not one array of strings, replies `"Error" "name"`. `"Env"`
+call that is not one array of strings, replies `@Error "name"`. `@Env`
 MUST NOT re-read the operating system.
 
 ## Why this design

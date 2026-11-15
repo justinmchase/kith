@@ -142,8 +142,15 @@ rule MessageObject =
   -> { kind: "object", keys: (coalesce keys []) }
 ;
 
+# `@Name` is the global registry symbol, the same value as s"Name".
+rule SymbolName =
+  "@" n:Identifier
+  -> { kind: "symbol", name: n }
+;
+
 rule Message =
   | MessageObject
+  | SymbolName
   | Expression
 ;
 
@@ -196,6 +203,7 @@ rule OnBarePattern = |> OnBareTokens |> PatternTokens;
 rule OnAtom =
   | ("(" p:Pattern ")" -> p)
   | OnObjectPattern
+  | SymbolName
   | OnQuotedString
   | OnBarePattern
 ;
@@ -239,6 +247,7 @@ rule OnThenObject =
 
 rule OnThenItem =
   | ("(" p:Pattern ")" -> p)
+  | SymbolName
   | OnQuotedString
   | OnCapturePattern
   | OnThenObject

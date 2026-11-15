@@ -280,7 +280,7 @@ fn data_functions_build_bytes_blobs_and_buffers() {
     assert_eq!(field(&world, "n"), &json!(3.0));
     send(&mut world, "Codec");
     let text = field(&world, "got").as_str().unwrap();
-    assert!(text.contains("@bytes"), "{text}");
+    assert!(text.contains("b\""), "{text}");
     assert!(text.contains("AQID"), "{text}");
     send(&mut world, "Round");
     assert_eq!(field(&world, "n"), &json!(1.0));

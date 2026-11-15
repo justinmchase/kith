@@ -1572,7 +1572,7 @@ export Parent;
 export Main;
 component Child {
   start {
-    on down "Listen" host:string port:number {
+    on down @Listen host:string port:number {
       (writeLine stdout host);
       (writeLine stdout port);
     }
@@ -1582,7 +1582,7 @@ component Parent {
   child: Child;
   start {
     on init {
-      send to child "Listen"
+      send to child @Listen
         (coalesce "127.0.0.1")
         (int (coalesce "3000"));
     }
@@ -1598,7 +1598,10 @@ export scene Main {
     match &init.body[0] {
         kith::ast::Statement::SendTo { message, .. } => {
             assert_eq!(message["kind"], "sequence");
-            assert_eq!(message["items"].as_array().expect("items").len(), 3);
+            let items = message["items"].as_array().expect("items");
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[0]["kind"], "symbol");
+            assert_eq!(items[0]["name"], "Listen");
         }
         other => panic!("expected send, got {other:?}"),
     }
@@ -1606,6 +1609,13 @@ export scene Main {
     world.run_until_idle().unwrap();
     assert_eq!(world.prints()[0], json!("127.0.0.1"));
     assert_eq!(world.prints()[1], json!(3000.0));
+
+    let string_name = broken.replace("on down @Listen", "on down \"Listen\"");
+    let missed =
+        World::start(kith::parse::parse_source(&string_name).expect("parse string listen"))
+            .and_then(|mut world| world.run_until_idle())
+            .expect_err("a string Listen does not match @Listen");
+    assert!(missed.message.contains("unmatched"), "{}", missed.message);
 }
 
 #[test]

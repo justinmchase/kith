@@ -436,7 +436,7 @@ export Box;
 export Main;
 component Box {
   start {
-    on up "Env" { HOST_NAME: string PORT: string } {
+    on up @Env { HOST_NAME: string PORT: string } {
       send self "Ready";
     }
     on "Tick" {}
@@ -452,6 +452,8 @@ export scene Main { Box(); }
         .as_array()
         .expect("prefixes");
     assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[0]["kind"], "symbol");
+    assert_eq!(prefixes[0]["name"], "Env");
     assert_eq!(prefixes[1]["kind"], "over");
     assert!(prefixes[1].get("name").is_none());
     assert!(start.handlers[0].body.len() == 1);

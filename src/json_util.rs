@@ -46,7 +46,7 @@ pub fn from_uffda_value(value: Value<'_>) -> Result<Json, Error> {
                 .map(from_uffda_value)
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        Value::Bytes(_) | Value::Date(_) => {
+        Value::Bytes(_) | Value::Date(_) | Value::Symbol(_) => {
             let document = uffda_runtime::codec::data::DataDocument::from_value(
                 value,
                 uffda_runtime::codec::data::DataLimits::default(),

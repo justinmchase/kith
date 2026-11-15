@@ -65,11 +65,99 @@ pub fn match_message(
     }
 }
 
+/// `@Name` in a handler is `{ kind: "symbol", name }`. Uffda's equal pattern
+/// does not match a symbol, so the name is checked here and the node is
+/// rewritten to `{ kind: "type", type: "symbol" }` before `parse_pattern`.
+pub fn uffda_pattern(pattern: &Json) -> Json {
+    let mut pattern = pattern.clone();
+    rewrite_symbol_patterns(&mut pattern);
+    pattern
+}
+
+fn rewrite_symbol_patterns(value: &mut Json) {
+    if value.get("kind").and_then(Json::as_str) == Some("symbol") {
+        *value = serde_json::json!({"kind": "type", "type": "symbol"});
+        return;
+    }
+    match value {
+        Json::Array(items) => {
+            for item in items {
+                rewrite_symbol_patterns(item);
+            }
+        }
+        Json::Object(map) => {
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in keys {
+                if let Some(child) = map.get_mut(&key) {
+                    rewrite_symbol_patterns(child);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A `{ kind: "symbol", name }` prefix matches only that registry symbol.
+/// Patterns with no symbol prefix agree with any message.
+pub fn symbol_names_match(pattern: &Json, message: &Doc) -> bool {
+    symbol_names_agree(pattern, message)
+}
+
+fn symbol_names_agree(pattern: &Json, message: &Doc) -> bool {
+    let Some(kind) = pattern.get("kind").and_then(Json::as_str) else {
+        return true;
+    };
+    match kind {
+        "symbol" => {
+            pattern.get("name").and_then(Json::as_str) == doc::as_symbol(message).as_deref()
+        }
+        "then" => {
+            let Some(patterns) = pattern.get("patterns").and_then(Json::as_array) else {
+                return true;
+            };
+            let Some(items) = doc::items(message) else {
+                return false;
+            };
+            if items.len() != patterns.len() {
+                return false;
+            }
+            patterns
+                .iter()
+                .zip(items.iter())
+                .all(|(pattern, item)| symbol_names_agree(pattern, item))
+        }
+        "over" => pattern
+            .get("keys")
+            .and_then(Json::as_object)
+            .map(|keys| {
+                keys.iter().all(|(name, child)| {
+                    doc::get(message, name)
+                        .map(|value| symbol_names_agree(child, &value))
+                        .unwrap_or(true)
+                })
+            })
+            .unwrap_or(true),
+        "variable" => pattern
+            .get("pattern")
+            .map(|inner| symbol_names_agree(inner, message))
+            .unwrap_or(true),
+        "and" => pattern
+            .get("patterns")
+            .and_then(Json::as_array)
+            .map(|items| items.iter().all(|item| symbol_names_agree(item, message)))
+            .unwrap_or(true),
+        _ => true,
+    }
+}
+
 pub fn match_document(
     pattern: &Json,
     message: &Doc,
 ) -> Result<Option<HashMap<String, Doc>>, Error> {
-    let pattern = parse_pattern(pattern)?;
+    if !symbol_names_match(pattern, message) {
+        return Ok(None);
+    }
+    let pattern = parse_pattern(&uffda_pattern(pattern))?;
     let iterable = match &pattern {
         Pattern::Then { patterns } => {
             let Some(values) = doc::items(message) else {
@@ -133,7 +221,10 @@ pub fn match_field(pattern: &Json, value: &Json) -> Result<bool, Error> {
 }
 
 pub fn match_field_document(pattern: &Json, value: &Doc) -> Result<bool, Error> {
-    let pattern = parse_pattern(pattern)?;
+    if !symbol_names_match(pattern, value) {
+        return Ok(false);
+    }
+    let pattern = parse_pattern(&uffda_pattern(pattern))?;
     let value = value.clone();
     let mut arena: Arena<Rootable![RuleExecution<'_>]> =
         Arena::new(|mc| RuleExecution::for_pattern(mc, pattern, vec![value.materialize(mc)]));

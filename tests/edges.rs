@@ -135,7 +135,8 @@ fn read_http(child: &mut std::process::Child, addr: &str, request: &str) -> Stri
 
 fn listening_pair(message: &Doc) -> (String, u16) {
     let items = doc::items(message).unwrap();
-    assert_eq!(doc::as_str(&items[0]).as_deref(), Some("Listening"));
+    let name = doc::as_symbol(&items[0]).or_else(|| doc::as_str(&items[0]));
+    assert_eq!(name.as_deref(), Some("Listening"));
     let host = doc::as_str(&items[1]).unwrap();
     let port = doc::as_u64(&items[2]).unwrap() as u16;
     (host, port)
@@ -143,6 +144,12 @@ fn listening_pair(message: &Doc) -> (String, u16) {
 
 fn down(name: &str, args: impl IntoIterator<Item = Doc>) -> Doc {
     let mut items = vec![doc::string(name)];
+    items.extend(args);
+    doc::array(items)
+}
+
+fn sym(name: &str, args: impl IntoIterator<Item = Doc>) -> Doc {
+    let mut items = vec![doc::symbol(name)];
     items.extend(args);
     doc::array(items)
 }
@@ -300,7 +307,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Http",
-        down(
+        sym(
             "GET",
             [
                 doc::string(format!("http://127.0.0.1:{port}/hi")),
@@ -310,12 +317,12 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     );
     settle(&mut world);
     let status = doc::items(&got(&world)).unwrap();
-    assert_eq!(doc::as_str(&status[0]).as_deref(), Some("Status"));
+    assert_eq!(doc::as_symbol(&status[0]).as_deref(), Some("Status"));
     assert_eq!(doc::as_u64(&status[1]), Some(200));
-    send(&mut world, "Http", doc::string("Pull"));
-    assert_eq!(got(&world), down("Chunk", [doc::bytes(b"ok".to_vec())]));
-    send(&mut world, "Http", doc::string("Pull"));
-    assert_eq!(got(&world), doc::string("End"));
+    send(&mut world, "Http", doc::symbol("Pull"));
+    assert_eq!(got(&world), sym("Chunk", [doc::bytes(b"ok".to_vec())]));
+    send(&mut world, "Http", doc::symbol("Pull"));
+    assert_eq!(got(&world), doc::symbol("End"));
 
     let port = serve(b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     let mut world = start(HTTP);
@@ -323,7 +330,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Http",
-        down("GET", [doc::string(format!("http://127.0.0.1:{port}/"))]),
+        sym("GET", [doc::string(format!("http://127.0.0.1:{port}/"))]),
     );
     settle(&mut world);
     assert!(started.elapsed() < Duration::from_secs(1));
@@ -363,7 +370,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Http",
-        down(
+        sym(
             "POST",
             [
                 doc::string(format!("http://127.0.0.1:{port}/up")),
@@ -371,14 +378,14 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
             ],
         ),
     );
-    assert_eq!(got(&world), doc::string("Ready"));
+    assert_eq!(got(&world), doc::symbol("Ready"));
     send(
         &mut world,
         "Http",
-        down("Push", [doc::bytes(b"hi".to_vec())]),
+        sym("Push", [doc::bytes(b"hi".to_vec())]),
     );
-    assert_eq!(got(&world), doc::string("Pushed"));
-    send(&mut world, "Http", doc::string("BodyEnd"));
+    assert_eq!(got(&world), doc::symbol("Pushed"));
+    send(&mut world, "Http", doc::symbol("BodyEnd"));
     settle(&mut world);
     assert_eq!(
         doc::as_u64(&doc::items(&got(&world)).unwrap()[1]),
@@ -392,9 +399,9 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Http",
-        down("PUT", [doc::string("http://127.0.0.1/x")]),
+        sym("PUT", [doc::string("http://127.0.0.1/x")]),
     );
-    assert_eq!(got(&world), down("Error", [doc::string("unknown")]));
+    assert_eq!(got(&world), sym("Error", [doc::string("unknown")]));
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -409,7 +416,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Http",
-        down(
+        sym(
             "GET",
             [doc::string(format!("https://127.0.0.1:{port}/secure"))],
         ),
@@ -420,7 +427,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     assert_eq!(saw.recv_timeout(Duration::from_secs(2)).unwrap(), 0x16);
 
     let mut world = start(HTTP);
-    send(&mut world, "Server", down("Listen", [doc::number(0.0)]));
+    send(&mut world, "Server", sym("Listen", [doc::number(0.0)]));
     let listened = listening_pair(&got(&world));
     assert_eq!(listened.0, "127.0.0.1");
     let port = listened.1;
@@ -435,7 +442,7 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     });
     until_got(
         &mut world,
-        &down(
+        &sym(
             "Request",
             [
                 doc::string("r1"),
@@ -448,12 +455,12 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
             ],
         ),
     );
-    send(&mut world, "Server", down("Pull", [doc::string("r1")]));
-    assert_eq!(got(&world), down("End", [doc::string("r1")]));
+    send(&mut world, "Server", sym("Pull", [doc::string("r1")]));
+    assert_eq!(got(&world), sym("End", [doc::string("r1")]));
     send(
         &mut world,
         "Server",
-        down(
+        sym(
             "Status",
             [doc::string("r1"), doc::number(200.0), doc::null()],
         ),
@@ -461,16 +468,16 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
     send(
         &mut world,
         "Server",
-        down("Push", [doc::string("r1"), doc::bytes(b"ok".to_vec())]),
+        sym("Push", [doc::string("r1"), doc::bytes(b"ok".to_vec())]),
     );
-    assert_eq!(got(&world), down("Pushed", [doc::string("r1")]));
-    send(&mut world, "Server", down("BodyEnd", [doc::string("r1")]));
+    assert_eq!(got(&world), sym("Pushed", [doc::string("r1")]));
+    send(&mut world, "Server", sym("BodyEnd", [doc::string("r1")]));
     settle(&mut world);
-    assert_eq!(got(&world), down("Responded", [doc::string("r1")]));
+    assert_eq!(got(&world), sym("Responded", [doc::string("r1")]));
     let response = String::from_utf8_lossy(&client.join().unwrap()).to_string();
     assert!(response.contains("200"), "{response}");
     assert!(response.contains("ok"), "{response}");
-    send(&mut world, "Server", doc::string("Stop"));
+    send(&mut world, "Server", doc::symbol("Stop"));
 }
 
 #[test]
@@ -482,12 +489,18 @@ fn server_listens_on_a_host_and_pushes_text() {
         "Server",
         down("Listen", [doc::string("127.0.0.1"), doc::number(0.0)]),
     );
+    assert_eq!(got(&world), sym("Error", [doc::string("unknown")]));
+    send(
+        &mut world,
+        "Server",
+        sym("Listen", [doc::string("127.0.0.1"), doc::number(0.0)]),
+    );
     let first = listening_pair(&got(&world));
     assert_eq!(first.0, "127.0.0.1");
     send(
         &mut world,
         "Server",
-        down("Listen", [doc::string("127.0.0.2"), doc::number(0.0)]),
+        sym("Listen", [doc::string("127.0.0.2"), doc::number(0.0)]),
     );
     let second = listening_pair(&got(&world));
     assert_eq!(second.0, "127.0.0.2");
@@ -504,7 +517,7 @@ fn server_listens_on_a_host_and_pushes_text() {
     });
     until_got(
         &mut world,
-        &down(
+        &sym(
             "Request",
             [
                 doc::string("r1"),
@@ -520,7 +533,7 @@ fn server_listens_on_a_host_and_pushes_text() {
     send(
         &mut world,
         "Server",
-        down(
+        sym(
             "Status",
             [
                 doc::string("r1"),
@@ -532,10 +545,10 @@ fn server_listens_on_a_host_and_pushes_text() {
     send(
         &mut world,
         "Server",
-        down("Push", [doc::string("r1"), doc::string("Hello, World!\n")]),
+        sym("Push", [doc::string("r1"), doc::string("Hello, World!\n")]),
     );
-    assert_eq!(got(&world), down("Pushed", [doc::string("r1")]));
-    send(&mut world, "Server", down("BodyEnd", [doc::string("r1")]));
+    assert_eq!(got(&world), sym("Pushed", [doc::string("r1")]));
+    send(&mut world, "Server", sym("BodyEnd", [doc::string("r1")]));
     settle(&mut world);
     let response = String::from_utf8_lossy(&client.join().unwrap()).to_string();
     assert!(response.contains("HTTP/1.1 200"), "{response}");
@@ -546,7 +559,7 @@ fn server_listens_on_a_host_and_pushes_text() {
         "{response}"
     );
     assert!(response.contains("Hello, World!\n"), "{response}");
-    send(&mut world, "Server", doc::string("Stop"));
+    send(&mut world, "Server", doc::symbol("Stop"));
 }
 
 fn pattern_text(pattern: &serde_json::Value) -> String {
@@ -559,19 +572,19 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process OptionalValue"));
-    assert!(source.contains("on up \"Env\" { HOST_NAME: OptionalValue PORT: OptionalValue }"));
+    assert!(source.contains("on up @Env { HOST_NAME: OptionalValue PORT: OptionalValue }"));
     assert!(!source.contains("values:"));
-    assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
-    assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
+    assert!(source.contains("@Env [\"HOST_NAME\" \"PORT\"]"));
+    assert_eq!(source.matches("send to proc @Env").count(), 1);
     assert!(source.contains("127.0.0.1"));
     assert!(source.contains("3000"));
     assert!(!source.contains("\"Exit\""));
     assert!(source.contains("Server running at http://{host}:{port}/"));
     assert!(source.contains("Hello, World!\\n"));
-    assert!(source.contains("on up \"Listening\" host:string port:number"));
+    assert!(source.contains("on up @Listening host:string port:number"));
     assert!(!source.contains("field "));
     assert!(source.contains(
-        "send to server \"Listen\"\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
+        "send to server @Listen\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
     ));
     let program = kith::parse::parse_source(&source).expect("parse hello-world");
     let hello = program.component("Hello").expect("Hello");
@@ -684,18 +697,18 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     let source = std::fs::read_to_string("examples/http.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process OptionalValue"));
-    assert!(source.contains("on up \"Env\" { HOST_NAME: OptionalValue PORT: OptionalValue }"));
+    assert!(source.contains("on up @Env { HOST_NAME: OptionalValue PORT: OptionalValue }"));
     assert!(!source.contains("values:"));
     assert!(!source.contains("component Http"));
-    assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
-    assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
+    assert!(source.contains("@Env [\"HOST_NAME\" \"PORT\"]"));
+    assert_eq!(source.matches("send to proc @Env").count(), 1);
     assert!(source.contains("127.0.0.1"));
     assert!(source.contains("3000"));
     assert!(!source.contains("\"Exit\""));
-    assert!(source.contains("on up \"Listening\" host:string port:number"));
+    assert!(source.contains("on up @Listening host:string port:number"));
     assert!(!source.contains("field "));
     assert!(source.contains(
-        "send to server \"Listen\"\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
+        "send to server @Listen\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
     ));
     let program = kith::parse::parse_source(&source).expect("parse http.kith");
     assert!(program.component("Http").is_none());
@@ -1175,11 +1188,11 @@ fn process_freezes_argv_env_and_exit() {
           field got: any;
           proc: Process;
           start {
-            on down "Argv" { send to proc "Argv"; }
-            on down "Env" names:any { send to proc "Env" names; }
+            on down "Argv" { send to proc @Argv; }
+            on down "Env" names:any { send to proc @Env names; }
             on down "Opt" value:OptionalValue { got -> value; }
             on down "Req" value:RequiredValue { got -> value; }
-            on down "Stop" { send to proc "Exit" 4; }
+            on down "Stop" { send to proc @Exit 4; }
             on up message:any { got -> message; }
           }
         }
@@ -1190,17 +1203,19 @@ fn process_freezes_argv_env_and_exit() {
     world.set_argv(vec!["one".into(), "two".into()]);
     world.replace_process(vec!["one".into(), "two".into()], &[("ONLY", "yes")]);
     send(&mut world, "Process", doc::string("Argv"));
+    assert_eq!(got(&world), sym("Error", [doc::string("unknown")]));
+    send(&mut world, "Process", doc::symbol("Argv"));
     assert_eq!(
         got(&world),
-        down(
+        sym(
             "Argv",
             [doc::array([doc::string("one"), doc::string("two")])]
         )
     );
-    send(&mut world, "Process", doc::string("Argv"));
+    send(&mut world, "Process", doc::symbol("Argv"));
     assert_eq!(
         got(&world),
-        down(
+        sym(
             "Argv",
             [doc::array([doc::string("one"), doc::string("two")])]
         )
@@ -1208,32 +1223,32 @@ fn process_freezes_argv_env_and_exit() {
     send(
         &mut world,
         "Process",
-        down("Env", [doc::array([doc::string("ONLY")])]),
+        sym("Env", [doc::array([doc::string("ONLY")])]),
     );
     assert_eq!(
         got(&world),
-        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
+        sym("Env", [doc::object([("ONLY", doc::string("yes"))])])
     );
     send(
         &mut world,
         "Process",
-        down("Env", [doc::array([doc::string("PATH")])]),
+        sym("Env", [doc::array([doc::string("PATH")])]),
     );
     assert_eq!(
         got(&world),
-        down("Env", [doc::object([("PATH", doc::null())])])
+        sym("Env", [doc::object([("PATH", doc::null())])])
     );
     send(
         &mut world,
         "Process",
-        down(
+        sym(
             "Env",
             [doc::array([doc::string("ONLY"), doc::string("PATH")])],
         ),
     );
     assert_eq!(
         got(&world),
-        down(
+        sym(
             "Env",
             [doc::object([
                 ("ONLY", doc::string("yes")),
@@ -1244,29 +1259,29 @@ fn process_freezes_argv_env_and_exit() {
     send(
         &mut world,
         "Process",
-        down(
+        sym(
             "Env",
             [doc::array([doc::string("ONLY"), doc::string("ONLY")])],
         ),
     );
     assert_eq!(
         got(&world),
-        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
+        sym("Env", [doc::object([("ONLY", doc::string("yes"))])])
     );
-    send(&mut world, "Process", down("Env", [doc::string("ONLY")]));
-    assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    send(&mut world, "Process", sym("Env", [doc::string("ONLY")]));
+    assert_eq!(got(&world), sym("Error", [doc::string("name")]));
     send(
         &mut world,
         "Process",
-        down("Env", [doc::array(Vec::<Doc>::new())]),
+        sym("Env", [doc::array(Vec::<Doc>::new())]),
     );
-    assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    assert_eq!(got(&world), sym("Error", [doc::string("name")]));
     send(
         &mut world,
         "Process",
-        down("Env", [doc::array([doc::number(1.0)])]),
+        sym("Env", [doc::array([doc::number(1.0)])]),
     );
-    assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    assert_eq!(got(&world), sym("Error", [doc::string("name")]));
     let root = world.root_id();
     world
         .send_document(root, down("Opt", [doc::string("yes")]))
@@ -1293,10 +1308,10 @@ fn process_freezes_argv_env_and_exit() {
     assert!(world.run_until_idle().is_err());
     let snap = world.snapshot().unwrap();
     let mut restored = World::restore(program, &snap).unwrap();
-    send(&mut restored, "Process", doc::string("Argv"));
+    send(&mut restored, "Process", doc::symbol("Argv"));
     assert_eq!(
         got(&restored),
-        down(
+        sym(
             "Argv",
             [doc::array([doc::string("one"), doc::string("two")])]
         )
@@ -1304,14 +1319,14 @@ fn process_freezes_argv_env_and_exit() {
     send(
         &mut restored,
         "Process",
-        down("Env", [doc::array([doc::string("ONLY")])]),
+        sym("Env", [doc::array([doc::string("ONLY")])]),
     );
     assert_eq!(
         got(&restored),
-        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
+        sym("Env", [doc::object([("ONLY", doc::string("yes"))])])
     );
     let before = got(&world);
-    send(&mut world, "Process", down("Exit", [doc::number(4.0)]));
+    send(&mut world, "Process", sym("Exit", [doc::number(4.0)]));
     assert_eq!(got(&world), before);
     assert_eq!(world.exit_code(), Some(4));
 
@@ -1325,10 +1340,10 @@ fn process_freezes_argv_env_and_exit() {
           field got: any;
           proc: Process;
           start {
-            on init { send to proc "Argv"; }
-            on up "Argv" args:any {
+            on init { send to proc @Argv; }
+            on up @Argv args:any {
               got -> args;
-              send to proc "Exit" 3;
+              send to proc @Exit 3;
             }
           }
         }

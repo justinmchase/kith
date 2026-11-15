@@ -74,8 +74,9 @@ their chapters define them. Byte length is `(byte_length bytes)`, not
 
 `import "kith:data" Bytes Blob Buffer bytes byte_at byte_length bytes_concat bytes_slice blob blob_bytes blob_type buffer buffer_slice buffer_bytes;`
 
-`Bytes` is an Uffda byte value. At a codec boundary it is `@bytes` with
-canonical unpadded base64url. `Blob` and `Buffer` are plain objects. Nothing
+`Bytes` is an Uffda byte value. At a codec boundary the compact spelling
+is `b"…"` with canonical unpadded base64url. `@bytes` still decodes to the
+same value. `Blob` and `Buffer` are plain objects. Nothing
 in this module is mutable, and nothing reads a device.
 
 | Export | Kind | Behavior |
@@ -95,7 +96,8 @@ in this module is mutable, and nothing reads a device.
 | `(buffer_slice buffer start end)` | func | A `Buffer` whose range is relative to that window. A range outside the window MUST fail. |
 | `(buffer_bytes buffer)` | func | New `Bytes` for the window. |
 
-`(to_codec bytes)` MUST emit `@bytes`. `(from_codec text)` of that record
+`(to_codec bytes)` MUST emit `b"…"`. `(from_codec text)` of that record,
+and of the long `@bytes` spelling,
 MUST be a byte value `(byte_at …)` can read. `(sha256 text)` remains the
 global and MUST return a byte value.
 
@@ -136,7 +138,8 @@ continue that pipe.
 `import "kith:time" Instant DateTime Zone Clock instant instant_text zone date_time instant_at add_seconds diff_seconds offset_seconds;`
 
 An instant is an Uffda Date: a millisecond UTC instant. At a codec boundary
-it is `@date` in RFC3339. A zone and a civil date are plain objects. The
+the compact spelling is `d"…"` in RFC3339. `@date"…"` still decodes to the
+same instant. A zone and a civil date are plain objects. The
 functions are pure. They MUST NOT read the OS clock or a zone database on
 the machine.
 
@@ -155,7 +158,7 @@ program turns two instants into that delay. `kith:time` MUST NOT export
 | Func | Returns |
 | --- | --- |
 | `(instant text)` | The instant for RFC3339 text. Invalid text, or a precision other than milliseconds, MUST fail. |
-| `(instant_text instant)` | The canonical `@date` text for that instant: RFC3339 UTC. A zero fraction is omitted (`2024-01-02T00:00:00Z`). A non-zero fraction keeps only the significant digits (`2024-01-01T00:00:01.5Z`). |
+| `(instant_text instant)` | The RFC3339 UTC text inside the compact `d"…"` record. A zero fraction is omitted (`2024-01-02T00:00:00Z`). A non-zero fraction keeps only the significant digits (`2024-01-01T00:00:01.5Z`). |
 | `(zone id)` | `"UTC"` is `{ kind: "utc" }`. `+HH:MM` and `-HH:MM`, hours `00`–`23` and minutes `00`–`59`, are `{ kind: "fixed", seconds }`. `+00:00` is fixed `0`, not utc. A table id is `{ kind: "iana", id }`. Anything else MUST fail. |
 | `(date_time instant zone)` | The civil `DateTime` of that instant in that zone. |
 | `(instant_at date zone)` | The instant that civil time denotes. A DST gap MUST fail with a message containing `gap`. An overlap MUST fail with a message containing `overlap`. |

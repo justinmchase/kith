@@ -1699,7 +1699,15 @@ impl World {
                 replies
             }
             Driver::Clock => vec![self.clock_reply(message)],
-            Driver::Edge(driver) => self.drive_edge(id, driver, message)?,
+            Driver::Edge(driver) => {
+                let symbols = driver.speaks_symbols();
+                let replies = self.drive_edge(id, driver, message)?;
+                if symbols {
+                    replies.into_iter().map(symbolize_reply).collect()
+                } else {
+                    replies
+                }
+            }
         };
         let Some(parent) = parent else {
             return Ok(vec![]);
@@ -1857,7 +1865,20 @@ impl World {
         else {
             return Ok(());
         };
+        let symbols = self
+            .instances
+            .get(&actor)
+            .and_then(|instance| instance.driver.as_ref())
+            .is_some_and(|driver| match driver {
+                Driver::Edge(edge) => edge.speaks_symbols(),
+                _ => false,
+            });
         for reply in done.replies {
+            let reply = if symbols {
+                symbolize_reply(reply)
+            } else {
+                reply
+            };
             self.deliver(parent, reply, Route::Up)?;
         }
         Ok(())
@@ -2788,6 +2809,21 @@ fn restore_run(value: &Doc) -> Result<WorkflowRun, Error> {
 
 fn required(doc: &Doc, key: &str) -> Result<Doc, Error> {
     doc::get(doc, key).ok_or_else(|| Error::new(format!("snapshot missing {key}")))
+}
+
+/// Http and process drivers build string heads. Callers of those drivers
+/// speak registry symbols, so the head is a symbol at delivery.
+fn symbolize_reply(message: Doc) -> Doc {
+    if let Some(name) = doc::as_str(&message) {
+        return doc::symbol(name);
+    }
+    if let Some(mut items) = doc::items(&message) {
+        if let Some(name) = items.first().and_then(doc::as_str) {
+            items[0] = doc::symbol(name);
+            return doc::array(items);
+        }
+    }
+    message
 }
 
 fn project(doc: &Doc) -> Result<Json, Error> {

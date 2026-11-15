@@ -185,8 +185,13 @@ export scene Main {
   is one value: `send up { kind: "Done" status body }` still sends an
   object. `complete` takes the same value list.
 - A newline between those values does not end the statement.
-  `send to name "Listen"` with the host and port arguments on following
-  lines is one send of three values.
+  `send to name @Listen` with the host and port arguments on following
+  lines is one send of three values: the symbol `Listen`, the host, and
+  the port.
+- `@Name` is the global registry symbol `Name`. It is the same value as
+  `s"Name"`, `@symbol"Name"`, and `(symbol "Name")`. It is not a keyword
+  escape. The string `"Name"` is a different value. `on @Name` matches
+  that symbol and MUST NOT match the string.
 - `send after Delay Route V…` is the same send, delivered later. `Delay` is
   seconds. See [timers](./timers.spec.md). Self is written
   `send after 5 self "Tick"`. Order's `MockShip` uses
@@ -289,8 +294,10 @@ A handler body is a synchronous prefix followed by at most one terminal.
   Matching is Uffda value pattern matching (`uffda-runtime` Pattern). A Then
   of several prefixes matches an array of that many values as an iterable
   input; every other pattern matches the message as one scalar value. The
-  array MUST have exactly as many elements as prefixes. `else` is matched
-  last, as `any` with the unqualified route list. It MUST NOT match init.
+  array MUST have exactly as many elements as prefixes. `on @Name` matches
+  the registry symbol `Name` and MUST NOT match the string `"Name"`.
+  `else` is matched last, as `any` with the unqualified route list. It
+  MUST NOT match init.
 - A listed name matches as follows: `down` is send to, send down, or
   inject; `up` is send up; `self` is send self. The handler matches if any
   listed name matches. `on init` MUST match only construction init.

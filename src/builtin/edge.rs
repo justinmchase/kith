@@ -387,15 +387,30 @@ struct Command {
     args: Vec<Doc>,
 }
 
-fn command(message: &Doc) -> Command {
-    if let Some(text) = doc::as_str(message) {
+impl Edge {
+    /// `kith:http` and `kith:process` take and reply with registry symbols.
+    pub fn speaks_symbols(&self) -> bool {
+        matches!(self.kind, Kind::Http | Kind::Server | Kind::Process)
+    }
+}
+
+fn command_name(doc: &Doc, symbols: bool) -> Option<String> {
+    if symbols {
+        doc::as_symbol(doc)
+    } else {
+        doc::as_str(doc)
+    }
+}
+
+fn command(message: &Doc, symbols: bool) -> Command {
+    if let Some(text) = command_name(message, symbols) {
         return Command {
             name: text,
             args: Vec::new(),
         };
     }
     if let Some(items) = doc::items(message) {
-        if let Some(name) = items.first().and_then(|item| doc::as_str(item)) {
+        if let Some(name) = items.first().and_then(|item| command_name(item, symbols)) {
             return Command {
                 name,
                 args: items.into_iter().skip(1).collect(),
@@ -458,7 +473,7 @@ fn header_doc(headers: &[(String, String)]) -> Doc {
 }
 
 pub fn step(edge: Edge, actor: u64, message: &Doc, host: &mut Host, io: &IoShared) -> Outcome {
-    let command = command(message);
+    let command = command(message, edge.speaks_symbols());
     let multiplexed = matches!(edge.kind, Kind::Listener | Kind::Server);
     let id = if multiplexed {
         text_arg(&command.args, 0)

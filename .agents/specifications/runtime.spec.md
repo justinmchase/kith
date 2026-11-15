@@ -1,7 +1,7 @@
 # Runtime
 
-This chapter defines how Kith's runtime sits on Uffda's: what it reuses from
-crates.io, what it implements itself, and why components and workflows are not
+This chapter defines how Kith's runtime sits on Uffda's: what it reuses,
+what it implements itself, and why components and workflows are not
 Uffda runtime types. Dispatch semantics are in [dispatch](./dispatch.spec.md).
 The operator surface is in [CLI](./cli.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
@@ -40,16 +40,25 @@ capitals.
 
 ### Reuse
 
-- The `kith` binary MUST depend on released `uffda-runtime` (and the supporting
-  crates it needs, such as `uffda-codec`, `uffda-heap`, and `uffda-build`) from
-  crates.io. It MUST NOT fork or vendor Uffda's matcher, evaluator, or value
-  heap.
+- The `kith` binary MUST depend on `uffda-runtime`, `uffda-heap`, and
+  `uffda-build` at git revision
+  `61c06f3eb2dff9f9f399e110754691024b06e468` (the merge of the symbol
+  literal onto Uffda main). The pin MUST be that commit. It MUST NOT be a
+  branch name and MUST NOT be `@main`. It MUST NOT fork or vendor Uffda's
+  matcher, evaluator, or value heap.
 - Grammar sources MUST import Uffda's published tokenizer, pattern, and
-  expression grammars rather than copying them.
-- Compiling those `.uff` grammar sources MUST use a released `uffda` CLI. The
-  CLI package MUST embed the resulting artifacts (the `uffda-build` consumer
-  path) and MUST NOT enable Uffda's product `embed-languages` feature, which
-  is Uffda's own grammars. The library crate MUST NOT embed that grammar.
+  expression grammars rather than copying them. The released `uffda` CLI
+  resolves that import as a semver range and does not resolve a git
+  commit, so the grammar import stays on the released JSR package. Kith's
+  grammar recognizes `@Name` and projects `{ kind: "symbol", name }`. The
+  pinned runtime evaluates that node as the registry symbol `Name`, the
+  same value as `s"Name"`, `@symbol"Name"`, and `(symbol "Name")`.
+- Compiling those `.uff` grammar sources MUST use a released `uffda` CLI.
+  The GitHub Action `justinmchase/uffda/.github/actions/uffda-setup` stays
+  on its release tag. The CLI package MUST embed the resulting artifacts
+  (the `uffda-build` consumer path) and MUST NOT enable Uffda's product
+  `embed-languages` feature, which is Uffda's own grammars. The library
+  crate MUST NOT embed that grammar.
 
 ### Do not extend Uffda for actors
 
@@ -89,7 +98,8 @@ The combined package MUST NOT be published to crates.io.
 | `kith` | GitHub Release assets `kith-{version}-{target}` | parse `.kith` source. It embeds the grammar and depends on `kith-runtime` |
 
 `kith-runtime` holds `ast`, `doc`, `codec`, `dispatch`, `host`, `interpreter`,
-and `builtin`. It depends on released `uffda-runtime`. It accepts a `Program`
+and `builtin`. It depends on `uffda-runtime` at the revision in
+[Reuse](#reuse). It accepts a `Program`
 value. Parsing `.kith` text and embedding `kith.lang.uff` stay in the CLI
 package.
 
