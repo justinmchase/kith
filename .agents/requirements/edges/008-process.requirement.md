@@ -17,9 +17,13 @@ Expected behavior:
 
 - `"Argv"` MUST reply `"Argv" args` with the arguments frozen at start,
   after `kith run`'s own flags. A second `"Argv"` MUST be the same array.
-- `"Env" name` MUST reply `"Env" name value` when the frozen map has that
-  name, and `"Missing" name` when it does not. It MUST NOT re-read the
-  operating system.
+- `"Env" names` MUST reply `"Env" values` in one message. `names` is an
+  array of one or more strings. `values` is an object: each requested name
+  is its frozen string, or null when the map has no such name. A repeated
+  name appears once. It MUST NOT reply once per name and MUST NOT re-read
+  the operating system.
+- An empty array, or a call that is not one array of strings, MUST reply
+  `"Error" "name"`.
 - `"Exit" code` MUST set the process status and MUST NOT reply. The run
   MUST end with that status.
 - Snapshot MUST restore the frozen argv and env.

@@ -1114,16 +1114,27 @@ fn process(edge: Edge, command: Command, host: &Host) -> Outcome {
             )],
         ),
         "Env" => {
-            let Some(name) = text_arg(&command.args, 0) else {
+            let Some(names) = command.args.first().and_then(doc::items) else {
                 return done(edge, vec![failure(None, "name")]);
             };
-            match host.env.get(&name) {
-                Some(value) => done(
-                    edge,
-                    vec![reply("Env", [doc::string(&name), doc::string(value)])],
-                ),
-                None => done(edge, vec![reply("Missing", [doc::string(name)])]),
+            if command.args.len() != 1 || names.is_empty() {
+                return done(edge, vec![failure(None, "name")]);
             }
+            let mut entries = Vec::with_capacity(names.len());
+            for item in names {
+                let Some(name) = doc::as_str(&item) else {
+                    return done(edge, vec![failure(None, "name")]);
+                };
+                if entries.iter().any(|(key, _): &(String, Doc)| key == &name) {
+                    continue;
+                }
+                let value = match host.env.get(&name) {
+                    Some(value) => doc::string(value),
+                    None => doc::null(),
+                };
+                entries.push((name, value));
+            }
+            done(edge, vec![reply("Env", [doc::object(entries)])])
         }
         "Exit" => {
             let Some(code) = doc::as_u64(command.args.first().unwrap_or(&doc::null())) else {

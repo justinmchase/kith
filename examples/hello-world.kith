@@ -11,21 +11,11 @@ component Hello {
 
   start {
     on init {
-      send to proc "Env" "HOST_NAME";
+      send to proc "Env" ["HOST_NAME" "PORT"];
     }
-    on up "Env" name:"HOST_NAME" value:string {
-      host -> value;
-      send to proc "Env" "PORT";
-    }
-    on up "Missing" name:"HOST_NAME" {
-      host -> "127.0.0.1";
-      send to proc "Env" "PORT";
-    }
-    on up "Env" name:"PORT" value:string {
-      send to server "Listen" host (int value);
-    }
-    on up "Missing" name:"PORT" {
-      send to server "Listen" host 3000;
+    on up "Env" values:{ HOST_NAME: (string | null) PORT: (string | null) } {
+      host -> (coalesce HOST_NAME "127.0.0.1");
+      send to server "Listen" host (int (coalesce PORT "3000"));
     }
     on up "Listening" port:number {
       (print "Server running at http://{host}:{port}/");

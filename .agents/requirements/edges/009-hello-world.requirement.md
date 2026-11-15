@@ -1,6 +1,6 @@
 ---
 id: edges-009
-title: hello-world defaults HOST_NAME and PORT, then answers Hello, World!
+title: hello-world loads HOST_NAME and PORT together, then answers Hello, World!
 spec_ref: .agents/specifications/edges.spec.md#hello-world; .agents/specifications/components.spec.md#sending
 ---
 
@@ -12,14 +12,15 @@ Preconditions:
 
 - `examples/hello-world.kith` imports `Server` from `kith:http` and
   `Process` from `kith:process`.
-- `HOST_NAME` and `PORT` are read with `"Env"`. A missing `HOST_NAME` is
-  `127.0.0.1`. A missing `PORT` is `3000`.
+- `HOST_NAME` and `PORT` are read together with one `"Env"`. A null
+  `HOST_NAME` is `127.0.0.1`. A null `PORT` is `3000`.
 
 Expected behavior:
 
-- On init the server MUST send `"Env" "HOST_NAME"` and MUST NOT `"Listen"`.
-- After the host reply it MUST send `"Env" "PORT"`. `"Listen" host port`
-  MUST wait until both values are loaded. A missing name MUST NOT `"Exit"`.
+- On init the server MUST send one `"Env"` whose names are `HOST_NAME`
+  and `PORT`. It MUST NOT `"Listen"` in that turn.
+- The `"Env" values` reply MUST load both names before `"Listen"`. A null
+  name MUST NOT `"Exit"`.
 - On `"Listening"` it MUST print
   `Server running at http://{host}:{port}/` and `goto Listening`
   before it handles a request.

@@ -103,23 +103,23 @@ replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
 ## Http example
 
 `examples/http.kith` imports `Server` from `kith:http` and `Process` from
-`kith:process`. It does not declare `component Http`. On init it sends
-`"Env" "HOST_NAME"`, then `"Env" "PORT"` after that reply. A missing
-`HOST_NAME` is `127.0.0.1`. A missing `PORT` is `3000`. It MUST NOT
-`"Listen"` until both the host and the port are loaded, and it MUST NOT
-exit when either name is missing. `"Listening"` `goto`s `Listening` before
-any request is handled. Every `"Request"` in that state is answered with
-status 200, header `Content-Type` `text/plain`, `"Push"` of the text
-`ok\n`, and `"BodyEnd"`.
+`kith:process`. It does not declare `component Http`. On init it sends one
+`"Env"` for `["HOST_NAME", "PORT"]`. The reply is one `"Env" values`
+object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is `3000`. It
+MUST NOT `"Listen"` until that reply is loaded, and it MUST NOT exit when
+either name is null. `"Listening"` `goto`s `Listening` before any request
+is handled. Every `"Request"` in that state is answered with status 200,
+header `Content-Type` `text/plain`, `"Push"` of the text `ok\n`, and
+`"BodyEnd"`.
 
 ## Hello world
 
 `examples/hello-world.kith` is the Node.js synopsis server. It imports
 `Server` from `kith:http` and `Process` from `kith:process`. On init it
-sends `"Env" "HOST_NAME"`, then `"Env" "PORT"` after that reply. A missing
-`HOST_NAME` is `127.0.0.1`. A missing `PORT` is `3000`. It MUST NOT
-`"Listen"` until both the host and the port are loaded, and it MUST NOT
-exit when either name is missing. On `"Listening"` it prints
+sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is one
+`"Env" values` object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT`
+is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
+NOT exit when either name is null. On `"Listening"` it prints
 `Server running at http://{host}:{port}/` and `goto`s `Listening`.
 Request handling is that state's `on up "Request"`. Every request gets
 `"Status"` 200 with header `Content-Type` `text/plain`, `"Push"` of the
@@ -214,8 +214,15 @@ with that status after the turn and MUST NOT reply.
 | Down | Later up |
 | --- | --- |
 | `"Argv"` | `"Argv" args` |
-| `"Env" name` | `"Env" name value` or `"Missing" name` |
+| `"Env" names` | `"Env" values` |
 | `"Exit" code` | no reply |
+
+`names` is an array of one or more strings. `values` is one object. Each
+requested name is a key, in request order, and a repeated name appears
+once. A name in the frozen map is its string. A missing name is null. The
+reply is that one object, not one message per name. An empty array, or a
+call that is not one array of strings, replies `"Error" "name"`. `"Env"`
+MUST NOT re-read the operating system.
 
 ## Why this design
 

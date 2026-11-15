@@ -534,8 +534,8 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process"));
-    assert!(source.contains("\"Env\" \"HOST_NAME\""));
-    assert!(source.contains("\"Env\" \"PORT\""));
+    assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
+    assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
     assert!(source.contains("127.0.0.1"));
     assert!(source.contains("3000"));
     assert!(!source.contains("\"Exit\""));
@@ -555,6 +555,7 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
         .expect("init");
     let init_body = format!("{:?}", init.body);
     assert!(init_body.contains("HOST_NAME"), "{init_body}");
+    assert!(init_body.contains("PORT"), "{init_body}");
     assert!(!init_body.contains("Listen"), "{init_body}");
     assert!(start.handlers.iter().any(|handler| {
         let body = format!("{:?}", handler.body);
@@ -644,8 +645,8 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     assert!(source.contains("import \"kith:http\" Server"));
     assert!(source.contains("import \"kith:process\" Process"));
     assert!(!source.contains("component Http"));
-    assert!(source.contains("\"Env\" \"HOST_NAME\""));
-    assert!(source.contains("\"Env\" \"PORT\""));
+    assert!(source.contains("\"Env\" [\"HOST_NAME\" \"PORT\"]"));
+    assert_eq!(source.matches("send to proc \"Env\"").count(), 1);
     assert!(source.contains("127.0.0.1"));
     assert!(source.contains("3000"));
     assert!(!source.contains("\"Exit\""));
@@ -1128,7 +1129,7 @@ fn process_freezes_argv_env_and_exit() {
           proc: Process;
           start {
             on down "Argv" { send to proc "Argv"; }
-            on down "Env" name:string { send to proc "Env" name; }
+            on down "Env" names:any { send to proc "Env" names; }
             on down "Stop" { send to proc "Exit" 4; }
             on up message:any { got -> message; }
           }
@@ -1155,13 +1156,68 @@ fn process_freezes_argv_env_and_exit() {
             [doc::array([doc::string("one"), doc::string("two")])]
         )
     );
-    send(&mut world, "Process", down("Env", [doc::string("ONLY")]));
+    send(
+        &mut world,
+        "Process",
+        down("Env", [doc::array([doc::string("ONLY")])]),
+    );
     assert_eq!(
         got(&world),
-        down("Env", [doc::string("ONLY"), doc::string("yes")])
+        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
     );
-    send(&mut world, "Process", down("Env", [doc::string("PATH")]));
-    assert_eq!(got(&world), down("Missing", [doc::string("PATH")]));
+    send(
+        &mut world,
+        "Process",
+        down("Env", [doc::array([doc::string("PATH")])]),
+    );
+    assert_eq!(
+        got(&world),
+        down("Env", [doc::object([("PATH", doc::null())])])
+    );
+    send(
+        &mut world,
+        "Process",
+        down(
+            "Env",
+            [doc::array([doc::string("ONLY"), doc::string("PATH")])],
+        ),
+    );
+    assert_eq!(
+        got(&world),
+        down(
+            "Env",
+            [doc::object([
+                ("ONLY", doc::string("yes")),
+                ("PATH", doc::null()),
+            ])]
+        )
+    );
+    send(
+        &mut world,
+        "Process",
+        down(
+            "Env",
+            [doc::array([doc::string("ONLY"), doc::string("ONLY")])],
+        ),
+    );
+    assert_eq!(
+        got(&world),
+        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
+    );
+    send(&mut world, "Process", down("Env", [doc::string("ONLY")]));
+    assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    send(
+        &mut world,
+        "Process",
+        down("Env", [doc::array(Vec::<Doc>::new())]),
+    );
+    assert_eq!(got(&world), down("Error", [doc::string("name")]));
+    send(
+        &mut world,
+        "Process",
+        down("Env", [doc::array([doc::number(1.0)])]),
+    );
+    assert_eq!(got(&world), down("Error", [doc::string("name")]));
     let snap = world.snapshot().unwrap();
     let mut restored = World::restore(program, &snap).unwrap();
     send(&mut restored, "Process", doc::string("Argv"));
@@ -1172,10 +1228,14 @@ fn process_freezes_argv_env_and_exit() {
             [doc::array([doc::string("one"), doc::string("two")])]
         )
     );
-    send(&mut restored, "Process", down("Env", [doc::string("ONLY")]));
+    send(
+        &mut restored,
+        "Process",
+        down("Env", [doc::array([doc::string("ONLY")])]),
+    );
     assert_eq!(
         got(&restored),
-        down("Env", [doc::string("ONLY"), doc::string("yes")])
+        down("Env", [doc::object([("ONLY", doc::string("yes"))])])
     );
     let before = got(&world);
     send(&mut world, "Process", down("Exit", [doc::number(4.0)]));
