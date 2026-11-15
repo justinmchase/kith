@@ -11,7 +11,7 @@ spec_ref: .agents/specifications/components.spec.md#declaration; .agents/specifi
 Preconditions:
 
 - `examples/ping.kith` declares Child `on down` Ping and Ping `on up` Pong.
-- `examples/http.kith` Client is `on down` Go in Idle and `on up` Response
+- `examples/health.kith` Client is `on down` Go in Idle and `on up` Response
   in Sending.
 
 Expected behavior:

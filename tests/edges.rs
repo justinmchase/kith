@@ -225,10 +225,6 @@ fn serve(response: &'static [u8]) -> u16 {
 #[test]
 // req:edges-002
 fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
-    let source = std::fs::read_to_string("examples/http.kith").unwrap();
-    assert!(source.contains("component Http"));
-    assert!(!source.contains("kith:http"));
-
     let port = serve(
         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\nX-Test: yes\r\n\r\nok",
     );
@@ -475,21 +471,63 @@ fn server_listens_on_a_host_and_pushes_text() {
     send(&mut world, "Server", doc::string("Stop"));
 }
 
+fn pattern_text(pattern: &serde_json::Value) -> String {
+    pattern.to_string()
+}
+
 #[test]
 // req:edges-009
-fn hello_world_serves_plain_text_on_port_3000() {
+fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     let source = std::fs::read_to_string("examples/hello-world.kith").unwrap();
     assert!(source.contains("import \"kith:http\" Server"));
-    assert!(source.contains("\"Listen\" \"127.0.0.1\" 3000"));
-    assert!(source.contains("Server running at http://127.0.0.1:3000/"));
+    assert!(source.contains("import \"kith:process\" Process"));
+    assert!(source.contains("\"Env\" \"PORT\""));
+    assert!(source.contains("\"Listen\" \"127.0.0.1\""));
+    assert!(!source.contains("3000"));
+    assert!(source.contains("Server running at http://127.0.0.1:{port}/"));
     assert!(source.contains("Hello, World!\\n"));
-    let mock = std::fs::read_to_string("examples/http.kith").unwrap();
-    assert!(mock.contains("component Http"));
-    assert!(!mock.contains("kith:http"));
+    let program = kith::parse::parse_source(&source).expect("parse hello-world");
+    let hello = program.component("Hello").expect("Hello");
+    let start = hello
+        .states
+        .iter()
+        .find(|state| state.start)
+        .expect("start");
+    assert!(start
+        .handlers
+        .iter()
+        .all(|handler| !pattern_text(&handler.pattern).contains("Request")));
+    let listening = hello
+        .states
+        .iter()
+        .find(|state| state.name == "Listening")
+        .expect("Listening");
+    assert!(listening.handlers.iter().any(|handler| {
+        pattern_text(&handler.pattern).contains("Request") && handler.route == ["up"]
+    }));
+    let entered = start.handlers.iter().any(|handler| {
+        pattern_text(&handler.pattern).contains("Listening")
+            && matches!(
+                handler.body.last(),
+                Some(kith::ast::Statement::Goto { state }) if state == "Listening"
+            )
+    });
+    assert!(entered, "Listening handler must goto Listening");
+
+    let missing = Command::new(env!("CARGO_BIN_EXE_kith"))
+        .arg("run")
+        .arg("examples/hello-world.kith")
+        .env_remove("PORT")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/hello-world.kith")
+        .env("PORT", "3000")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -543,6 +581,83 @@ fn hello_world_serves_plain_text_on_port_3000() {
         "{response}"
     );
     assert!(response.ends_with("Hello, World!\n"), "{response}");
+}
+
+#[test]
+// req:edges-010
+fn http_example_imports_kith_http_and_serves_on_port() {
+    let source = std::fs::read_to_string("examples/http.kith").unwrap();
+    assert!(source.contains("import \"kith:http\" Server"));
+    assert!(source.contains("import \"kith:process\" Process"));
+    assert!(!source.contains("component Http"));
+    assert!(source.contains("\"Env\" \"PORT\""));
+    assert!(source.contains("\"Listen\" \"127.0.0.1\""));
+    let program = kith::parse::parse_source(&source).expect("parse http.kith");
+    assert!(program.component("Http").is_none());
+    let service = program.component("Service").expect("Service");
+    let start = service
+        .states
+        .iter()
+        .find(|state| state.start)
+        .expect("start");
+    assert!(start
+        .handlers
+        .iter()
+        .all(|handler| !pattern_text(&handler.pattern).contains("Request")));
+    let listening = service
+        .states
+        .iter()
+        .find(|state| state.name == "Listening")
+        .expect("Listening");
+    assert!(listening.handlers.iter().any(|handler| {
+        pattern_text(&handler.pattern).contains("Request") && handler.route == ["up"]
+    }));
+    assert!(start.handlers.iter().any(|handler| {
+        pattern_text(&handler.pattern).contains("Listening")
+            && matches!(
+                handler.body.last(),
+                Some(kith::ast::Statement::Goto { state }) if state == "Listening"
+            )
+    }));
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
+        .arg("run")
+        .arg("examples/http.kith")
+        .env("PORT", port.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut sock = None;
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        if let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")) {
+            sock = Some(stream);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mut sock = sock.expect("http example did not listen");
+    std::thread::sleep(Duration::from_millis(100));
+    sock.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let mut buf = Vec::new();
+    let _ = sock.read_to_end(&mut buf);
+    let _ = child.kill();
+    let _ = child.wait();
+    let response = String::from_utf8_lossy(&buf).to_string();
+    assert!(response.contains("HTTP/1.1 200"), "{response}");
+    assert!(
+        response
+            .to_ascii_lowercase()
+            .contains("content-type: text/plain"),
+        "{response}"
+    );
+    assert!(response.ends_with("ok\n"), "{response}");
 }
 
 const STDIO: &str = r#"

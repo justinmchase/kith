@@ -175,7 +175,7 @@ fn check_order_workflow() {
 #[test]
 // req:runtime-002 req:runtime-003
 fn check_http_health() {
-    let http = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/http.kith");
+    let http = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/health.kith");
     let checked = run(&["check", http.to_str().unwrap()]);
     assert!(checked.status.success(), "{}", stderr(&checked));
 }

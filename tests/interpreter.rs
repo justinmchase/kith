@@ -1040,7 +1040,7 @@ fn order_workflow_rejects_an_invalid_order() {
 }
 
 fn http_program() -> kith::ast::Program {
-    kith::parse::parse_source(include_str!("../examples/http.kith")).expect("parse http.kith")
+    kith::parse::parse_source(include_str!("../examples/health.kith")).expect("parse http.kith")
 }
 
 fn settle_http_request(world: &mut World) {

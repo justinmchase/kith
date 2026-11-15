@@ -9,8 +9,8 @@ Byte values and the pull protocol are defined in
 [built-ins](./builtins.spec.md#stream). `send after` stays in
 [timers](./timers.spec.md).
 
-`examples/http.kith` is unchanged. Its `component Http` is the user mock
-and MUST NOT import `kith:http`.
+`examples/http.kith` imports `kith:http` and runs as a server. It does not
+declare `component Http`. The user mock is `examples/health.kith`.
 
 ## Conventions
 
@@ -100,14 +100,27 @@ bytes`, `"Push" id text`, and `"BodyEnd" id`. `"Push" id text` appends the
 UTF-8 bytes of `text`. `"BodyEnd" id` replies `"Responded" id`. `"Stop"`
 replies `"Stopped"`. Request ids are `r1`, `r2`, … in accept order.
 
+## Http example
+
+`examples/http.kith` imports `Server` from `kith:http` and `Process` from
+`kith:process`. It does not declare `component Http`. On init it sends
+`"Env" "PORT"`. `"Env" "PORT" value` listens with `"Listen" "127.0.0.1"`
+and `(int value)`. The host stays `127.0.0.1`. `"Missing" "PORT"` sends
+`"Exit" 1`. `"Listening"` `goto`s `Listening` before any request is handled.
+Every `"Request"` in that state is answered with status 200, header
+`Content-Type` `text/plain`, `"Push"` of the text `ok\n`, and `"BodyEnd"`.
+
 ## Hello world
 
 `examples/hello-world.kith` is the Node.js synopsis server. It imports
-`Server` from `kith:http`. On init it sends `"Listen" "127.0.0.1" 3000`.
-On `"Listening"` it prints `Server running at http://127.0.0.1:3000/`.
-Every `"Request"` gets `"Status"` 200 with header `Content-Type` `text/plain`,
-`"Push"` of the text `Hello, World!\n`, and `"BodyEnd"`. `examples/http.kith`
-stays the user mock and MUST NOT import `kith:http`.
+`Server` from `kith:http` and `Process` from `kith:process`. The host is
+`127.0.0.1`. The port is the number in the environment variable `PORT`,
+read with `"Env" "PORT"` and passed as `(int value)`. It MUST NOT listen
+on a literal port. `"Missing" "PORT"` sends `"Exit" 1`. On `"Listening"`
+it prints `Server running at http://127.0.0.1:{port}/` and `goto`s
+`Listening`. Request handling is that state's `on up "Request"`. Every
+request gets `"Status"` 200 with header `Content-Type` `text/plain`,
+`"Push"` of the text `Hello, World!\n`, and `"BodyEnd"`.
 
 ## Stdio
 
@@ -203,8 +216,10 @@ with that status after the turn and MUST NOT reply.
 
 ## Why this design
 
-- **The import is the driver.** A user-written `Http` stays the mock. The
-  built-in is what a program gets when it imports `kith:http`.
+- **The import is the driver.** A user-written `Http`, including the mock
+  in `examples/health.kith`, stays a user component. The built-in is what
+  a program gets when it imports `kith:http`, which is what
+  `examples/http.kith` and `examples/hello-world.kith` do.
 - **The stream is the body.** Net, HTTP, stdio, and files reuse `Pull`,
   `Chunk`, and `End` so a second byte type is not required.
 - **The dispatcher does not block.** A connect or an accept finishes on a

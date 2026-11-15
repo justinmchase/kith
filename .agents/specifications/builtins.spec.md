@@ -211,7 +211,7 @@ instant. Per-instance driver state for `Pipe` is part of the same snapshot.
   in scope would hide a source of variation, or a second runtime, in every
   handler. The import is the edge.
 - **The driver is a child.** `Pipe` and `Clock` use the same `send to` /
-  later `up` shape as the `Http` mock in `examples/http.kith`. That mock
+  later `up` shape as the `Http` mock in `examples/health.kith`. That mock
   stays a user component. This chapter does not bind it to a socket.
 - **The dispatcher clock stays virtual.** `send after` is still seconds from
   zero. The wall is a message a checker can script. Connecting them is

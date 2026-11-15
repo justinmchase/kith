@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/runtime.spec.md#host-io; .agents/specifications
 
 Preconditions:
 
-- `examples/http.kith` is loaded. The scene fills `http = Http()` under
+- `examples/health.kith` is loaded. The scene fills `http = Http()` under
   Client under HealthCheck.
 
 Expected behavior:

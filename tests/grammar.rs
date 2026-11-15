@@ -266,7 +266,7 @@ fn order_source_parses_tasks_picks_and_map() {
 #[test]
 // req:grammar-001 req:runtime-002 req:components-012 req:runtime-003 req:components-014 req:components-015 req:components-016 req:components-017
 fn http_source_parses_client_and_mock() {
-    let program = parse_source(include_str!("../examples/http.kith")).expect("parse http.kith");
+    let program = parse_source(include_str!("../examples/health.kith")).expect("parse http.kith");
     let client = program.component("Client").expect("Client");
     assert_eq!(client.states[0].name, "Idle");
     assert!(client.states[0].named);

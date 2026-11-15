@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/runtime.spec.md#host-io; .agents/specifications
 
 Preconditions:
 
-- `examples/http.kith` HealthCheck owns Client and fields `s1`, `s2`,
+- `examples/health.kith` HealthCheck owns Client and fields `s1`, `s2`,
   `s3` typed `number?`.
 
 Expected behavior:

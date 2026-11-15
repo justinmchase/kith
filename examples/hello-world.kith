@@ -1,18 +1,30 @@
 import "kith:http" Server;
+import "kith:process" Process;
 
 export Hello;
 export Main;
 
 component Hello {
   server: Server;
+  proc: Process;
 
   start {
     on init {
-      send to server "Listen" "127.0.0.1" 3000;
+      send to proc "Env" "PORT";
+    }
+    on up "Env" name:"PORT" value:string {
+      send to server "Listen" "127.0.0.1" (int value);
+    }
+    on up "Missing" name:"PORT" {
+      send to proc "Exit" 1;
     }
     on up "Listening" port:number {
-      (print "Server running at http://127.0.0.1:3000/");
+      (print "Server running at http://127.0.0.1:{port}/");
+      goto Listening;
     }
+  }
+
+  state Listening {
     on up "Request" id:string method:string path:string headers:any {
       send to server "Status" id 200 { "Content-Type": "text/plain" };
       send to server "Push" id "Hello, World!\n";
@@ -24,5 +36,6 @@ component Hello {
 export scene Main {
   Hello() {
     server = Server();
+    proc = Process();
   }
 }

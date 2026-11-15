@@ -11,7 +11,7 @@ spec_ref: .agents/specifications/components.spec.md#identity-and-lifetime; .agen
 Preconditions:
 
 - A scene-constructed component instance has been created. HealthCheck in
-  `examples/http.kith` declares `on init { send self "Tick"; }`.
+  `examples/health.kith` declares `on init { send self "Tick"; }`.
   Http and Client do not declare `on init`.
 
 Expected behavior:

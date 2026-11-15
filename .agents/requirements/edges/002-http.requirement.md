@@ -11,8 +11,6 @@ spec_ref: .agents/specifications/edges.spec.md#http
 Preconditions:
 
 - A program imports `Http` and `Server` from `kith:http`.
-- `examples/http.kith` still defines its own `component Http` and does not
-  import `kith:http`.
 
 Expected behavior:
 

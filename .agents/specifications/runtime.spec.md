@@ -238,10 +238,10 @@ replaces. Same-turn stream writes are not Uffda `HostCallable` returns
 that wait; they return `undefined` now. The real driver for a kind this
 runtime provides is the built-in import in
 [built-ins](./builtins.spec.md#registration). `Pipe` and `Clock` are those
-drivers. The scene-filled `Http` in `examples/http.kith` remains the user
+drivers. The scene-filled `Http` in `examples/health.kith` remains the user
 mock and still replies with one `"Response"`. `kith:http` is not this slice.
 
-The normative program is `examples/http.kith`: a HealthCheck that probes
+The normative program is `examples/health.kith`: a HealthCheck that probes
 through Checking, Waiting, and Validating, then waits 5 seconds before the
 next Tick. It `(writeLine stdout …)`s `"Healthy"` when the last three
 statuses are 200, `"Unhealthy"` when none of them are 200, and
@@ -348,5 +348,5 @@ two named states; a component MUST NOT declare three `start` states.
   gap, not an actor gap; track it upstream if Kith messages need it.
 - **Host I/O adapters.** A built-in module binds its driver by import.
   `kith:http` is that driver. A user-declared `Http`, including the mock in
-  `examples/http.kith`, stays a user component and does not import it.
+  `examples/health.kith`, stays a user component and does not import it.
   Device payloads are `Bytes`. Bodies use the stream messages.
