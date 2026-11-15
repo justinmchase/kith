@@ -570,6 +570,9 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     assert!(source.contains("Hello, World!\\n"));
     assert!(source.contains("on up \"Listening\" host:string port:number"));
     assert!(!source.contains("field "));
+    assert!(source.contains(
+        "send to server \"Listen\"\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
+    ));
     let program = kith::parse::parse_source(&source).expect("parse hello-world");
     let hello = program.component("Hello").expect("Hello");
     let start = hello
@@ -691,6 +694,9 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     assert!(!source.contains("\"Exit\""));
     assert!(source.contains("on up \"Listening\" host:string port:number"));
     assert!(!source.contains("field "));
+    assert!(source.contains(
+        "send to server \"Listen\"\n        (coalesce HOST_NAME \"127.0.0.1\")\n        (int (coalesce PORT \"3000\"));"
+    ));
     let program = kith::parse::parse_source(&source).expect("parse http.kith");
     assert!(program.component("Http").is_none());
     let service = program.component("Service").expect("Service");

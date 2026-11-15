@@ -13,7 +13,9 @@ component Service {
       send to proc "Env" ["HOST_NAME" "PORT"];
     }
     on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue } {
-      send to server "Listen" (coalesce HOST_NAME "127.0.0.1") (int (coalesce PORT "3000"));
+      send to server "Listen"
+        (coalesce HOST_NAME "127.0.0.1")
+        (int (coalesce PORT "3000"));
     }
     on up "Listening" host:string port:number {
       goto Listening;

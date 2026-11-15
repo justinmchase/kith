@@ -22,7 +22,8 @@ Expected behavior:
 - On init the server MUST send one `"Env"` whose names are `HOST_NAME`
   and `PORT`. It MUST NOT `"Listen"` in that turn.
 - The `"Env" values` reply MUST load both names before `"Listen"`. A null
-  name MUST NOT `"Exit"`.
+  name MUST NOT `"Exit"`. The `"Listen"` host and port arguments MUST be
+  written on their own lines.
 - It MUST NOT store the host or the port in a field. On
   `"Listening" host port` it MUST print
   `Server running at http://{host}:{port}/` from that message and

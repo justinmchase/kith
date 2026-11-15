@@ -21,6 +21,10 @@ Expected behavior:
   `send self "Check" s1 s2 s3` MUST send `["Check", s1, s2, s3]`.
   `on self "Check" a:200 b:200 c:200` MUST match only when the three
   captures are `200`.
+- A newline between arguments MUST NOT end the statement.
+  `send to child "Listen"` with `(coalesce "127.0.0.1")` and
+  `(int (coalesce "3000"))` on following lines MUST send
+  `["Listen", "127.0.0.1", 3000]`.
 - An object argument MUST remain one value. `send up { kind: "Done" status body }`
   MUST send an object. `on v:{ kind: "Done" status body }` MUST bind `v`
   to that object. `on { kind: "GET" url: any }` MUST match an object

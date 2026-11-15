@@ -111,8 +111,9 @@ On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is
 matched by `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }`
 with no name on the object. A null `HOST_NAME` is `127.0.0.1`. A null
 `PORT` is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and
-it MUST NOT exit when either name is null. It MUST NOT store the host or
-port in a field. `"Listening" host port` `goto`s `Listening` before any
+it MUST NOT exit when either name is null. The `"Listen"` host and port
+arguments are on their own lines. It MUST NOT store the host or port in
+a field. `"Listening" host port` `goto`s `Listening` before any
 request is handled. Every `"Request"` in that state is answered with
 status 200, header `Content-Type` `text/plain`, `"Push"` of the text
 `ok\n`, and `"BodyEnd"`.
@@ -126,7 +127,8 @@ The reply is matched by
 `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }` with no
 name on the object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is
 `3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
-NOT exit when either name is null. It MUST NOT store the host or port in
+NOT exit when either name is null. The `"Listen"` host and port
+arguments are on their own lines. It MUST NOT store the host or port in
 a field. On `"Listening" host port` it prints
 `Server running at http://{host}:{port}/` from that message and `goto`s
 `Listening`. Request handling is that state's `on up "Request"`. Every request gets

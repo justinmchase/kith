@@ -23,7 +23,8 @@ Expected behavior:
 - On init it MUST send one `"Env"` whose names are `HOST_NAME` and
   `PORT`. It MUST NOT `"Listen"` in that turn.
 - The `"Env" values` reply MUST load both names before `"Listen"`. A null
-  name MUST NOT `"Exit"`.
+  name MUST NOT `"Exit"`. The `"Listen"` host and port arguments MUST be
+  written on their own lines.
 - It MUST NOT store the host or the port in a field.
   `"Listening" host port` MUST `goto Listening` before a request is
   handled.

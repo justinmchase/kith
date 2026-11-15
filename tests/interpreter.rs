@@ -1565,6 +1565,47 @@ export scene Main { Box(); }
     let mut world = World::start(object).expect("start object");
     world.run_until_idle().unwrap();
     assert!(world.prints().iter().any(|value| value == &json!(200.0)));
+
+    let broken = r#"
+export Child;
+export Parent;
+export Main;
+component Child {
+  start {
+    on down "Listen" host:string port:number {
+      (writeLine stdout host);
+      (writeLine stdout port);
+    }
+  }
+}
+component Parent {
+  child: Child;
+  start {
+    on init {
+      send to child "Listen"
+        (coalesce "127.0.0.1")
+        (int (coalesce "3000"));
+    }
+  }
+}
+export scene Main {
+  Parent() { child = Child(); }
+}
+"#;
+    let program = kith::parse::parse_source(broken).expect("parse multiline listen");
+    let parent = program.component("Parent").expect("Parent");
+    let init = parent.states[0].handlers.iter().next().expect("init");
+    match &init.body[0] {
+        kith::ast::Statement::SendTo { message, .. } => {
+            assert_eq!(message["kind"], "sequence");
+            assert_eq!(message["items"].as_array().expect("items").len(), 3);
+        }
+        other => panic!("expected send, got {other:?}"),
+    }
+    let mut world = World::start(program).expect("start multiline listen");
+    world.run_until_idle().unwrap();
+    assert_eq!(world.prints()[0], json!("127.0.0.1"));
+    assert_eq!(world.prints()[1], json!(3000.0));
 }
 
 #[test]

@@ -184,6 +184,9 @@ export scene Main {
   `["Check", s1, s2, s3]`. `send self "Tick"` sends `"Tick"`. An object
   is one value: `send up { kind: "Done" status body }` still sends an
   object. `complete` takes the same value list.
+- A newline between those values does not end the statement.
+  `send to name "Listen"` with the host and port arguments on following
+  lines is one send of three values.
 - `send after Delay Route V…` is the same send, delivered later. `Delay` is
   seconds. See [timers](./timers.spec.md). Self is written
   `send after 5 self "Tick"`. Order's `MockShip` uses
