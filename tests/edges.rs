@@ -80,6 +80,13 @@ fn until_got(world: &mut World, expected: &Doc) {
     panic!("timed out waiting, last message did not match");
 }
 
+fn free_port() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    port
+}
+
 fn down(name: &str, args: impl IntoIterator<Item = Doc>) -> Doc {
     let mut items = vec![doc::string(name)];
     items.extend(args);
@@ -524,27 +531,33 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
         .unwrap();
     assert_eq!(missing.status.code(), Some(1));
 
+    let port = free_port();
+    let ready = format!("Server running at http://127.0.0.1:{port}/");
     let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/hello-world.kith")
-        .env("PORT", "3000")
+        .env("PORT", port.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     let mut stderr = child.stderr.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
+    let needle = ready.clone();
     std::thread::spawn(move || {
         let mut buf = Vec::new();
         let mut tmp = [0u8; 512];
         loop {
             match stderr.read(&mut tmp) {
-                Ok(0) | Err(_) => break,
+                Ok(0) | Err(_) => {
+                    let _ = tx.send(buf);
+                    break;
+                }
                 Ok(count) => {
                     buf.extend_from_slice(&tmp[..count]);
                     if buf
-                        .windows(b"Server running at http://127.0.0.1:3000/".len())
-                        .any(|window| window == b"Server running at http://127.0.0.1:3000/")
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes())
                     {
                         let _ = tx.send(buf);
                         break;
@@ -554,15 +567,12 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
         }
     });
     let log = rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(Duration::from_secs(20))
         .expect("hello-world did not log that it is listening");
     let log = String::from_utf8_lossy(&log);
-    assert!(
-        log.contains("Server running at http://127.0.0.1:3000/"),
-        "{log}"
-    );
+    assert!(log.contains(&ready), "{log}");
 
-    let mut sock = TcpStream::connect("127.0.0.1:3000").unwrap();
+    let mut sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
     sock.write_all(
         b"POST /hi HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
     )
@@ -620,27 +630,35 @@ fn http_example_imports_kith_http_and_serves_on_port() {
             )
     }));
 
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let port = free_port();
     let mut child = Command::new(env!("CARGO_BIN_EXE_kith"))
         .arg("run")
         .arg("examples/http.kith")
         .env("PORT", port.to_string())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let stderr_text = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    });
     let mut sock = None;
     let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(5) {
+    while started.elapsed() < Duration::from_secs(20) {
         if let Ok(stream) = TcpStream::connect(format!("127.0.0.1:{port}")) {
             sock = Some(stream);
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let mut sock = sock.expect("http example did not listen");
+    let mut sock = sock.unwrap_or_else(|| {
+        let _ = child.kill();
+        let note = stderr_text.join().unwrap_or_default();
+        panic!("http example did not listen\n{note}");
+    });
     std::thread::sleep(Duration::from_millis(100));
     sock.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .unwrap();
