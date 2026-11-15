@@ -1757,6 +1757,7 @@ impl World {
                     self.hub.listening += 1;
                     outcome.replies.push(doc::array([
                         doc::string("Listening"),
+                        doc::string(&listen.host),
                         doc::number(port as f64),
                     ]));
                 }

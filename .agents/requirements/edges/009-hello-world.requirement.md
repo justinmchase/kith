@@ -23,9 +23,10 @@ Expected behavior:
   and `PORT`. It MUST NOT `"Listen"` in that turn.
 - The `"Env" values` reply MUST load both names before `"Listen"`. A null
   name MUST NOT `"Exit"`.
-- On `"Listening"` it MUST print
-  `Server running at http://{host}:{port}/` and `goto Listening`
-  before it handles a request.
+- It MUST NOT store the host or the port in a field. On
+  `"Listening" host port` it MUST print
+  `Server running at http://{host}:{port}/` from that message and
+  `goto Listening` before it handles a request.
 - Every `"Request"` in `Listening` MUST be answered with status 200,
   header `Content-Type` `text/plain`, and body `Hello, World!\n`.
 

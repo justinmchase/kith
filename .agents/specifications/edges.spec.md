@@ -61,12 +61,13 @@ connect, both directions are the stream protocol.
 | `"Push" bytes` | `"Pushed"` or `"Error" reason` |
 | `"Close"` | `"Closed"` |
 
-`Listener` is multiplexed by id. `"Listening" port` reports the bound port,
-including when the requested port is `0`.
+`Listener` is multiplexed by id. `"Listening" host port` reports the host
+and bound port of that listen, including when the requested port is `0`.
+A second `"Listen"` replies with that listen's pair.
 
 | Down | Later up |
 | --- | --- |
-| `"Listen" host port` | `"Listening" port` or `"Error" reason` |
+| `"Listen" host port` | `"Listening" host port` or `"Error" reason` |
 | `"Pull" id` | `"Chunk" id bytes`, `"End" id`, or `"Error" id reason` |
 | `"Push" id bytes` | `"Pushed" id` or `"Error" id reason` |
 | `"Close" id` | `"Closed" id` |
@@ -92,9 +93,11 @@ string to string, or null. `"Pull"` then yields `Chunk` of `Bytes` and
 it is not `"Close"`.
 
 `Server` is multiplexed by id. `"Listen" port` binds `127.0.0.1` and replies
-`"Listening" port` with the bound port. `"Listen" host port` binds that host
-and replies the same way. An accepted request is `"Request" id method path
-headers`. `path` is the raw path and query. A GET has no body: the first
+`"Listening" host port` with that host and the bound port. `"Listen" host
+port` binds that host and replies `"Listening" host port` for that listen.
+A second `"Listen"` replies with that listen's host and port. An accepted
+request is `"Request" id method path headers`. `path` is the raw path and
+query. A GET has no body: the first
 `"Pull" id` is `"End" id`. `"Status" id status headers` allows `"Push" id
 bytes`, `"Push" id text`, and `"BodyEnd" id`. `"Push" id text` appends the
 UTF-8 bytes of `text`. `"BodyEnd" id` replies `"Responded" id`. `"Stop"`
@@ -108,10 +111,11 @@ On init it sends one `"Env"` for `["HOST_NAME", "PORT"]`. The reply is
 matched by `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }`
 with no name on the object. A null `HOST_NAME` is `127.0.0.1`. A null
 `PORT` is `3000`. It MUST NOT `"Listen"` until that reply is loaded, and
-it MUST NOT exit when either name is null. `"Listening"` `goto`s
-`Listening` before any request is handled. Every `"Request"` in that state
-is answered with status 200, header `Content-Type` `text/plain`, `"Push"`
-of the text `ok\n`, and `"BodyEnd"`.
+it MUST NOT exit when either name is null. It MUST NOT store the host or
+port in a field. `"Listening" host port` `goto`s `Listening` before any
+request is handled. Every `"Request"` in that state is answered with
+status 200, header `Content-Type` `text/plain`, `"Push"` of the text
+`ok\n`, and `"BodyEnd"`.
 
 ## Hello world
 
@@ -122,9 +126,10 @@ The reply is matched by
 `on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue }` with no
 name on the object. A null `HOST_NAME` is `127.0.0.1`. A null `PORT` is
 `3000`. It MUST NOT `"Listen"` until that reply is loaded, and it MUST
-NOT exit when either name is null. On `"Listening"` it prints
-`Server running at http://{host}:{port}/` and `goto`s `Listening`.
-Request handling is that state's `on up "Request"`. Every request gets
+NOT exit when either name is null. It MUST NOT store the host or port in
+a field. On `"Listening" host port` it prints
+`Server running at http://{host}:{port}/` from that message and `goto`s
+`Listening`. Request handling is that state's `on up "Request"`. Every request gets
 `"Status"` 200 with header `Content-Type` `text/plain`, `"Push"` of the
 text `Hello, World!\n`, and `"BodyEnd"`.
 

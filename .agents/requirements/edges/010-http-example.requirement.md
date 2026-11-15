@@ -24,7 +24,9 @@ Expected behavior:
   `PORT`. It MUST NOT `"Listen"` in that turn.
 - The `"Env" values` reply MUST load both names before `"Listen"`. A null
   name MUST NOT `"Exit"`.
-- `"Listening"` MUST `goto Listening` before a request is handled.
+- It MUST NOT store the host or the port in a field.
+  `"Listening" host port` MUST `goto Listening` before a request is
+  handled.
 - Every `"Request"` in that state MUST be answered with status 200,
   header `Content-Type` `text/plain`, and body `ok\n`.
 

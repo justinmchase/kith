@@ -133,6 +133,14 @@ fn read_http(child: &mut std::process::Child, addr: &str, request: &str) -> Stri
     String::from_utf8_lossy(&buf).into_owned()
 }
 
+fn listening_pair(message: &Doc) -> (String, u16) {
+    let items = doc::items(message).unwrap();
+    assert_eq!(doc::as_str(&items[0]).as_deref(), Some("Listening"));
+    let host = doc::as_str(&items[1]).unwrap();
+    let port = doc::as_u64(&items[2]).unwrap() as u16;
+    (host, port)
+}
+
 fn down(name: &str, args: impl IntoIterator<Item = Doc>) -> Doc {
     let mut items = vec![doc::string(name)];
     items.extend(args);
@@ -224,13 +232,20 @@ fn net_streams_tcp_bytes_and_keeps_a_scripted_pull_in_flight() {
         "Listener",
         down("Listen", [doc::string("127.0.0.1"), doc::number(0.0)]),
     );
-    let listening = got(&world);
-    let items = doc::items(&listening).unwrap();
-    assert_eq!(doc::as_str(&items[0]).as_deref(), Some("Listening"));
-    let port = doc::as_u64(&items[1]).unwrap();
+    let first = listening_pair(&got(&world));
+    assert_eq!(first.0, "127.0.0.1");
+    send(
+        &mut world,
+        "Listener",
+        down("Listen", [doc::string("127.0.0.2"), doc::number(0.0)]),
+    );
+    let second = listening_pair(&got(&world));
+    assert_eq!(second.0, "127.0.0.2");
+    assert_ne!(first.1, second.1);
+    let port = second.1;
     let (release, hold) = std::sync::mpsc::channel();
     let client = std::thread::spawn(move || {
-        let sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        let sock = TcpStream::connect(format!("127.0.0.2:{port}")).unwrap();
         let _ = hold.recv();
         drop(sock);
     });
@@ -406,7 +421,9 @@ fn http_speaks_http11_without_redirects_and_uses_tls_for_https() {
 
     let mut world = start(HTTP);
     send(&mut world, "Server", down("Listen", [doc::number(0.0)]));
-    let port = doc::as_u64(&doc::items(&got(&world)).unwrap()[1]).unwrap();
+    let listened = listening_pair(&got(&world));
+    assert_eq!(listened.0, "127.0.0.1");
+    let port = listened.1;
     let client = std::thread::spawn(move || {
         let mut sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
         sock.write_all(b"GET /hi?x=1 HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
@@ -465,11 +482,19 @@ fn server_listens_on_a_host_and_pushes_text() {
         "Server",
         down("Listen", [doc::string("127.0.0.1"), doc::number(0.0)]),
     );
-    let listening = doc::items(&got(&world)).unwrap();
-    assert_eq!(doc::as_str(&listening[0]).as_deref(), Some("Listening"));
-    let port = doc::as_u64(&listening[1]).unwrap();
+    let first = listening_pair(&got(&world));
+    assert_eq!(first.0, "127.0.0.1");
+    send(
+        &mut world,
+        "Server",
+        down("Listen", [doc::string("127.0.0.2"), doc::number(0.0)]),
+    );
+    let second = listening_pair(&got(&world));
+    assert_eq!(second.0, "127.0.0.2");
+    assert_ne!(first.1, second.1);
+    let port = second.1;
     let client = std::thread::spawn(move || {
-        let mut sock = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        let mut sock = TcpStream::connect(format!("127.0.0.2:{port}")).unwrap();
         sock.write_all(b"GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n")
             .unwrap();
         sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
@@ -543,6 +568,8 @@ fn hello_world_serves_plain_text_on_the_port_from_the_environment() {
     assert!(!source.contains("\"Exit\""));
     assert!(source.contains("Server running at http://{host}:{port}/"));
     assert!(source.contains("Hello, World!\\n"));
+    assert!(source.contains("on up \"Listening\" host:string port:number"));
+    assert!(!source.contains("field "));
     let program = kith::parse::parse_source(&source).expect("parse hello-world");
     let hello = program.component("Hello").expect("Hello");
     let start = hello
@@ -662,6 +689,8 @@ fn http_example_imports_kith_http_and_serves_on_port() {
     assert!(source.contains("127.0.0.1"));
     assert!(source.contains("3000"));
     assert!(!source.contains("\"Exit\""));
+    assert!(source.contains("on up \"Listening\" host:string port:number"));
+    assert!(!source.contains("field "));
     let program = kith::parse::parse_source(&source).expect("parse http.kith");
     assert!(program.component("Http").is_none());
     let service = program.component("Service").expect("Service");

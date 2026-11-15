@@ -5,7 +5,6 @@ export Hello;
 export Main;
 
 component Hello {
-  field host: string?;
   server: Server;
   proc: Process;
 
@@ -14,10 +13,9 @@ component Hello {
       send to proc "Env" ["HOST_NAME" "PORT"];
     }
     on up "Env" { HOST_NAME: OptionalValue PORT: OptionalValue } {
-      host -> (coalesce HOST_NAME "127.0.0.1");
-      send to server "Listen" host (int (coalesce PORT "3000"));
+      send to server "Listen" (coalesce HOST_NAME "127.0.0.1") (int (coalesce PORT "3000"));
     }
-    on up "Listening" port:number {
+    on up "Listening" host:string port:number {
       (print "Server running at http://{host}:{port}/");
       goto Listening;
     }
