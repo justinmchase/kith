@@ -80,7 +80,7 @@ component Other {
 }
 
 component Parent {
-  Child child;
+  child: Child;
 
   start {
     on { kind: "To" } {

@@ -12,7 +12,7 @@ component Child {
 
 component Ping {
   field heard: number = 0;
-  Child child;
+  child: Child;
 
   start {
     on down "Ping" n:number {

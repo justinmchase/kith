@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/scenes.spec.md#constraints
 
 Preconditions:
 
-- A parent declares `A a` and a scene fills that port with `a = B()`.
+- A parent declares `a: A` and a scene fills that port with `a = B()`.
 
 Expected behavior:
 

@@ -92,8 +92,8 @@ export Probe;
 export Main;
 component Probe {
   field got: any;
-  Socket socket;
-  Listener listener;
+  socket: Socket;
+  listener: Listener;
   start { on up message:any { got -> message; } }
 }
 export scene Main {
@@ -201,8 +201,8 @@ export Probe;
 export Main;
 component Probe {
   field got: any;
-  Http http;
-  Server server;
+  http: Http;
+  server: Server;
   start { on up message:any { got -> message; } }
 }
 export scene Main {
@@ -413,9 +413,9 @@ export Probe;
 export Main;
 component Probe {
   field got: any;
-  Stdin input;
-  Stdout out;
-  Stderr err;
+  input: Stdin;
+  out: Stdout;
+  err: Stderr;
   start { on up message:any { got -> message; } }
 }
 export scene Main {
@@ -443,7 +443,7 @@ fn stdio_is_the_process_byte_streams() {
         export Main;
         component Probe {
           field text: any;
-          Stdin input;
+          input: Stdin;
           start {
             on init { send to input "Pull"; }
             on up "Chunk" value:any { text -> (utf8_decode value); }
@@ -478,8 +478,8 @@ fn stdio_is_the_process_byte_streams() {
         export Probe;
         export Main;
         component Probe {
-          Stdout out;
-          Stderr err;
+          out: Stdout;
+          err: Stderr;
           start {
             on init {
               (print "diag");
@@ -512,7 +512,7 @@ export Probe;
 export Main;
 component Probe {
   field got: any;
-  File file;
+  file: File;
   start { on up message:any { got -> message; } }
 }
 export scene Main { Probe() { file = File(); } }
@@ -667,7 +667,7 @@ fn crypto_digests_bytes_and_draws_from_its_own_stream() {
             component Probe {
               field got: any;
               field n: number = 0;
-              Crypto crypto;
+              crypto: Crypto;
               start {
                 on down "A" { n -> (rand 0 1000000); }
                 on down "C" { n -> (rand 0 1000000); }
@@ -731,7 +731,7 @@ fn crypto_digests_bytes_and_draws_from_its_own_stream() {
         export Main;
         component Probe {
           field got: any;
-          Crypto crypto;
+          crypto: Crypto;
           start { on up message:any { got -> message; } }
         }
         export scene Main { Probe() { crypto = Crypto(); } }
@@ -806,7 +806,7 @@ fn process_freezes_argv_env_and_exit() {
         export Main;
         component Probe {
           field got: any;
-          Process proc;
+          proc: Process;
           start {
             on down "Argv" { send to proc "Argv"; }
             on down "Env" name:string { send to proc "Env" name; }
@@ -871,7 +871,7 @@ fn process_freezes_argv_env_and_exit() {
         export Main;
         component Probe {
           field got: any;
-          Process proc;
+          proc: Process;
           start {
             on init { send to proc "Argv"; }
             on up "Argv" args:any {

@@ -11,7 +11,7 @@ spec_ref: .agents/specifications/components.spec.md#sending; .agents/specificati
 Preconditions:
 
 - `examples/order.kith` declares `MockShip` and `Carrier` with port
-  `MockShip ship`. The scene fills `ship = MockShip()` under a Carrier
+  `ship: MockShip`. The scene fills `ship = MockShip()` under a Carrier
   prototype.
 
 Expected behavior:

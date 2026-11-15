@@ -11,7 +11,7 @@ spec_ref: .agents/specifications/scenes.spec.md#declaration; .agents/specificati
 Preconditions:
 
 - Source declares `export scene Main { Ping() { child = Child(); } }` and
-  component `Ping` with port `Child child`.
+  component `Ping` with port `child: Child`.
 
 Expected behavior:
 
@@ -20,7 +20,7 @@ Expected behavior:
 - Check MUST reject a duplicate port fill under one parent.
 - Check MUST reject a construction that names an unknown kind.
 - Check MUST reject a missing port fill.
-- Check MUST reject `a = B()` when the parent declares port `A a`.
+- Check MUST reject `a = B()` when the parent declares port `a: A`.
 
 Postconditions:
 

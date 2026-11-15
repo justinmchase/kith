@@ -97,7 +97,7 @@ component Child {
 
 component Ping {
   field heard: number = 0;
-  Child child;
+  child: Child;
 
   start {
     on down "Ping" n:number {
@@ -125,7 +125,8 @@ export scene Main {
   matches null or a number and MUST NOT match a string: Uffda Maybe that
   skips a present non-null value is not a match for a stored field.
   The value used is the value that matched.
-- `Kind name;` is a port: one child of kind `Kind` bound as `name`.
+- `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
+  `Kind` is a component or a workflow.
 - `start { ... }` is the start state with implicit name `Start`. That name
   is not a `goto` target. Use unnamed start when the machine never returns
   to it. `start Name { ... }` names the start; `goto Name` returns there.

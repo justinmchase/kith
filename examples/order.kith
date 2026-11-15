@@ -40,7 +40,7 @@ component MockShip {
 component Carrier {
   field item: string = "";
   field index: number = 0;
-  MockShip ship;
+  ship: MockShip;
 
   start Waiting {
     on down { kind: "Item" item: any index: number } {
