@@ -101,7 +101,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Setup Uffda CLI
-        uses: justinmchase/uffda/.github/actions/uffda-setup@main
+        uses: justinmchase/uffda/.github/actions/uffda-setup@0.10.9
         with:
           version: 0.10.8
 
