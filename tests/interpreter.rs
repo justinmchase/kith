@@ -652,7 +652,7 @@ fn ping_example_sets_heard_to_seven() {
 
 #[test]
 // req:workflows-002
-fn then_and_pick_transition_with_working_value() {
+fn arrow_and_pick_transition_with_working_value() {
     let workflow = Workflow {
         kind: "workflow".into(),
         name: "Flow".into(),
@@ -674,6 +674,7 @@ fn then_and_pick_transition_with_working_value() {
                 },
                 next: Some(Next::Goto {
                     step: "Decide".into(),
+                    input: None,
                 }),
             },
             FlowStep {
@@ -685,10 +686,12 @@ fn then_and_pick_transition_with_working_value() {
                         ChoiceClause {
                             pattern: kind_eq("unused"),
                             step: "No".into(),
+                            input: None,
                         },
                         ChoiceClause {
                             pattern: json!({"kind": "any"}),
                             step: "Yes".into(),
+                            input: None,
                         },
                     ],
                 },
@@ -979,6 +982,66 @@ fn run_path_executes_dynamic_ir() {
         .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.output(world.root_id()).unwrap()["kind"], json!("Dyn"));
+}
+
+#[test]
+// req:workflows-009
+fn step_completion_is_addressed_by_the_step_name() {
+    let program = kith::parse::parse_source(
+        r#"
+export ChargeCard;
+export Fulfill;
+export Sale;
+export Main;
+
+component ChargeCard {
+  start {
+    on any {
+      complete { kind: "Paid" accountId: "a-1" quantity: 3 };
+    }
+  }
+}
+
+component Fulfill {
+  start {
+    on { accountId: any quantity: number } {
+      complete { kind: "Filled" accountId quantity };
+    }
+  }
+}
+
+workflow Sale {
+  start pay: ChargeCard -> paid;
+  paid: pick {
+    ({ kind: "Paid" quantity }) -> fulfill { accountId: pay.accountId quantity };
+    else -> decline;
+  };
+  fulfill: Fulfill -> succeed;
+  decline: fail "no";
+}
+
+export scene Main {
+  Sale();
+}
+"#,
+    )
+    .expect("parse sale");
+    let sale = program.workflow("Sale").expect("Sale");
+    let paid = sale.steps.iter().find(|step| step.name == "paid").expect("paid");
+    match &paid.body {
+        StepBody::Choice { clauses } => {
+            assert_eq!(clauses[0].step, "fulfill");
+            assert!(clauses[0].input.is_some());
+        }
+        other => panic!("expected choice, got {other:?}"),
+    }
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "Go"})).unwrap();
+    world.run_until_idle().unwrap();
+    let output = world.output(world.root_id()).expect("output");
+    assert_eq!(output["kind"], json!("Filled"));
+    assert_eq!(output["accountId"], json!("a-1"));
+    assert_eq!(output["quantity"], json!(3.0));
 }
 
 fn order_program() -> kith::ast::Program {

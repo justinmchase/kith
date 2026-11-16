@@ -339,22 +339,35 @@ rule ComponentDeclaration =
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
 ;
 
+# `-> Name` or `-> Name { input }`. The object is the next step's input.
+rule FlowGoto =
+  n:Identifier i:MessageObject?
+  -> { step: n, input: (coalesce i null) }
+;
+
 rule FlowTarget =
   | ("succeed" -> { kind: "succeed" })
   | ("fail" e:Expression -> { kind: "fail", error: e })
-  | (n:Identifier -> { kind: "goto", step: n })
+  | (g:FlowGoto -> { kind: "goto", step: g.step, input: g.input })
 ;
 
-rule FlowThen = "then" t:FlowTarget -> t;
+rule FlowEdge = "-" ">" t:FlowTarget -> t;
+
+# Object patterns allow a bare field (`quantity`) and an omitted comma, the
+# same Over as `on`. A grouped Uffda pattern covers the other forms.
+rule ChoicePattern =
+  | OnObjectPattern
+  | Pattern
+;
 
 rule ChoiceClause =
   | (
-    "else" "-" ">" n:Identifier ";"
-    -> { pattern: { kind: "any" }, step: n }
+    "else" "-" ">" g:FlowGoto ";"
+    -> { pattern: { kind: "any" }, step: g.step, input: g.input }
   )
   | (
-    "(" p:Pattern ")" "-" ">" n:Identifier ";"
-    -> { pattern: p, step: n }
+    "(" p:ChoicePattern ")" "-" ">" g:FlowGoto ";"
+    -> { pattern: p, step: g.step, input: g.input }
   )
 ;
 
@@ -363,56 +376,116 @@ rule MapInit =
   -> { kind: "object", keys: (coalesce keys []) }
 ;
 
-# Same Then as `on`: an Over `{ items: any orderId: any }`, a grouped
-# `(Pattern)`, or a capture. `->` is Kith's edge, so the pattern is not a
-# top-level Uffda Then (that would eat `->` / `{`).
-rule StepHead =
-  | (p:OnThen "-" ">" -> p)
-  | (ok -> null)
+# A destructure is an Over, a grouped `(Pattern)`, or a capture. It is not
+# a top-level Uffda Then (`->` would be part of that Then). A bare name is
+# a task kind, so `pay: ChargeCard -> paid` is name, kind, edge.
+rule StepPattern =
+  | OnObjectPattern
+  | ("(" p:Pattern ")" -> p)
+  | OnCapturePattern
 ;
 
-rule StepBody =
+rule Fanout =
+  "fanout" e:Expression "with" k:Identifier "into" r:Identifier i:MapInit?
+  -> { kind: "map", items: e, component: k, reduce: r, init: i }
+;
+
+# `name: Pattern` then one edge form. `pick` takes no further `->`.
+# A null pass value keeps the working value (`pattern -> step`).
+rule StepCore =
   | (
-    "fanout" e:Expression "with" k:Identifier "into" r:Identifier i:MapInit?
-    -> { kind: "map", items: e, component: k, reduce: r, init: i }
+    "pick" "{" c:ChoiceClause* "}"
+    -> {
+      pattern: null,
+      body: { kind: "choice", clauses: c },
+      next: { kind: "succeed" }
+    }
   )
-  | ("run" p:Identifier -> { kind: "run", path: p })
-  | ("pass" e:Expression -> { kind: "pass", value: e })
-  | ("pick" "{" c:ChoiceClause* "}" -> { kind: "choice", clauses: c })
-  | ("succeed" -> { kind: "succeed" })
-  | ("fail" e:Expression -> { kind: "fail", error: e })
-  | (k:Identifier -> { kind: "task", component: k })
+  | (
+    "succeed"
+    -> { pattern: null, body: { kind: "succeed" }, next: { kind: "succeed" } }
+  )
+  | (
+    "fail" e:Expression
+    -> {
+      pattern: null,
+      body: { kind: "fail", error: e },
+      next: { kind: "succeed" }
+    }
+  )
+  | (
+    "pass" e:Expression g:FlowEdge?
+    -> {
+      pattern: null,
+      body: { kind: "pass", value: e },
+      next: (coalesce g { kind: "succeed" })
+    }
+  )
+  | (
+    "run" p:Identifier g:FlowEdge?
+    -> {
+      pattern: null,
+      body: { kind: "run", path: p },
+      next: (coalesce g { kind: "succeed" })
+    }
+  )
+  | (
+    p:StepPattern f:Fanout g:FlowEdge?
+    -> { pattern: p, body: f, next: (coalesce g { kind: "succeed" }) }
+  )
+  | (
+    f:Fanout g:FlowEdge?
+    -> { pattern: null, body: f, next: (coalesce g { kind: "succeed" }) }
+  )
+  | (
+    p:StepPattern "pass" e:Expression g:FlowEdge?
+    -> {
+      pattern: p,
+      body: { kind: "pass", value: e },
+      next: (coalesce g { kind: "succeed" })
+    }
+  )
+  | (
+    p:StepPattern "run" n:Identifier g:FlowEdge?
+    -> {
+      pattern: p,
+      body: { kind: "run", path: n },
+      next: (coalesce g { kind: "succeed" })
+    }
+  )
+  | (
+    p:StepPattern g:FlowEdge
+    -> { pattern: p, body: { kind: "pass", value: null }, next: g }
+  )
+  | (
+    k:Identifier g:FlowEdge?
+    -> {
+      pattern: null,
+      body: { kind: "task", component: k },
+      next: (coalesce g { kind: "succeed" })
+    }
+  )
 ;
 
 rule FlowStep =
   | (
-    "start" n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
+    "start" n:Identifier ":" c:StepCore ";"
     -> {
       name: n,
       start: true,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
+      pattern: c.pattern,
+      body: c.body,
+      next: c.next
     }
   )
   | (
-    "start" h:StepHead b:StepBody t:FlowThen? ";"
-    -> {
-      name: "Start",
-      start: true,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
-    }
-  )
-  | (
-    n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
+    n:Identifier ":" c:StepCore ";"
     -> {
       name: n,
       start: false,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
+      pattern: c.pattern,
+      body: c.body,
+      next: c.next
     }
   )
 ;

@@ -148,7 +148,7 @@ fn import_list_parses_and_relative_files_resolve() {
     .unwrap();
     std::fs::write(
         dir.join("main.kith"),
-        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start succeed;\n}\nexport scene Main {\n  Box()\n}\n",
+        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start done: succeed;\n}\nexport scene Main {\n  Box()\n}\n",
     )
     .unwrap();
     let err = resolve_program(&dir.join("main.kith")).expect_err("missing export");
@@ -156,7 +156,7 @@ fn import_list_parses_and_relative_files_resolve() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-003
+// req:grammar-001 req:workflows-002 req:workflows-003
 fn import_source_parses_fanout_and_join() {
     let source = include_str!("../examples/import.kith");
     let program = parse_source(source).expect("parse import.kith");
@@ -168,6 +168,10 @@ fn import_source_parses_fanout_and_join() {
         import.steps[0].body,
         kith::ast::StepBody::Map { ref component, ref reduce, .. }
             if component == "Worker" && reduce == "Count"
+    ));
+    assert!(matches!(
+        &import.steps[0].next,
+        Some(kith::ast::Next::Succeed {})
     ));
     let count = program.component("Count").expect("Count");
     assert!(count.fields.iter().any(|field| field.name == "total"));
@@ -181,15 +185,25 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
+// req:grammar-001 req:workflows-002 req:workflows-005 req:workflows-008 req:workflows-009 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
-    assert!(order.steps.iter().any(|step| step.start
-        && matches!(
-            step.body,
-            kith::ast::StepBody::Task { ref component } if component == "ValidateOrder"
-        )));
+    let validate = order
+        .steps
+        .iter()
+        .find(|step| step.start)
+        .expect("start");
+    assert_eq!(validate.name, "validate");
+    assert!(validate.pattern.is_none());
+    assert!(matches!(
+        &validate.body,
+        kith::ast::StepBody::Task { component } if component == "ValidateOrder"
+    ));
+    assert!(matches!(
+        &validate.next,
+        Some(kith::ast::Next::Goto { step, input: None }) if step == "stock"
+    ));
     assert!(order
         .steps
         .iter()
@@ -197,9 +211,9 @@ fn order_source_parses_tasks_picks_and_map() {
     let fulfill = order
         .steps
         .iter()
-        .find(|step| step.name == "Fulfill")
-        .expect("Fulfill");
-    let pattern = fulfill.pattern.as_ref().expect("Fulfill pattern");
+        .find(|step| step.name == "fulfill")
+        .expect("fulfill");
+    let pattern = fulfill.pattern.as_ref().expect("fulfill pattern");
     assert_eq!(pattern["kind"], "over");
     assert!(pattern["keys"].get("items").is_some());
     assert!(pattern["keys"].get("orderId").is_some());
@@ -210,6 +224,24 @@ fn order_source_parses_tasks_picks_and_map() {
                 && reduce == "Summarize"
                 && init.is_some()
     ));
+    assert!(matches!(
+        &fulfill.next,
+        Some(kith::ast::Next::Succeed {})
+    ));
+    let paid = order
+        .steps
+        .iter()
+        .find(|step| step.name == "paid")
+        .expect("paid");
+    match &paid.body {
+        kith::ast::StepBody::Choice { clauses } => {
+            assert_eq!(clauses[0].step, "fulfill");
+            assert!(clauses[0].input.is_some());
+            assert_eq!(clauses[1].step, "decline");
+            assert!(clauses[1].input.is_none());
+        }
+        other => panic!("expected choice, got {other:?}"),
+    }
     let summarize = program.component("Summarize").expect("Summarize");
     assert!(summarize.fields.iter().any(|field| field.name == "total"));
     assert!(summarize.fields.iter().any(|field| field.name == "orderId"));
@@ -263,6 +295,106 @@ fn order_source_parses_tasks_picks_and_map() {
             })
     }));
     World::check(&program).expect("order checks");
+}
+
+#[test]
+// req:workflows-002
+fn workflow_edges_are_arrows_and_then_does_not_parse() {
+    let program = parse_source(
+        r#"
+export Unit;
+export Flow;
+export Main;
+
+component Unit {
+  start {
+    else complete { kind: "Ok" };
+  }
+}
+
+workflow Flow {
+  start go: Unit -> decide;
+  decide: pick {
+    ({ kind: "Ok" }) -> yes;
+    else -> no;
+  };
+  yes: pass "ok" -> succeed;
+  no: pass "no" -> fail "no";
+}
+
+export scene Main {
+  Flow();
+}
+"#,
+    )
+    .expect("parse arrow edges");
+    let flow = program.workflow("Flow").expect("Flow");
+    let start = flow.steps.iter().find(|step| step.start).expect("start");
+    assert!(start.pattern.is_none());
+    assert!(matches!(
+        &start.body,
+        kith::ast::StepBody::Task { component } if component == "Unit"
+    ));
+    assert_eq!(start.name, "go");
+    assert!(matches!(
+        &start.next,
+        Some(kith::ast::Next::Goto { step, input: None }) if step == "decide"
+    ));
+    let yes = flow.steps.iter().find(|step| step.name == "yes").expect("yes");
+    assert!(yes.pattern.is_none());
+    assert!(matches!(&yes.body, kith::ast::StepBody::Pass { .. }));
+    assert!(matches!(&yes.next, Some(kith::ast::Next::Succeed {})));
+    let no = flow.steps.iter().find(|step| step.name == "no").expect("no");
+    assert!(matches!(
+        &no.next,
+        Some(kith::ast::Next::Fail { .. })
+    ));
+    match &flow
+        .steps
+        .iter()
+        .find(|step| step.name == "decide")
+        .expect("decide")
+        .body
+    {
+        kith::ast::StepBody::Choice { clauses } => {
+            assert_eq!(clauses[0].step, "yes");
+            assert_eq!(clauses[1].step, "no");
+        }
+        other => panic!("expected choice, got {other:?}"),
+    }
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "Go"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.output(world.root_id()), Some(&json!("ok")));
+
+    let rejected = parse_source(
+        r#"
+export Unit;
+export Flow;
+export Main;
+component Unit { start { else complete { kind: "Ok" }; } }
+workflow Flow {
+  start go: Unit then decide;
+  decide: succeed;
+}
+export scene Main { Flow(); }
+"#,
+    );
+    assert!(rejected.is_err(), "then is not a workflow edge");
+    let unnamed = parse_source(
+        r#"
+export Unit;
+export Flow;
+export Main;
+component Unit { start { else complete { kind: "Ok" }; } }
+workflow Flow {
+  start Unit -> decide;
+  decide: succeed;
+}
+export scene Main { Flow(); }
+"#,
+    );
+    assert!(unnamed.is_err(), "a step name comes before the colon");
 }
 
 #[test]

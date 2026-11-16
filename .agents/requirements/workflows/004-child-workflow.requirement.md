@@ -15,7 +15,7 @@ Preconditions:
 
 Expected behavior:
 
-- The parent MUST take that payload as the task output and MAY `then succeed`
+- The parent MUST take that payload as the task output and MAY `-> succeed`
   with it.
 
 Postconditions:

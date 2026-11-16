@@ -23,7 +23,7 @@ component Count {
 }
 
 workflow Import {
-  start { items: any } -> fanout items with Worker into Count then succeed;
+  start count: { items: any } fanout items with Worker into Count -> succeed;
 }
 
 export scene Main {

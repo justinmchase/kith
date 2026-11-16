@@ -99,7 +99,12 @@ pub enum StepBody {
 #[serde(tag = "kind")]
 pub enum Next {
     #[serde(rename = "goto")]
-    Goto { step: String },
+    Goto {
+        step: String,
+        /// Object passed to the next step. Absent means the step output.
+        #[serde(default)]
+        input: Option<Json>,
+    },
     #[serde(rename = "succeed")]
     Succeed {},
     #[serde(rename = "fail")]
@@ -110,6 +115,9 @@ pub enum Next {
 pub struct ChoiceClause {
     pub pattern: Json,
     pub step: String,
+    /// Object passed to the chosen step. Absent means the working value.
+    #[serde(default)]
+    pub input: Option<Json>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

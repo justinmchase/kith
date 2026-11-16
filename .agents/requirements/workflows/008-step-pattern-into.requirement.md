@@ -10,18 +10,22 @@ spec_ref: .agents/specifications/workflows.spec.md#declaration
 
 Preconditions:
 
-- `Fulfill` in `examples/order.kith` is
-  `{ items: any, orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed`.
+- `fulfill` in `examples/order.kith` is
+  `{ items: any, orderId: any } fanout items with Carrier into Summarize(orderId) -> succeed`.
+  The `paid` arm that reaches it is
+  `({ kind: "Paid" }) -> fulfill { orderId: pay.orderId items: pay.items }`.
 
 Expected behavior:
 
-- The step pattern MUST be a Uffda Over that binds `items` and `orderId` from
-  a Paid message and MUST ignore extra keys such as `kind`.
+- The step pattern MUST be a Uffda Over that binds `items` and `orderId`
+  from the step input and MUST ignore extra keys.
 - `fanout items` MUST map that list. `Summarize(orderId)` MUST set
   Summarize's `orderId` field.
 - After two deliveries the run MUST succeed with
   `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
-- `then succeed` is Next; a fanout step MAY `then Name` instead.
+- `-> succeed` is Next; a fanout step MAY `-> Name` instead. The object on
+  `-> fulfill` is that step's input. `pay.orderId` reads the `pay` step's
+  completion.
 
 Postconditions:
 

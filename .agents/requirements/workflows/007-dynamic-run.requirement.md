@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/workflows.spec.md#dynamic-graphs
 
 Preconditions:
 
-- A `Host` workflow is `start run plan then succeed`. The injected value
+- A `Host` workflow is `start host: run plan -> succeed`. The injected value
   contains a `plan` workflow IR that tasks `Child`.
 
 Expected behavior:

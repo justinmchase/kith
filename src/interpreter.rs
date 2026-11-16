@@ -73,6 +73,8 @@ struct WorkflowRun {
     output_json: Json,
     definition: Workflow,
     prototypes: Vec<Instance>,
+    /// Step name to that step's output. Later steps read `name.field`.
+    completions: HashMap<String, Doc>,
 }
 
 struct InstanceState {
@@ -845,6 +847,7 @@ impl World {
                     output_json: Json::Null,
                     definition: workflow,
                     prototypes: Vec::new(),
+                    completions: HashMap::new(),
                 }),
                 driver: None,
             },
@@ -896,15 +899,19 @@ impl World {
             run.step = step.name.clone();
             run.output = working.clone();
         }
-        let bindings = match &step.pattern {
+        let mut bindings = match &step.pattern {
             Some(pattern) => bind_step(pattern, &working, &self.program.rules)?,
             None => bindings_from(&working),
         };
+        self.overlay_completions(id, &mut bindings);
         match &step.body {
             StepBody::Succeed {} => self.succeed(id, working),
             StepBody::Fail { error } => {
                 let value = self.eval(error, &bindings)?;
                 self.fail(id, value)
+            }
+            StepBody::Pass { value } if value.is_null() => {
+                self.advance(id, working, step.next.as_ref())
             }
             StepBody::Pass { value } => {
                 let output = self.eval(value, &bindings)?;
@@ -912,8 +919,16 @@ impl World {
             }
             StepBody::Choice { clauses } => {
                 for clause in clauses {
-                    if match_program(&clause.pattern, &working, &self.program.rules)?.is_some() {
-                        return self.goto_named(id, &clause.step);
+                    if let Some(matched) = match_program(&clause.pattern, &working, &self.program.rules)?
+                    {
+                        let mut scope = bindings.clone();
+                        scope.extend(matched);
+                        let input = if let Some(expression) = &clause.input {
+                            self.eval(expression, &scope)?
+                        } else {
+                            working.clone()
+                        };
+                        return self.goto_named(id, &clause.step, input);
                     }
                 }
                 Err(Error::new(format!("no choice matched on {}", step.name)))
@@ -1115,20 +1130,34 @@ impl World {
         run.definition.step(&run.step)?.next.clone()
     }
 
-    fn goto_named(&mut self, id: ActorId, name: &str) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let (step, output) = {
+    fn overlay_completions(&self, id: ActorId, bindings: &mut HashMap<String, Doc>) {
+        let Some(run) = self.instances.get(&id).and_then(|instance| instance.run.as_ref()) else {
+            return;
+        };
+        for (name, value) in &run.completions {
+            bindings
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
+
+    fn goto_named(
+        &mut self,
+        id: ActorId,
+        name: &str,
+        input: Doc,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        let step = {
             let run = self.instances[&id]
                 .run
                 .as_ref()
                 .ok_or_else(|| Error::new("not a workflow"))?;
-            let step = run
-                .definition
+            run.definition
                 .step(name)
                 .cloned()
-                .ok_or_else(|| Error::new(format!("unknown step {name}")))?;
-            (step, run.output.clone())
+                .ok_or_else(|| Error::new(format!("unknown step {name}")))?
         };
-        self.enter_step(id, &step, output)
+        self.enter_step(id, &step, input)
     }
 
     fn advance(
@@ -1137,21 +1166,38 @@ impl World {
         output: Doc,
         next: Option<&Next>,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        let step_name = self.instances[&id]
+            .run
+            .as_ref()
+            .map(|run| run.step.clone())
+            .unwrap_or_default();
         if let Some(run) = self
             .instances
             .get_mut(&id)
             .and_then(|instance| instance.run.as_mut())
         {
+            run.completions.insert(step_name, output.clone());
             run.output = output.clone();
             run.output_json = project(&output)?;
         }
         match next {
             None | Some(Next::Succeed {}) => self.succeed(id, output),
             Some(Next::Fail { error }) => {
-                let value = self.eval(error, &bindings_from(&output))?;
+                let mut bindings = bindings_from(&output);
+                self.overlay_completions(id, &mut bindings);
+                let value = self.eval(error, &bindings)?;
                 self.fail(id, value)
             }
-            Some(Next::Goto { step }) => self.goto_named(id, step),
+            Some(Next::Goto { step, input }) => {
+                let value = if let Some(expression) = input {
+                    let mut bindings = bindings_from(&output);
+                    self.overlay_completions(id, &mut bindings);
+                    self.eval(expression, &bindings)?
+                } else {
+                    output
+                };
+                self.goto_named(id, step, value)
+            }
         }
     }
 
@@ -2459,7 +2505,7 @@ fn check_workflow(program: &Program, workflow: &Workflow) -> Result<(), Error> {
             }
             _ => {}
         }
-        if let Some(Next::Goto { step }) = &step.next {
+        if let Some(Next::Goto { step, .. }) = &step.next {
             if !names.contains(step.as_str()) {
                 return Err(Error::new(format!("unknown step {step}")));
             }
@@ -2634,6 +2680,14 @@ fn run_document(run: &WorkflowRun) -> Result<Doc, Error> {
         // Workflow syntax trees are JSON. They are embedded in the snapshot here.
         ("definition", syntax_document(&run.definition)?),
         ("prototypes", syntax_document(&run.prototypes)?),
+        (
+            "completions",
+            doc::object(
+                run.completions
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            ),
+        ),
     ]))
 }
 
@@ -2807,6 +2861,12 @@ fn restore_run(value: &Doc) -> Result<WorkflowRun, Error> {
         output_json: project(&output)?,
         definition,
         prototypes,
+        completions: doc::entries(
+            &doc::get(value, "completions").unwrap_or_else(|| doc::object::<&str>([])),
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .collect(),
     })
 }
 

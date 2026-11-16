@@ -15,7 +15,7 @@ capitals.
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
   example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `with`,
-  `into`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
+  `into`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
   `complete`, `after`, `up`, `down`, `self`, `init`, `or`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
@@ -114,7 +114,7 @@ capitals.
 - **Machine state**: the state the machine is in, plus the values of its fields.
 - **Goto**: a component statement (`goto Name`) that enters another declared
   state of this instance. It is a terminal: at most one per handler, last
-  if present, exclusive with `complete`. It is not a workflow `then`.
+  if present, exclusive with `complete`. It is not a workflow edge (`->`).
 
 ## Dispatch
 
@@ -136,7 +136,8 @@ capitals.
   the family of AWS Step Functions. It is not a component state machine. The
   graph is a value. A scene MAY run a workflow as its root.
 - **Step**: one node in a workflow graph. It is not an actor. Completing it
-  follows `then` (or a choice clause).
+  follows `->` (or a choice clause). Its output stays addressable by the
+  step name.
 - **Run**: one execution of a graph, serializable and restorable.
 - **Complete**: finishing a component or nested workflow as a work item
   (`complete V`). The payload is sent up (except at the root) and is the
@@ -159,7 +160,7 @@ capitals.
 - **Fan-out**: a map step (`fanout Expression with Kind into Acc`) that
   spawns one work item per list element.
 - **Join**: fan-in of those work items into one accumulator instance, then
-  `then`.
+  the step's `->` edge.
 - **Into**: names the accumulator component for a map (`into Acc`). That
   component holds the aggregate in its fields, takes each item, then
   `complete`s on `else`.

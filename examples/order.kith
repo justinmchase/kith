@@ -73,19 +73,19 @@ component Summarize {
 }
 
 workflow Order {
-  start Validate: ValidateOrder then Stock;
-  Stock: pick {
-    ({ kind: "Accepted" }) -> Pay;
-    else -> Reject;
+  start validate: ValidateOrder -> stock;
+  stock: pick {
+    ({ kind: "Accepted" }) -> pay;
+    else -> reject;
   };
-  Pay: ChargeCard then Paid;
-  Paid: pick {
-    ({ kind: "Paid" }) -> Fulfill;
-    else -> Decline;
+  pay: ChargeCard -> paid;
+  paid: pick {
+    ({ kind: "Paid" }) -> fulfill { orderId: pay.orderId items: pay.items };
+    else -> decline;
   };
-  Fulfill: { items: any orderId: any } -> fanout items with Carrier into Summarize(orderId) then succeed;
-  Reject: fail "invalid order";
-  Decline: fail "payment declined";
+  fulfill: { items: any orderId: any } fanout items with Carrier into Summarize(orderId) -> succeed;
+  reject: fail "invalid order";
+  decline: fail "payment declined";
 }
 
 export scene Main {

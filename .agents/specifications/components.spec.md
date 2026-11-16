@@ -51,7 +51,7 @@ capitals.
   first executable slice MUST NOT spawn or destroy children; scene-constructed
   children exist for the parent's lifetime. Dynamic spawn is a
   [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
-  `then`, `pick`, `run`, `succeed`, or `fail`. A component MAY `complete V` so
+  `pick`, `run`, `succeed`, or `fail`. A component MAY `complete V` so
   it can be a task or map work item.
 
 ### Routing
@@ -166,7 +166,7 @@ export scene Main {
   `goto Start` MUST fail check unless the start was declared `start Start`.
   An unknown name MUST fail check. `goto` is a terminal: see
   [terminal statements](#terminal-statements). Workflows change step with
-  `then` / `pick`, not `goto`.
+  `->` / `pick`, not `goto`.
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 

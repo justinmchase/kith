@@ -47,8 +47,9 @@ primitives rather than defining their own.
   (`send self`), then matched as a Uffda pattern.
 - **Machines and flows.** Component behavior is a state machine: a matched
   message may send, assign, and `complete`. Workflow behavior is a flow graph:
-  completing a step follows `then` (or a `pick` clause) with that step's
-  output as the working value. Actor `send` / `goto` / `complete` / `->` are
+  completing a step follows `->` (or a `pick` clause). With no input object
+  the working value is that step's output, and the output stays addressable
+  by the step name. Actor `send` / `goto` / `complete` / `->` are
   statements. Host I/O is Uffda invocation syntax, not a second set of
   keywords.
 - **Dispatch is the runtime.** User code MUST NOT schedule actors, wait on

@@ -56,13 +56,14 @@ verify it cite it with `req:{id}`.
 ## Workflows
 
 - [Distinct primitive](./workflows/001-distinct-and-root.requirement.md)
-- [Then and pick](./workflows/002-goto-steps.requirement.md)
+- [Arrow and pick](./workflows/002-goto-steps.requirement.md)
 - [Map fan-out and reduce](./workflows/003-fanout-join.requirement.md)
 - [Child workflow](./workflows/004-child-workflow.requirement.md)
 - [Order wait, confirm, summarize](./workflows/005-ping-workflow.requirement.md)
 - [Snapshot and restore](./workflows/006-snapshot-restore.requirement.md)
 - [Dynamic run](./workflows/007-dynamic-run.requirement.md)
 - [Step pattern and into init](./workflows/008-step-pattern-into.requirement.md)
+- [Step completion by name](./workflows/009-step-completion.requirement.md)
 
 ## Grammar
 
