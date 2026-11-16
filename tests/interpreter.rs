@@ -1004,8 +1004,8 @@ component ChargeCard {
 
 component Fulfill {
   start {
-    on { accountId: any quantity: number } {
-      complete { kind: "Filled" accountId quantity };
+    on { accountId: any quantity: number ticket: "t-1" } {
+      complete { kind: "Filled" accountId quantity ticket };
     }
   }
 }
@@ -1013,10 +1013,11 @@ component Fulfill {
 workflow Sale {
   start pay: ChargeCard -> paid;
   paid: pick {
-    ({ kind: "Paid" quantity }) -> fulfill { accountId: pay.accountId quantity };
+    ({ kind: "Paid" quantity }) -> fulfill { accountId: pay.accountId quantity ticket: "t-1" };
     else -> decline;
   };
-  fulfill: Fulfill -> succeed;
+  fulfill: Fulfill -> note;
+  note: { accountId: any quantity: number ticket: any } pass { kind: "Noted", accountId: accountId, quantity: quantity, charged: pay.accountId, ticket: ticket } -> succeed;
   decline: fail "no";
 }
 
@@ -1035,13 +1036,24 @@ export scene Main {
         }
         other => panic!("expected choice, got {other:?}"),
     }
+    let fulfill = sale
+        .steps
+        .iter()
+        .find(|step| step.name == "fulfill")
+        .expect("fulfill");
+    assert!(matches!(
+        &fulfill.body,
+        StepBody::Task { component } if component == "Fulfill"
+    ));
     let mut world = World::start(program).expect("start");
     world.inject(json!({"kind": "Go"})).unwrap();
     world.run_until_idle().unwrap();
     let output = world.output(world.root_id()).expect("output");
-    assert_eq!(output["kind"], json!("Filled"));
+    assert_eq!(output["kind"], json!("Noted"));
     assert_eq!(output["accountId"], json!("a-1"));
     assert_eq!(output["quantity"], json!(3.0));
+    assert_eq!(output["charged"], json!("a-1"));
+    assert_eq!(output["ticket"], json!("t-1"));
 }
 
 fn order_program() -> kith::ast::Program {

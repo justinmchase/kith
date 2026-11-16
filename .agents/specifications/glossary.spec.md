@@ -135,9 +135,10 @@ capitals.
 - **Workflow**: a flow graph (task, map, choice, pass, run, succeed, fail) in
   the family of AWS Step Functions. It is not a component state machine. The
   graph is a value. A scene MAY run a workflow as its root.
-- **Step**: one node in a workflow graph. It is not an actor. Completing it
-  follows `->` (or a choice clause). Its output stays addressable by the
-  step name.
+- **Step**: one node in a workflow graph. It is not an actor. It has an input
+  message. A task, map, pass, or run stores its output under the step name.
+  The name on `->` is this node; the component is the body of `name: Pattern`.
+  The object after that name is the next step's input.
 - **Run**: one execution of a graph, serializable and restorable.
 - **Complete**: finishing a component or nested workflow as a work item
   (`complete V`). The payload is sent up (except at the root) and is the

@@ -19,13 +19,15 @@ Expected behavior:
 
 - The step pattern MUST be a Uffda Over that binds `items` and `orderId`
   from the step input and MUST ignore extra keys.
+- `fulfill` on `-> fulfill { ... }` MUST be that step. The object MUST be
+  its input. The step body MUST be the fanout, whose components are
+  `Carrier` and `Summarize`.
 - `fanout items` MUST map that list. `Summarize(orderId)` MUST set
   Summarize's `orderId` field.
 - After two deliveries the run MUST succeed with
   `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
-- `-> succeed` is Next; a fanout step MAY `-> Name` instead. The object on
-  `-> fulfill` is that step's input. `pay.orderId` reads the `pay` step's
-  completion.
+- `-> succeed` is Next; a fanout step MAY `-> Name` instead. `pay.orderId`
+  reads the `pay` step's completion.
 
 Postconditions:
 

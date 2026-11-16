@@ -185,7 +185,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-002 req:workflows-005 req:workflows-008 req:workflows-009 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
+// req:grammar-001 req:workflows-002 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");

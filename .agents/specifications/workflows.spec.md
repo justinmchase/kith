@@ -21,12 +21,14 @@ capitals.
 - **Workflow declaration**: source that names a flow graph and compiles to the
   same IR a `run` step MAY execute from a value.
 - **Step**: one node in that graph (task, map, choice, pass, run, succeed,
-  fail). It is not an actor.
-- **Run**: one execution of a graph: current step, working input/output,
-  step completions, in-flight work, status.
-- **Task**: run one component or workflow until it `complete`s. That payload
-  is the step output. With no input object it is also the next step's input.
-  It stays addressable by the step name.
+  fail). It is not an actor. It has an input message. A step that finishes
+  with an output stores that message under the step name. The name on `->`
+  is this node. The component, or other pattern, is the body of
+  `name: Pattern`.
+- **Run**: one execution of a graph: current step, that step's input, the
+  outputs of finished steps, in-flight work, status.
+- **Task**: run one component or workflow until it `complete`s. The step's
+  input is the message sent to it. The completion value is the step output.
 - **Map**: dynamic fan-out of a list path. Fan-in is a **reduce**: one
   reducer instance holds the aggregate in its fields. Each completion is
   one item; end of the map takes `else` and `complete`.
@@ -35,9 +37,15 @@ capitals.
 
 - A workflow is not a component. It has no `on` handlers and no `state`.
 - Completing a step transitions along `->` (or a choice clause). With no
-  input object, the working value is the output of the step that just
-  finished. `-> Name { ... }` replaces the next step's input. That output
-  stays addressable by the step name.
+  input object, the next step's input is the output of the step that just
+  finished. `-> Name { ... }` replaces that input with the message the
+  object evaluates to. `Name` is a step. A task, map, pass, or run stores
+  its output under its step name. A choice does not.
+- Expressions in a step's body see that step's input and the outputs of
+  earlier steps, each addressed by its step name. The input object on an
+  edge that leaves a task, map, pass, or run sees that step's output and
+  those same prior completions. A component handler sees the message the
+  step sent.
 - Fan-out cardinality is known only at run time, including zero and one.
   Fan-in is a reduce: the working value after a map is the reducer's
   `complete` payload, not a collection of item payloads.
@@ -59,7 +67,7 @@ capitals.
   The reducer's `complete` after `else` (including when the list is empty)
   advances the `->` edge. The join MUST NOT materialize an array of all
   payloads as the step output.
-- Choice matches the working value against clause patterns in order. `else`
+- Choice matches the step's input against clause patterns in order. `else`
   MUST be last if present. No match MUST fail the run.
 - Snapshot and restore MUST round-trip a run, including in-flight map items.
 
@@ -126,11 +134,12 @@ paid: pick {
 };
 ```
 
-`pay` is the step name. When `ChargeCard` completes, that value stays
-available as `pay`. `pay.accountId` reads a field of it. The pick pattern
-binds fields of the working value (`quantity`). The object after `fulfill`
-is the input to that step. With no object, the next step receives the
-output of the step that just finished.
+`pay` is the step name. `ChargeCard` is the body of `pay: ChargeCard`. When
+that component completes, the completion is `pay`'s output. `pay.accountId`
+reads a field of it. The pick pattern binds fields of `paid`'s input
+(`quantity`). `fulfill` on the edge is the step declared as
+`fulfill: Pattern`, and the object is that step's input. Input, output, and
+what a step may read are defined in [Working value](#working-value).
 
 - `start name: Pattern Edge` is the entry step. `name: Pattern Edge` is a
   later step. Every step has a name.
@@ -144,8 +153,9 @@ output of the step that just finished.
   `fail E`. `->` is the only edge token. `then` is not a workflow edge.
   `pick` is exclusive: the step has no further `->`, and a clause MUST NOT
   inline a fanout. A clause routes to a step that MAY be a fanout.
-- **task** `name: Kind -> Name` — spawn `Kind`, send the working value, wait
-  for `complete` (Step Functions Task). The completion is kept under `name`.
+- **task** `name: Kind -> Name` — spawn `Kind`, send this step's input, wait
+  for `complete` (Step Functions Task). The completion is this step's output
+  and is kept under `name`.
 - **map** `name: Pattern fanout Expression with Kind into Acc(Init) -> Name`
   — Expression is the list (Step Functions Map). The pattern MAY be omitted
   when the list expression needs no destructure. Spawn one `Kind` per
@@ -158,15 +168,16 @@ output of the step that just finished.
 - **choice** `name: pick { (Pattern) -> Name; (Pattern) -> Name { ... }; else -> Name; }`
   — Step Functions Choice. Each clause names a later step. The pattern is
   grouped so `->` is Kith's edge, not a Uffda Then. A bare field
-  (`quantity`) binds that field of the working value.
+  (`quantity`) binds that field of this step's input. A choice has no
+  output of its own.
 - **pass** `pass Expression` — replace the working value (Pass).
 - **run** `run path` — execute the workflow IR at that key (dynamic graph).
 - **succeed** / **fail Expression** — terminal (Succeed / Fail).
 - `-> Name` | `-> Name { ... }` | `-> succeed` | `-> fail E` is Next / End.
   `-> succeed` is one Next, not the only Next; `-> packed` continues the
-  graph. The object is a message. Its fields are expressions, so
-  `pay.accountId` and a pattern binding (`quantity`) are in scope. Absent
-  the object, the next input is the step output.
+  graph. `Name` is a step name. The object is that step's input message.
+  Its fields are expressions, evaluated in the scope of the step that is
+  leaving. Absent the object, the next input is the step output.
 
 Scene children under a workflow are **prototypes**, not live children. A task
 or map that names that kind clones the prototype tree (ports filled). Otherwise
@@ -174,13 +185,67 @@ it spawns a bare instance (no ports allowed).
 
 ### Working value
 
-- Inject at the root sets the working value and enters `start`.
-- With no input object, a step's output becomes the next step's input
-  (Step Functions default ResultPath `$`). `-> Name { ... }` replaces it.
-- The output of a finished step is kept under that step's name for the rest
-  of the run. `name.field` reads it. A component task's completion is that
-  value.
-- The run's output is the working value at succeed. `kith run` prints it.
+Each step has an input message. A task, map, pass, or run also has an output
+message, stored under that step's name for the rest of the run. A choice,
+`succeed`, and `fail` are not stored under the step name.
+
+In the Order graph the choice arm
+
+```kith
+({ kind: "Paid" }) -> fulfill { orderId: pay.orderId items: pay.items };
+```
+
+names the step `fulfill`. That step is declared as
+
+```kith
+fulfill: { items: any orderId: any } fanout items with Carrier into Summarize(orderId) -> succeed;
+```
+
+The component, or other pattern, is the body of `fulfill: Pattern`. This
+body is a map: it spawns `Carrier` for each item and reduces into
+`Summarize`. `Summarize(orderId)` initializes that accumulator's fields.
+The object after `fulfill` is the message that becomes `fulfill`'s input.
+That edge does not construct a component.
+
+**Into a step.** `-> Name` passes the previous step's output as `Name`'s
+input. `-> Name { ... }` evaluates the object as a message, and that message
+is `Name`'s input. Inject at the root is the `start` step's input. A task
+sends its input to the component and waits for `complete`. A map matches its
+pattern against its input, sends one item message per element, and
+initializes the accumulator from the `into` arguments. A choice matches its
+input against the clause patterns.
+
+**Out of a step.** A component step's output is the value that component
+`complete`s. Later steps read it by the step name (`pay.accountId`). A map's
+output is the accumulator's `complete` payload. A `pass` output is its
+expression. A destructure followed only by `->` keeps the input. A choice selects the
+next step and that step's input. `succeed` ends the run with its input.
+`fail` ends the run with the error. The output is stored under the step name
+before an outgoing input object is evaluated, so that object may read the
+step that just finished.
+
+**In scope at a step.** An expression in the step's body sees two sources:
+
+- the run's prior step completions, addressed by step name
+- that step's own input: the fields its pattern binds, or, when it has no
+  pattern, the fields of the input message
+
+A name bound from the input is the binding the expression sees when that
+name is also a step name. A message that is not an object has no field
+bindings; it is still the input a task sends or a pass keeps. A component
+handler does not see this scope. It sees the message the step sent.
+
+A choice clause binds fields of that choice step's input. Those bindings and
+the prior completions are in scope for the clause's input object. In
+`({ kind: "Paid" quantity }) -> fulfill { accountId: pay.accountId quantity }`,
+`quantity` is bound from `paid`'s input and `pay.accountId` is the output of
+the step `pay`.
+
+An input object on the edge that leaves a task, map, pass, or run is
+evaluated from that step's output fields and the prior completions, including
+the step that just finished.
+
+The run's output is the input of `succeed`. `kith run` prints it.
 
 ### Waiting for an outside message
 
@@ -239,6 +304,10 @@ Inject `{ kind: "Start", items: ["a", "b"] }` at `Import` MUST map two
   (`send to` / `send up`). Order is a graph (`->` / `pick` / `fanout`).
 - **One edge.** A sequential step and a choice arm both name the next step
   with `->`. A second word for that edge is not part of the graph.
+- **The name on an edge is a step.** The component is the body of the step
+  declared as `name: Pattern`. The object after the name is that step's
+  input message, so the graph can pass a new message without hiding the
+  node that produced the previous one.
 - **The graph is data.** That is what makes dynamic steps, runtime-built
   workflows, and rehydration the same interpreter.
 - **Fan-in is an accumulator component, not a collect.** A results array is
