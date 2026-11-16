@@ -1,0 +1,21 @@
+[package]
+name = "kith-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Kith runtime: components, message dispatch, and workflows on Uffda"
+repository = "https://github.com/justinmchase/kith"
+homepage = "https://github.com/justinmchase/kith"
+documentation = "https://docs.rs/kith-runtime"
+readme = "README.md"
+keywords = ["kith", "uffda", "workflow", "actor"]
+categories = ["compilers"]
+publish = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+time = "0.3.55"
+uffda-heap = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468", default-features = false }
+uffda-runtime = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468", default-features = false }
+url = "2"

@@ -1,8 +1,8 @@
 name: Release Binaries
 
 # Compile the kith CLI and attach it to a GitHub Release. The grammar is
-# compiled by a released uffda CLI during the build. Libraries stay off
-# crates.io until kith-runtime is extracted; see runtime.spec.md Packages.
+# compiled by a released uffda CLI during the build. kith-runtime publishes
+# separately via Publish; see runtime.spec.md Packages.
 on:
   workflow_dispatch:
     inputs:

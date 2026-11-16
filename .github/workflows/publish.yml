@@ -1,0 +1,47 @@
+name: Publish
+# crates.io library via OIDC trusted publishing. CLI binaries attach earlier
+# via Release Binaries.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  crates-io:
+    name: crates.io
+    runs-on: ubuntu-latest
+    # Must match the Trusted Publishing "environment" on kith-runtime at crates.io
+    # (optional there; if set on crates.io, this name must match).
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Align crate versions with the release tag
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          tag="${tag#v}"
+          for manifest in Cargo.toml crates/kith-runtime/Cargo.toml; do
+            ver="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$manifest" | head -1)"
+            if [[ "$ver" != "$tag" ]]; then
+              echo "${manifest} version ${ver} != release tag ${tag}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Authenticate to crates.io (OIDC)
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish kith-runtime
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish -p kith-runtime --locked
