@@ -1,6 +1,6 @@
 use crate::ast::Program;
 use crate::codec::encode;
-use crate::doc;
+use crate::doc::{self, Doc};
 use crate::error::Error;
 use crate::interpreter::World;
 use crate::parse::{artifact_document, load_program, parse_file};
@@ -20,7 +20,7 @@ pub enum Command {
     },
     Run {
         path: PathBuf,
-        message: Option<Json>,
+        message: Option<Doc>,
         argv: Vec<String>,
     },
     Version,
@@ -59,10 +59,7 @@ pub fn parse_args(args: &[String]) -> Result<Command, Error> {
                     let value = args
                         .next()
                         .ok_or_else(|| Error::new("kith run --message needs JSON"))?;
-                    message = Some(
-                        serde_json::from_str(value)
-                            .map_err(|error| Error::new(error.to_string()))?,
-                    );
+                    message = Some(message_document(value)?);
                 } else if arg == "--" {
                     argv.extend(args.cloned());
                     break;
@@ -132,13 +129,13 @@ pub fn run(command: Command) -> Result<RunResult, Error> {
 
 pub fn run_program(
     program: Program,
-    message: Option<Json>,
+    message: Option<Doc>,
     argv: Vec<String>,
 ) -> Result<RunResult, Error> {
     let mut world = World::start(program)?;
     world.set_argv(argv);
     if let Some(message) = message {
-        world.inject(message)?;
+        world.inject_document(message)?;
     }
     finish(&mut world)?;
     let text = if world.suppress_result() {
@@ -150,6 +147,15 @@ pub fn run_program(
         text,
         code: world.exit_code().unwrap_or(0),
     })
+}
+
+/// JSON when the text is JSON. A data codec record otherwise, so a symbol
+/// message is `[s"Ping" 7]`.
+fn message_document(text: &str) -> Result<Doc, Error> {
+    match serde_json::from_str::<Json>(text) {
+        Ok(json) => doc::from_json(&json),
+        Err(json_error) => doc::decode(text).map_err(|_| Error::new(json_error.to_string())),
+    }
 }
 
 fn finish(world: &mut World) -> Result<(), Error> {

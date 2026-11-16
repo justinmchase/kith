@@ -414,7 +414,10 @@ impl World {
 
     /// External edge: `kith run --message` passes one JSON value.
     pub fn inject(&mut self, message: Json) -> Result<(), Error> {
-        let message = doc::from_json(&message)?;
+        self.inject_document(doc::from_json(&message)?)
+    }
+
+    pub fn inject_document(&mut self, message: Doc) -> Result<(), Error> {
         if self.instances[&self.root_id()].run.is_some() {
             let sends = self.start_run(self.root_id(), message)?;
             for (to, message, route) in sends {

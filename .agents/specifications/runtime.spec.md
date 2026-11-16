@@ -249,7 +249,8 @@ that wait; they return `undefined` now. The real driver for a kind this
 runtime provides is the built-in import in
 [built-ins](./builtins.spec.md#registration). `Pipe` and `Clock` are those
 drivers. The scene-filled `Http` in `examples/health.kith` remains the user
-mock and still replies with one `"Response"`. `kith:http` is not this slice.
+mock and still replies with one `@Response`. `kith:http` is not this slice.
+The mock does not import `kith:http`.
 
 The normative program is `examples/health.kith`: a HealthCheck that probes
 through Checking, Waiting, and Validating, then waits 5 seconds before the
@@ -262,9 +263,9 @@ for the same later-message shape without a child.
 ```kith
 component Http {
   start {
-    on down "GET" url:any {
+    on down @GET url:any {
       (writeLine stdout "Requested" url);
-      send after (rand 1 3) up "Response" 200 "ok";
+      send after (rand 1 3) up @Response 200 "ok";
     }
   }
 }
@@ -272,14 +273,14 @@ component Http {
 component Client {
   http: Http;
   start Idle {
-    on down "Go" url:any {
-      send to http "GET" url;
+    on down @Go url:any {
+      send to http @GET url;
       goto Sending;
     }
   }
   state Sending {
-    on up "Response" status:number body:any {
-      send up "Done" status body;
+    on up @Response status:number body:any {
+      send up @Done status body;
       goto Idle;
     }
   }
@@ -292,36 +293,36 @@ component HealthCheck {
   client: Client;
   start Checking {
     on init {
-      send self "Tick";
+      send self @Tick;
     }
-    on self "Tick" {
-      send to client "Go" "https://example.com";
+    on self @Tick {
+      send to client @Go "https://example.com";
       goto Waiting;
     }
   }
   state Waiting {
-    on up "Done" status:number body:any {
+    on up @Done status:number body:any {
       s1 -> s2;
       s2 -> s3;
       s3 -> status;
-      send self "Check" s1 s2 s3;
+      send self @Check s1 s2 s3;
       goto Validating;
     }
   }
   state Validating {
-    on self "Check" a:200 b:200 c:200 {
+    on self @Check a:200 b:200 c:200 {
       (writeLine stdout "Healthy");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
-    on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
+    on self @Check a:(number & not 200) b:(number & not 200) c:(number & not 200) {
       (writeLine stdout "Unhealthy");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
     else {
       (writeLine stdout "Indeterminate");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
   }

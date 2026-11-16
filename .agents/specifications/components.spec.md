@@ -89,8 +89,8 @@ primitive ([workflows](./workflows.spec.md)).
 ```kith
 component Child {
   start {
-    on down "Ping" n:number {
-      send up "Pong" n;
+    on down @Ping n:number {
+      send up @Pong n;
     }
   }
 }
@@ -100,10 +100,10 @@ component Ping {
   child: Child;
 
   start {
-    on down "Ping" n:number {
-      send to child "Ping" n;
+    on down @Ping n:number {
+      send to child @Ping n;
     }
-    on up "Pong" n:number {
+    on up @Pong n:number {
       heard -> n;
     }
   }
@@ -153,8 +153,9 @@ export scene Main {
   a parent's request shape continues up.
 - `on item: any { ... }` is a capture: the whole message is bound as `item`.
   A map accumulator uses that for each completion; see
-  [reduce](./workflows.spec.md#declaration). `on "Ping" n:number` is Then
-  of a tag and a payload: it matches the sequence `["Ping", n]`.
+  [reduce](./workflows.spec.md#declaration). `on @Ping n:number` is Then
+  of the symbol `Ping` and a payload. It matches that symbol and `n`, and
+  MUST NOT match the string `"Ping"`.
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `else`
   MAY be a single statement: `else complete { kind: "Summarize" total };`.
@@ -374,8 +375,8 @@ One prefix MUST project that pattern, not a Then of length one.
 
 ## Example
 
-Injecting `["Ping", 7]` at `Ping` MUST `send to child`, Child MUST
-`send up` `["Pong", 7]`, and `Ping.heard` MUST be `7`. The Order
+Injecting the symbol `Ping` and `7` at `Ping` MUST `send to child`, Child
+MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`. The Order
 workflow is in [workflows](./workflows.spec.md#example).
 
 ## Why this design

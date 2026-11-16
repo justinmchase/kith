@@ -186,7 +186,12 @@ fn mixed_parent_program(handlers: Vec<Handler>) -> Program {
 // req:components-001 req:scenes-001
 fn parent_owns_scene_constructed_children() {
     let mut world = World::start(ping_program()).expect("start");
-    world.inject(json!(["Ping", 1])).unwrap();
+    world
+        .inject_document(kith::doc::array([
+            kith::doc::symbol("Ping"),
+            kith::doc::number(1.0),
+        ]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.kind(world.root_id()), Some("Ping"));
     assert_eq!(world.children_of_kind(world.root_id(), "Child").len(), 1);
@@ -627,8 +632,20 @@ fn first_matching_handler_consumes_the_message() {
 #[test]
 // req:components-006 req:components-017
 fn ping_example_sets_heard_to_seven() {
+    let mut missed = World::start(ping_program()).expect("start");
+    let err = missed
+        .inject(json!(["Ping", 7.0]))
+        .and_then(|_| missed.run_until_idle())
+        .expect_err("string Ping does not match @Ping");
+    assert!(err.message.contains("unmatched"), "{}", err.message);
+
     let mut world = World::start(ping_program()).expect("start");
-    world.inject(json!(["Ping", 7])).unwrap();
+    world
+        .inject_document(kith::doc::array([
+            kith::doc::symbol("Ping"),
+            kith::doc::number(7.0),
+        ]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
@@ -1133,7 +1150,14 @@ fn http_parent_response_is_unmatched_down() {
     world.run_until_idle().unwrap();
     let client = world.child(world.root_id(), "client").expect("client");
     let err = world
-        .send(client, json!(["Response", 200.0, "ok"]))
+        .send_document(
+            client,
+            kith::doc::array([
+                kith::doc::symbol("Response"),
+                kith::doc::number(200.0),
+                kith::doc::string("ok"),
+            ]),
+        )
         .and_then(|_| world.run_until_idle())
         .expect_err("parent Response must not match on up");
     assert!(err.message.contains("unmatched"));

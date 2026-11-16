@@ -91,7 +91,7 @@ fn parse_check_compile_and_run_ping() {
         "compile artifact must be a data codec record, not JSON"
     );
 
-    let ran = run(&["run", ping, "--message", r#"["Ping",7]"#]);
+    let ran = run(&["run", ping, "--message", r#"[s"Ping" 7]"#]);
     // req:runtime-004 — process stdout is the run-result record, not a stream write.
     assert!(ran.status.success(), "{}", stderr(&ran));
     let stdout = String::from_utf8_lossy(&ran.stdout);
@@ -127,12 +127,7 @@ export scene Main { Box(); }
 "#,
     )
     .unwrap();
-    let ran = run(&[
-        "run",
-        path.to_str().unwrap(),
-        "--message",
-        r#"["Ping",7]"#,
-    ]);
+    let ran = run(&["run", path.to_str().unwrap(), "--message", r#"["Ping",7]"#]);
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
     assert_eq!(fields["heard"], json!(7.0));

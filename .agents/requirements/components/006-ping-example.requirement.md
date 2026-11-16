@@ -14,8 +14,9 @@ Preconditions:
 
 Expected behavior:
 
-- Injecting `["Ping", 7]` MUST `send to child`, Child MUST
-  `send up` `["Pong", 7]`, and `Ping.heard` MUST be `7`.
+- Injecting the symbol `Ping` and `7` MUST `send to child`, Child MUST
+  `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
+  The string `"Ping"` MUST NOT match `on @Ping`.
 
 Postconditions:
 

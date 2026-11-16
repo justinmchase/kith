@@ -1,3 +1,4 @@
+use kith::doc;
 use kith::parse::{parse_source, resolve_program};
 use kith::World;
 use serde_json::json;
@@ -24,13 +25,12 @@ fn ping_source_parses_to_the_component_tree() {
     let child = program.component("Child").expect("Child");
     assert_eq!(child.states[0].handlers[0].route, ["down"]);
     assert_eq!(child.states[0].handlers[0].pattern["kind"], "then");
-    assert_eq!(
-        child.states[0].handlers[0].pattern["patterns"]
-            .as_array()
-            .expect("then")
-            .len(),
-        2
-    );
+    let prefixes = child.states[0].handlers[0].pattern["patterns"]
+        .as_array()
+        .expect("then");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[0]["kind"], "symbol");
+    assert_eq!(prefixes[0]["name"], "Ping");
     let ping = program.component("Ping").expect("Ping");
     assert_eq!(ping.states[0].handlers[0].route, ["down"]);
     assert_eq!(ping.states[0].handlers[1].route, ["up"]);
@@ -49,7 +49,9 @@ fn ping_source_parses_to_the_component_tree() {
         .any(|child| child.key.as_deref() == Some("child") && child.component == "Child"));
 
     let mut world = World::start(program).expect("interpreter accepts parsed tree");
-    world.inject(json!(["Ping", 7])).unwrap();
+    world
+        .inject_document(doc::array([doc::symbol("Ping"), doc::number(7.0)]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
@@ -267,10 +269,17 @@ fn order_source_parses_tasks_picks_and_map() {
 // req:grammar-001 req:runtime-002 req:components-012 req:runtime-003 req:components-014 req:components-015 req:components-016 req:components-017
 fn http_source_parses_client_and_mock() {
     let program = parse_source(include_str!("../examples/health.kith")).expect("parse http.kith");
+    assert!(program
+        .imports
+        .iter()
+        .all(|import| import.module_url != "kith:http"));
     let client = program.component("Client").expect("Client");
     assert_eq!(client.states[0].name, "Idle");
     assert!(client.states[0].named);
     assert_eq!(client.states[0].handlers[0].route, ["down"]);
+    let go = &client.states[0].handlers[0].pattern["patterns"][0];
+    assert_eq!(go["kind"], "symbol");
+    assert_eq!(go["name"], "Go");
     let sending = client
         .states
         .iter()
