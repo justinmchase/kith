@@ -78,10 +78,10 @@ Higher-level languages link a library. Operators install a binary. Those are
 different packages, on the same split Uffda uses: libraries on crates.io, the
 product CLI on GitHub Releases.
 
-The repository still builds as one Cargo package named `kith`. The first
-crates.io publish MUST be the library crates below, extracted on these
-boundaries. That publish MUST leave `publish = false` on the CLI package.
-The combined package MUST NOT be published to crates.io.
+The repository is a Cargo workspace. crates.io publish MUST be the library
+crates below. That publish MUST leave `publish = false` on the CLI package.
+The combined package MUST NOT be published to crates.io. The crate name `kith`
+is taken on crates.io by an unrelated project.
 
 | Package | Ships as | A language uses it to |
 | --- | --- | --- |

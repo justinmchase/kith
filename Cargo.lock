@@ -581,10 +581,21 @@ dependencies = [
 name = "kith"
 version = "0.1.0"
 dependencies = [
+ "kith-runtime",
+ "serde",
+ "serde_json",
+ "uffda-build",
+ "uffda-runtime",
+ "url",
+]
+
+[[package]]
+name = "kith-runtime"
+version = "0.1.0"
+dependencies = [
  "serde",
  "serde_json",
  "time",
- "uffda-build",
  "uffda-heap",
  "uffda-runtime",
  "url",
