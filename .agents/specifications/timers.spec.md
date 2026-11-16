@@ -59,7 +59,7 @@ capitals.
 ```kith
 send after (rand 1 3) up { kind: "Delivered" };
 send after 2 up { kind: "Delivered" };
-send after 5 self "Tick";
+send after 5 self @Tick;
 ```
 
 A `send after Delay self V` is how a component runs later without a child

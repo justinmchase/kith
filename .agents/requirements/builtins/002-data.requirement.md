@@ -29,7 +29,7 @@ Expected behavior:
   `(buffer_bytes buffer)` MUST return new bytes for the window. The `Buffer`
   rule MUST match a window whose bounds sit inside the bytes.
 - A function that was not imported MUST fail as an unknown callee.
-  `(to_codec (bytes …))` MUST emit `@bytes`, and `(from_codec …)` of that
+  `(to_codec (bytes …))` MUST emit `b"…"`. `(from_codec …)` of that
   text MUST round-trip through `(byte_at …)`. `(sha256 text)` MUST be a
   byte value `(byte_length …)` can measure. A nested `(byte_length …)`
   inside `(add …)` MUST run.

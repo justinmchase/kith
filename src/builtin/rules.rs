@@ -16,8 +16,10 @@ use uffda_runtime::runtime::{RuleExecution, RuntimeError};
 use url::Url;
 
 pub fn uses_rule(pattern: &serde_json::Value, rules: &[String]) -> bool {
-    // The Kith grammar embeds the Uffda pattern syntax tree as JSON.
-    let Ok(pattern) = parse_pattern(pattern) else {
+    // Symbol prefixes are rewritten before parse so a rule inside
+    // `on @Env { HOST_NAME: OptionalValue }` is still visible.
+    let pattern = crate::host::uffda_pattern(pattern);
+    let Ok(pattern) = parse_pattern(&pattern) else {
         return false;
     };
     pattern_uses(&pattern, rules)
@@ -28,11 +30,14 @@ pub fn match_with_rules(
     message: &Doc,
     rules: &[String],
 ) -> Result<Option<HashMap<String, Doc>>, Error> {
-    if !uses_rule(pattern, rules) {
+    if !crate::host::symbol_names_match(pattern, message) {
+        return Ok(None);
+    }
+    let prepared = crate::host::uffda_pattern(pattern);
+    if !uses_rule(&prepared, rules) {
         return crate::host::match_document(pattern, message);
     }
-    // The Kith grammar embeds the Uffda pattern syntax tree as JSON.
-    let parsed = parse_pattern(pattern)?;
+    let parsed = parse_pattern(&prepared)?;
     let input = match &parsed {
         Pattern::Then { patterns } => {
             let Some(items) = doc::items(message) else {
@@ -45,7 +50,7 @@ pub fn match_with_rules(
         }
         _ => vec![message.clone()],
     };
-    let graph = harness(pattern, &parsed, rules)?;
+    let graph = harness(&prepared, &parsed, rules)?;
     let names = binding_names(&parsed);
     let mut arena: Arena<Rootable![RuleExecution<'_>]> = Arena::try_new(|mc| {
         let values = input.iter().map(|item| item.materialize(mc)).collect();
@@ -246,6 +251,7 @@ fn harness(
         ("kith:data", &["Bytes", "Blob", "Buffer"][..]),
         ("kith:stream", &["Chunk", "End"][..]),
         ("kith:time", &["Instant", "DateTime", "Zone"][..]),
+        ("kith:process", &["OptionalValue", "RequiredValue"][..]),
     ] {
         let used: Vec<_> = module_names
             .iter()

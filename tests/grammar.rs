@@ -1,3 +1,4 @@
+use kith::doc;
 use kith::parse::{parse_source, resolve_program};
 use kith::World;
 use serde_json::json;
@@ -24,13 +25,12 @@ fn ping_source_parses_to_the_component_tree() {
     let child = program.component("Child").expect("Child");
     assert_eq!(child.states[0].handlers[0].route, ["down"]);
     assert_eq!(child.states[0].handlers[0].pattern["kind"], "then");
-    assert_eq!(
-        child.states[0].handlers[0].pattern["patterns"]
-            .as_array()
-            .expect("then")
-            .len(),
-        2
-    );
+    let prefixes = child.states[0].handlers[0].pattern["patterns"]
+        .as_array()
+        .expect("then");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[0]["kind"], "symbol");
+    assert_eq!(prefixes[0]["name"], "Ping");
     let ping = program.component("Ping").expect("Ping");
     assert_eq!(ping.states[0].handlers[0].route, ["down"]);
     assert_eq!(ping.states[0].handlers[1].route, ["up"]);
@@ -49,7 +49,9 @@ fn ping_source_parses_to_the_component_tree() {
         .any(|child| child.key.as_deref() == Some("child") && child.component == "Child"));
 
     let mut world = World::start(program).expect("interpreter accepts parsed tree");
-    world.inject(json!(["Ping", 7])).unwrap();
+    world
+        .inject_document(doc::array([doc::symbol("Ping"), doc::number(7.0)]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
@@ -266,11 +268,18 @@ fn order_source_parses_tasks_picks_and_map() {
 #[test]
 // req:grammar-001 req:runtime-002 req:components-012 req:runtime-003 req:components-014 req:components-015 req:components-016 req:components-017
 fn http_source_parses_client_and_mock() {
-    let program = parse_source(include_str!("../examples/http.kith")).expect("parse http.kith");
+    let program = parse_source(include_str!("../examples/health.kith")).expect("parse http.kith");
+    assert!(program
+        .imports
+        .iter()
+        .all(|import| import.module_url != "kith:http"));
     let client = program.component("Client").expect("Client");
     assert_eq!(client.states[0].name, "Idle");
     assert!(client.states[0].named);
     assert_eq!(client.states[0].handlers[0].route, ["down"]);
+    let go = &client.states[0].handlers[0].pattern["patterns"][0];
+    assert_eq!(go["kind"], "symbol");
+    assert_eq!(go["name"], "Go");
     let sending = client
         .states
         .iter()
@@ -429,6 +438,37 @@ export scene Main { Box(); }
         other => panic!("expected expr, got {other:?}"),
     }
     World::check(&program).expect("sequence program checks");
+
+    let later = parse_source(
+        r#"
+export Box;
+export Main;
+component Box {
+  start {
+    on up @Env { HOST_NAME: string PORT: string } {
+      send self "Ready";
+    }
+    on "Tick" {}
+  }
+}
+export scene Main { Box(); }
+"#,
+    )
+    .expect("parse later object");
+    let start = &later.component("Box").expect("Box").states[0];
+    assert_eq!(start.handlers[0].pattern["kind"], "then");
+    let prefixes = start.handlers[0].pattern["patterns"]
+        .as_array()
+        .expect("prefixes");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[0]["kind"], "symbol");
+    assert_eq!(prefixes[0]["name"], "Env");
+    assert_eq!(prefixes[1]["kind"], "over");
+    assert!(prefixes[1].get("name").is_none());
+    assert!(start.handlers[0].body.len() == 1);
+    assert!(start.handlers[1].body.is_empty());
+    assert_eq!(start.handlers[1].pattern["kind"], "equal");
+    World::check(&later).expect("later object checks");
 }
 
 #[test]

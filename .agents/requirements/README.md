@@ -90,3 +90,5 @@ verify it cite it with `req:{id}`.
 - [Crypto](./edges/006-crypto.requirement.md)
 - [Path](./edges/007-path.requirement.md)
 - [Process](./edges/008-process.requirement.md)
+- [Hello world server](./edges/009-hello-world.requirement.md)
+- [Http example server](./edges/010-http-example.requirement.md)

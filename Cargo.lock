@@ -1044,15 +1044,13 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "uffda-build"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd552ca052c35853fa6ed17a6ac0d552850d3aea96fc2e592e06e6059594cf1e"
+version = "0.10.9"
+source = "git+https://github.com/justinmchase/uffda?rev=61c06f3eb2dff9f9f399e110754691024b06e468#61c06f3eb2dff9f9f399e110754691024b06e468"
 
 [[package]]
 name = "uffda-codec"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dfcb85a9e591ab680b26f4319a6a84980853ab56968d038cae4690cd28cf5c3"
+version = "0.10.9"
+source = "git+https://github.com/justinmchase/uffda?rev=61c06f3eb2dff9f9f399e110754691024b06e468#61c06f3eb2dff9f9f399e110754691024b06e468"
 dependencies = [
  "base64 0.22.1",
  "num-bigint",
@@ -1064,9 +1062,8 @@ dependencies = [
 
 [[package]]
 name = "uffda-heap"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bea5c015c21f96ae4034f0d098d32db1c6d67f12bd24ccb0eb32fe9b7de3ed4c"
+version = "0.10.9"
+source = "git+https://github.com/justinmchase/uffda?rev=61c06f3eb2dff9f9f399e110754691024b06e468#61c06f3eb2dff9f9f399e110754691024b06e468"
 dependencies = [
  "gc-arena",
  "uffda-heap-derive",
@@ -1074,9 +1071,8 @@ dependencies = [
 
 [[package]]
 name = "uffda-heap-derive"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fada3c7d89ac462a9cace370b8566dac5ef3424ede174e24f5a57ce2264c519e"
+version = "0.10.9"
+source = "git+https://github.com/justinmchase/uffda?rev=61c06f3eb2dff9f9f399e110754691024b06e468#61c06f3eb2dff9f9f399e110754691024b06e468"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1086,9 +1082,8 @@ dependencies = [
 
 [[package]]
 name = "uffda-runtime"
-version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e76e764178ad2d54a45a231c14f960858b79578d7ee2c1fef4252ad32edc747"
+version = "0.10.9"
+source = "git+https://github.com/justinmchase/uffda?rev=61c06f3eb2dff9f9f399e110754691024b06e468#61c06f3eb2dff9f9f399e110754691024b06e468"
 dependencies = [
  "base64 0.22.1",
  "bs58",

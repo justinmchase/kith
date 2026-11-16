@@ -387,15 +387,30 @@ struct Command {
     args: Vec<Doc>,
 }
 
-fn command(message: &Doc) -> Command {
-    if let Some(text) = doc::as_str(message) {
+impl Edge {
+    /// `kith:http` and `kith:process` take and reply with registry symbols.
+    pub fn speaks_symbols(&self) -> bool {
+        matches!(self.kind, Kind::Http | Kind::Server | Kind::Process)
+    }
+}
+
+fn command_name(doc: &Doc, symbols: bool) -> Option<String> {
+    if symbols {
+        doc::as_symbol(doc)
+    } else {
+        doc::as_str(doc)
+    }
+}
+
+fn command(message: &Doc, symbols: bool) -> Command {
+    if let Some(text) = command_name(message, symbols) {
         return Command {
             name: text,
             args: Vec::new(),
         };
     }
     if let Some(items) = doc::items(message) {
-        if let Some(name) = items.first().and_then(|item| doc::as_str(item)) {
+        if let Some(name) = items.first().and_then(|item| command_name(item, symbols)) {
             return Command {
                 name,
                 args: items.into_iter().skip(1).collect(),
@@ -429,6 +444,14 @@ fn bytes_arg(args: &[Doc], index: usize) -> Option<Vec<u8>> {
     doc::as_bytes(args.get(index)?)
 }
 
+/// A server push body is raw bytes, or text encoded as UTF-8.
+fn push_body(args: &[Doc], index: usize) -> Option<Vec<u8>> {
+    if let Some(bytes) = bytes_arg(args, index) {
+        return Some(bytes);
+    }
+    text_arg(args, index).map(String::into_bytes)
+}
+
 fn headers_arg(value: &Doc) -> Result<Vec<(String, String)>, ()> {
     if doc::is_null(value) {
         return Ok(Vec::new());
@@ -450,7 +473,7 @@ fn header_doc(headers: &[(String, String)]) -> Doc {
 }
 
 pub fn step(edge: Edge, actor: u64, message: &Doc, host: &mut Host, io: &IoShared) -> Outcome {
-    let command = command(message);
+    let command = command(message, edge.speaks_symbols());
     let multiplexed = matches!(edge.kind, Kind::Listener | Kind::Server);
     let id = if multiplexed {
         text_arg(&command.args, 0)
@@ -790,7 +813,21 @@ fn parse_url(url: &str) -> Result<Target, ()> {
 fn server(mut edge: Edge, command: Command) -> Outcome {
     match command.name.as_str() {
         "Listen" => {
-            let Some(port) = doc::as_u64(command.args.first().unwrap_or(&doc::null())) else {
+            let (host, port_doc) = if command.args.len() >= 2 {
+                let Some(host) = text_arg(&command.args, 0) else {
+                    return done(edge, vec![failure(None, "host")]);
+                };
+                if host.is_empty() {
+                    return done(edge, vec![failure(None, "host")]);
+                }
+                (host, command.args.get(1).cloned().unwrap_or_else(doc::null))
+            } else {
+                (
+                    "127.0.0.1".into(),
+                    command.args.first().cloned().unwrap_or_else(doc::null),
+                )
+            };
+            let Some(port) = doc::as_u64(&port_doc) else {
                 return done(edge, vec![failure(None, "port")]);
             };
             if port > u16::MAX as u64 {
@@ -799,7 +836,7 @@ fn server(mut edge: Edge, command: Command) -> Outcome {
             edge.listening = true;
             let mut outcome = done(edge, vec![]);
             outcome.listen = Some(ListenOn {
-                host: "127.0.0.1".into(),
+                host,
                 port: port as u16,
                 server: true,
             });
@@ -844,7 +881,7 @@ fn server(mut edge: Edge, command: Command) -> Outcome {
             let Some(id) = text_arg(&command.args, 0) else {
                 return done(edge, vec![failure(None, "id")]);
             };
-            let Some(bytes) = bytes_arg(&command.args, 1) else {
+            let Some(bytes) = push_body(&command.args, 1) else {
                 return done(edge, vec![failure(Some(&id), "bytes")]);
             };
             let Some((_, response)) = edge.responses.iter_mut().find(|(name, _)| name == &id)
@@ -1092,16 +1129,27 @@ fn process(edge: Edge, command: Command, host: &Host) -> Outcome {
             )],
         ),
         "Env" => {
-            let Some(name) = text_arg(&command.args, 0) else {
+            let Some(names) = command.args.first().and_then(doc::items) else {
                 return done(edge, vec![failure(None, "name")]);
             };
-            match host.env.get(&name) {
-                Some(value) => done(
-                    edge,
-                    vec![reply("Env", [doc::string(&name), doc::string(value)])],
-                ),
-                None => done(edge, vec![reply("Missing", [doc::string(name)])]),
+            if command.args.len() != 1 || names.is_empty() {
+                return done(edge, vec![failure(None, "name")]);
             }
+            let mut entries = Vec::with_capacity(names.len());
+            for item in names {
+                let Some(name) = doc::as_str(&item) else {
+                    return done(edge, vec![failure(None, "name")]);
+                };
+                if entries.iter().any(|(key, _): &(String, Doc)| key == &name) {
+                    continue;
+                }
+                let value = match host.env.get(&name) {
+                    Some(value) => doc::string(value),
+                    None => doc::null(),
+                };
+                entries.push((name, value));
+            }
+            done(edge, vec![reply("Env", [doc::object(entries)])])
         }
         "Exit" => {
             let Some(code) = doc::as_u64(command.args.first().unwrap_or(&doc::null())) else {
