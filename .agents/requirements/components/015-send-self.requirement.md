@@ -10,7 +10,7 @@ spec_ref: .agents/specifications/components.spec.md#sending; .agents/specificati
 
 Preconditions:
 
-- `examples/http.kith` HealthCheck `send self`s Tick and Check, and
+- `examples/health.kith` HealthCheck `send self`s Tick and Check, and
   `send after 5 self` the next Tick.
 
 Expected behavior:

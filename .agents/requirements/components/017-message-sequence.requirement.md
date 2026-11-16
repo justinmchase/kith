@@ -21,10 +21,21 @@ Expected behavior:
   `send self "Check" s1 s2 s3` MUST send `["Check", s1, s2, s3]`.
   `on self "Check" a:200 b:200 c:200` MUST match only when the three
   captures are `200`.
+- A newline between arguments MUST NOT end the statement.
+  `send to child @Listen` with `(coalesce "127.0.0.1")` and
+  `(int (coalesce "3000"))` on following lines MUST send the symbol
+  `Listen`, then `"127.0.0.1"`, then `3000`, as one statement.
+  `on @Listen` MUST match that symbol and MUST NOT match the string
+  `"Listen"`.
 - An object argument MUST remain one value. `send up { kind: "Done" status body }`
   MUST send an object. `on v:{ kind: "Done" status body }` MUST bind `v`
   to that object. `on { kind: "GET" url: any }` MUST match an object
   without commas between entries.
+- A later non-empty `{ ... }` MUST be an object prefix.
+  `on up @Env { HOST_NAME: string PORT: string }` MUST project a Then
+  whose first pattern is the symbol `Env` and
+  whose second pattern is an Over, and MUST NOT bind that object under a
+  name. `on "Tick" {}` MUST stay an empty body.
 - A Then of N prefixes MUST NOT match an array of a different length.
 - `complete` MUST take the same value list as `send`.
 

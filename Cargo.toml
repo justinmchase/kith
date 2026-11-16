@@ -20,8 +20,8 @@ path = "src/main.rs"
 kith-runtime = { path = "crates/kith-runtime", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-uffda-runtime = { version = "0.10.8", default-features = false }
+uffda-runtime = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468", default-features = false }
 url = "2"
 
 [build-dependencies]
-uffda-build = "0.10.8"
+uffda-build = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468" }

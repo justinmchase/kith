@@ -1,0 +1,40 @@
+import "kith:http" Server;
+import "kith:process" Process OptionalValue;
+
+export Hello;
+export Main;
+
+component Hello {
+  server: Server;
+  proc: Process;
+
+  start {
+    on init {
+      send to proc @Env ["HOST_NAME" "PORT"];
+    }
+    on up @Env { HOST_NAME: OptionalValue PORT: OptionalValue } {
+      send to server @Listen
+        (coalesce HOST_NAME "127.0.0.1")
+        (int (coalesce PORT "3000"));
+    }
+    on up @Listening host:string port:number {
+      (print "Server running at http://{host}:{port}/");
+      goto Listening;
+    }
+  }
+
+  state Listening {
+    on up @Request id:string method:string path:string headers:any {
+      send to server @Status id 200 { "Content-Type": "text/plain" };
+      send to server @Push id "Hello, World!\n";
+      send to server @BodyEnd id;
+    }
+  }
+}
+
+export scene Main {
+  Hello() {
+    server = Server();
+    proc = Process();
+  }
+}

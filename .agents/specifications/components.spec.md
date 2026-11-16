@@ -89,8 +89,8 @@ primitive ([workflows](./workflows.spec.md)).
 ```kith
 component Child {
   start {
-    on down "Ping" n:number {
-      send up "Pong" n;
+    on down @Ping n:number {
+      send up @Pong n;
     }
   }
 }
@@ -100,10 +100,10 @@ component Ping {
   child: Child;
 
   start {
-    on down "Ping" n:number {
-      send to child "Ping" n;
+    on down @Ping n:number {
+      send to child @Ping n;
     }
-    on up "Pong" n:number {
+    on up @Pong n:number {
       heard -> n;
     }
   }
@@ -134,7 +134,9 @@ export scene Main {
 - `on pattern { ... }` is a transition in that state. The pattern is a
   Uffda Then of prefixes up to the handler `{`: a quoted string, a
   capture (`n:number`, `v:{ kind: "Done" status body }`), a single atom
-  (`any`, a type name), or one object. Several prefixes match a sequence
+  (`any`, a type name), or one object. A non-empty `{ ... }` after another
+  prefix is that object. `on "Tick" {}` is an empty body, not an empty
+  object pattern. Several prefixes match a sequence
   (`on self "Check" a:200 b:200 c:200`). One prefix is that pattern, not
   wrapped. `on (pattern) { ... }` groups a full Uffda pattern (Or / Then /
   Pipe) so `|` and juxtaposition cannot eat the handler body. Bindings from
@@ -151,8 +153,9 @@ export scene Main {
   a parent's request shape continues up.
 - `on item: any { ... }` is a capture: the whole message is bound as `item`.
   A map accumulator uses that for each completion; see
-  [reduce](./workflows.spec.md#declaration). `on "Ping" n:number` is Then
-  of a tag and a payload: it matches the sequence `["Ping", n]`.
+  [reduce](./workflows.spec.md#declaration). `on @Ping n:number` is Then
+  of the symbol `Ping` and a payload. It matches that symbol and `n`, and
+  MUST NOT match the string `"Ping"`.
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `else`
   MAY be a single statement: `else complete { kind: "Summarize" total };`.
@@ -182,6 +185,14 @@ export scene Main {
   `["Check", s1, s2, s3]`. `send self "Tick"` sends `"Tick"`. An object
   is one value: `send up { kind: "Done" status body }` still sends an
   object. `complete` takes the same value list.
+- A newline between those values does not end the statement.
+  `send to name @Listen` with the host and port arguments on following
+  lines is one send of three values: the symbol `Listen`, the host, and
+  the port.
+- `@Name` is the global registry symbol `Name`. It is the same value as
+  `s"Name"`, `@symbol"Name"`, and `(symbol "Name")`. It is not a keyword
+  escape. The string `"Name"` is a different value. `on @Name` matches
+  that symbol and MUST NOT match the string.
 - `send after Delay Route V…` is the same send, delivered later. `Delay` is
   seconds. See [timers](./timers.spec.md). Self is written
   `send after 5 self "Tick"`. Order's `MockShip` uses
@@ -213,6 +224,8 @@ export scene Main {
 - A message object (`send`, `complete`) MAY omit commas between entries.
   An identifier with no `:` is `name: name`.
   `{ kind: "Done" status body }` is `{ kind: "Done", status: status, body: body }`.
+  A key MAY be a string, so a name that is not an identifier can be written
+  `{ "Content-Type": "text/plain" }`.
   Uffda expressions that are not these message objects keep Uffda's object
   commas. An object pattern in `on` projects a Uffda Over and MAY omit
   commas the same way: `{ kind: "GET" url: any }`. A bare identifier in an
@@ -282,8 +295,10 @@ A handler body is a synchronous prefix followed by at most one terminal.
   Matching is Uffda value pattern matching (`uffda-runtime` Pattern). A Then
   of several prefixes matches an array of that many values as an iterable
   input; every other pattern matches the message as one scalar value. The
-  array MUST have exactly as many elements as prefixes. `else` is matched
-  last, as `any` with the unqualified route list. It MUST NOT match init.
+  array MUST have exactly as many elements as prefixes. `on @Name` matches
+  the registry symbol `Name` and MUST NOT match the string `"Name"`.
+  `else` is matched last, as `any` with the unqualified route list. It
+  MUST NOT match init.
 - A listed name matches as follows: `down` is send to, send down, or
   inject; `up` is send up; `self` is send self. The handler matches if any
   listed name matches. `on init` MUST match only construction init.
@@ -360,8 +375,8 @@ One prefix MUST project that pattern, not a Then of length one.
 
 ## Example
 
-Injecting `["Ping", 7]` at `Ping` MUST `send to child`, Child MUST
-`send up` `["Pong", 7]`, and `Ping.heard` MUST be `7`. The Order
+Injecting the symbol `Ping` and `7` at `Ping` MUST `send to child`, Child
+MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`. The Order
 workflow is in [workflows](./workflows.spec.md#example).
 
 ## Why this design
@@ -376,7 +391,8 @@ workflow is in [workflows](./workflows.spec.md#example).
 - **Pattern-matched receives.** Uffda already matches values: a Then of
   prefixes is an iterable match, an Over is an object match. A separate
   switch language would duplicate it. Kith only stops Then before the
-  handler `{` (a Uffda Then would take `{` as another object) and allows
+  handler `{`. A non-empty object may still be a later prefix, and an empty
+  `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
   a kind. `to` names the port; `down` names the kind; `up` is the ancestor

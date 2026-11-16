@@ -10,20 +10,20 @@ spec_ref: .agents/specifications/runtime.spec.md#host-io; .agents/specifications
 
 Preconditions:
 
-- `examples/http.kith` HealthCheck owns Client and fields `s1`, `s2`,
+- `examples/health.kith` HealthCheck owns Client and fields `s1`, `s2`,
   `s3` typed `number?`.
 
 Expected behavior:
 
-- Handling `"Tick"` MUST `send to client` a Go and
+- Handling `@Tick` MUST `send to client` `@Go` and
   `goto Waiting`. It MUST NOT `send after` Tick.
-- After each Done, HealthCheck MUST shift the last three statuses,
-  `send self "Check" s1 s2 s3`, then
+- After each `@Done`, HealthCheck MUST shift the last three statuses,
+  `send self @Check s1 s2 s3`, then
   `goto Validating`.
 - Validating MUST `(writeLine stdout "Healthy")` when `a`, `b`, and `c`
   are 200, `(writeLine stdout "Unhealthy")` when each is a number and
   none are 200, and `(writeLine stdout "Indeterminate")` otherwise. Each
-  arm MUST `send after 5 self "Tick"` then `goto Checking`.
+  arm MUST `send after 5 self @Tick` then `goto Checking`.
 - After one or two numeric statuses it MUST write `"Indeterminate"`.
 - After three 200 responses it MUST write `"Healthy"`.
 - After three statuses that are each not 200 it MUST write `"Unhealthy"`.

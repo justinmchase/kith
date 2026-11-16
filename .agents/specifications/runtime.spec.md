@@ -1,7 +1,7 @@
 # Runtime
 
-This chapter defines how Kith's runtime sits on Uffda's: what it reuses from
-crates.io, what it implements itself, and why components and workflows are not
+This chapter defines how Kith's runtime sits on Uffda's: what it reuses,
+what it implements itself, and why components and workflows are not
 Uffda runtime types. Dispatch semantics are in [dispatch](./dispatch.spec.md).
 The operator surface is in [CLI](./cli.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
@@ -40,16 +40,25 @@ capitals.
 
 ### Reuse
 
-- The `kith` binary MUST depend on released `uffda-runtime` (and the supporting
-  crates it needs, such as `uffda-codec`, `uffda-heap`, and `uffda-build`) from
-  crates.io. It MUST NOT fork or vendor Uffda's matcher, evaluator, or value
-  heap.
+- The `kith` binary MUST depend on `uffda-runtime`, `uffda-heap`, and
+  `uffda-build` at git revision
+  `61c06f3eb2dff9f9f399e110754691024b06e468` (the merge of the symbol
+  literal onto Uffda main). The pin MUST be that commit. It MUST NOT be a
+  branch name and MUST NOT be `@main`. It MUST NOT fork or vendor Uffda's
+  matcher, evaluator, or value heap.
 - Grammar sources MUST import Uffda's published tokenizer, pattern, and
-  expression grammars rather than copying them.
-- Compiling those `.uff` grammar sources MUST use a released `uffda` CLI. The
-  CLI package MUST embed the resulting artifacts (the `uffda-build` consumer
-  path) and MUST NOT enable Uffda's product `embed-languages` feature, which
-  is Uffda's own grammars. The library crate MUST NOT embed that grammar.
+  expression grammars rather than copying them. The released `uffda` CLI
+  resolves that import as a semver range and does not resolve a git
+  commit, so the grammar import stays on the released JSR package. Kith's
+  grammar recognizes `@Name` and projects `{ kind: "symbol", name }`. The
+  pinned runtime evaluates that node as the registry symbol `Name`, the
+  same value as `s"Name"`, `@symbol"Name"`, and `(symbol "Name")`.
+- Compiling those `.uff` grammar sources MUST use a released `uffda` CLI.
+  The GitHub Action `justinmchase/uffda/.github/actions/uffda-setup` stays
+  on its release tag. The CLI package MUST embed the resulting artifacts
+  (the `uffda-build` consumer path) and MUST NOT enable Uffda's product
+  `embed-languages` feature, which is Uffda's own grammars. The library
+  crate MUST NOT embed that grammar.
 
 ### Do not extend Uffda for actors
 
@@ -89,7 +98,8 @@ is taken on crates.io by an unrelated project.
 | `kith` | GitHub Release assets `kith-{version}-{target}` | parse `.kith` source. It embeds the grammar and depends on `kith-runtime` |
 
 `kith-runtime` holds `ast`, `doc`, `codec`, `dispatch`, `host`, `interpreter`,
-and `builtin`. It depends on released `uffda-runtime`. It accepts a `Program`
+and `builtin`. It depends on `uffda-runtime` at the revision in
+[Reuse](#reuse). It accepts a `Program`
 value. Parsing `.kith` text and embedding `kith.lang.uff` stay in the CLI
 package.
 
@@ -238,10 +248,11 @@ replaces. Same-turn stream writes are not Uffda `HostCallable` returns
 that wait; they return `undefined` now. The real driver for a kind this
 runtime provides is the built-in import in
 [built-ins](./builtins.spec.md#registration). `Pipe` and `Clock` are those
-drivers. The scene-filled `Http` in `examples/http.kith` remains the user
-mock and still replies with one `"Response"`. `kith:http` is not this slice.
+drivers. The scene-filled `Http` in `examples/health.kith` remains the user
+mock and still replies with one `@Response`. `kith:http` is not this slice.
+The mock does not import `kith:http`.
 
-The normative program is `examples/http.kith`: a HealthCheck that probes
+The normative program is `examples/health.kith`: a HealthCheck that probes
 through Checking, Waiting, and Validating, then waits 5 seconds before the
 next Tick. It `(writeLine stdout …)`s `"Healthy"` when the last three
 statuses are 200, `"Unhealthy"` when none of them are 200, and
@@ -252,9 +263,9 @@ for the same later-message shape without a child.
 ```kith
 component Http {
   start {
-    on down "GET" url:any {
+    on down @GET url:any {
       (writeLine stdout "Requested" url);
-      send after (rand 1 3) up "Response" 200 "ok";
+      send after (rand 1 3) up @Response 200 "ok";
     }
   }
 }
@@ -262,14 +273,14 @@ component Http {
 component Client {
   http: Http;
   start Idle {
-    on down "Go" url:any {
-      send to http "GET" url;
+    on down @Go url:any {
+      send to http @GET url;
       goto Sending;
     }
   }
   state Sending {
-    on up "Response" status:number body:any {
-      send up "Done" status body;
+    on up @Response status:number body:any {
+      send up @Done status body;
       goto Idle;
     }
   }
@@ -282,36 +293,36 @@ component HealthCheck {
   client: Client;
   start Checking {
     on init {
-      send self "Tick";
+      send self @Tick;
     }
-    on self "Tick" {
-      send to client "Go" "https://example.com";
+    on self @Tick {
+      send to client @Go "https://example.com";
       goto Waiting;
     }
   }
   state Waiting {
-    on up "Done" status:number body:any {
+    on up @Done status:number body:any {
       s1 -> s2;
       s2 -> s3;
       s3 -> status;
-      send self "Check" s1 s2 s3;
+      send self @Check s1 s2 s3;
       goto Validating;
     }
   }
   state Validating {
-    on self "Check" a:200 b:200 c:200 {
+    on self @Check a:200 b:200 c:200 {
       (writeLine stdout "Healthy");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
-    on self "Check" a:(number & not 200) b:(number & not 200) c:(number & not 200) {
+    on self @Check a:(number & not 200) b:(number & not 200) c:(number & not 200) {
       (writeLine stdout "Unhealthy");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
     else {
       (writeLine stdout "Indeterminate");
-      send after 5 self "Tick";
+      send after 5 self @Tick;
       goto Checking;
     }
   }
@@ -348,5 +359,5 @@ two named states; a component MUST NOT declare three `start` states.
   gap, not an actor gap; track it upstream if Kith messages need it.
 - **Host I/O adapters.** A built-in module binds its driver by import.
   `kith:http` is that driver. A user-declared `Http`, including the mock in
-  `examples/http.kith`, stays a user component and does not import it.
+  `examples/health.kith`, stays a user component and does not import it.
   Device payloads are `Bytes`. Bodies use the stream messages.

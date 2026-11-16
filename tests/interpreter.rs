@@ -186,7 +186,12 @@ fn mixed_parent_program(handlers: Vec<Handler>) -> Program {
 // req:components-001 req:scenes-001
 fn parent_owns_scene_constructed_children() {
     let mut world = World::start(ping_program()).expect("start");
-    world.inject(json!(["Ping", 1])).unwrap();
+    world
+        .inject_document(kith::doc::array([
+            kith::doc::symbol("Ping"),
+            kith::doc::number(1.0),
+        ]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.kind(world.root_id()), Some("Ping"));
     assert_eq!(world.children_of_kind(world.root_id(), "Child").len(), 1);
@@ -627,8 +632,20 @@ fn first_matching_handler_consumes_the_message() {
 #[test]
 // req:components-006 req:components-017
 fn ping_example_sets_heard_to_seven() {
+    let mut missed = World::start(ping_program()).expect("start");
+    let err = missed
+        .inject(json!(["Ping", 7.0]))
+        .and_then(|_| missed.run_until_idle())
+        .expect_err("string Ping does not match @Ping");
+    assert!(err.message.contains("unmatched"), "{}", err.message);
+
     let mut world = World::start(ping_program()).expect("start");
-    world.inject(json!(["Ping", 7])).unwrap();
+    world
+        .inject_document(kith::doc::array([
+            kith::doc::symbol("Ping"),
+            kith::doc::number(7.0),
+        ]))
+        .unwrap();
     world.run_until_idle().unwrap();
     assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(7.0)));
 }
@@ -1040,7 +1057,7 @@ fn order_workflow_rejects_an_invalid_order() {
 }
 
 fn http_program() -> kith::ast::Program {
-    kith::parse::parse_source(include_str!("../examples/http.kith")).expect("parse http.kith")
+    kith::parse::parse_source(include_str!("../examples/health.kith")).expect("parse http.kith")
 }
 
 fn settle_http_request(world: &mut World) {
@@ -1133,7 +1150,14 @@ fn http_parent_response_is_unmatched_down() {
     world.run_until_idle().unwrap();
     let client = world.child(world.root_id(), "client").expect("client");
     let err = world
-        .send(client, json!(["Response", 200.0, "ok"]))
+        .send_document(
+            client,
+            kith::doc::array([
+                kith::doc::symbol("Response"),
+                kith::doc::number(200.0),
+                kith::doc::string("ok"),
+            ]),
+        )
         .and_then(|_| world.run_until_idle())
         .expect_err("parent Response must not match on up");
     assert!(err.message.contains("unmatched"));
@@ -1565,6 +1589,57 @@ export scene Main { Box(); }
     let mut world = World::start(object).expect("start object");
     world.run_until_idle().unwrap();
     assert!(world.prints().iter().any(|value| value == &json!(200.0)));
+
+    let broken = r#"
+export Child;
+export Parent;
+export Main;
+component Child {
+  start {
+    on down @Listen host:string port:number {
+      (writeLine stdout host);
+      (writeLine stdout port);
+    }
+  }
+}
+component Parent {
+  child: Child;
+  start {
+    on init {
+      send to child @Listen
+        (coalesce "127.0.0.1")
+        (int (coalesce "3000"));
+    }
+  }
+}
+export scene Main {
+  Parent() { child = Child(); }
+}
+"#;
+    let program = kith::parse::parse_source(broken).expect("parse multiline listen");
+    let parent = program.component("Parent").expect("Parent");
+    let init = parent.states[0].handlers.iter().next().expect("init");
+    match &init.body[0] {
+        kith::ast::Statement::SendTo { message, .. } => {
+            assert_eq!(message["kind"], "sequence");
+            let items = message["items"].as_array().expect("items");
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[0]["kind"], "symbol");
+            assert_eq!(items[0]["name"], "Listen");
+        }
+        other => panic!("expected send, got {other:?}"),
+    }
+    let mut world = World::start(program).expect("start multiline listen");
+    world.run_until_idle().unwrap();
+    assert_eq!(world.prints()[0], json!("127.0.0.1"));
+    assert_eq!(world.prints()[1], json!(3000.0));
+
+    let string_name = broken.replace("on down @Listen", "on down \"Listen\"");
+    let missed =
+        World::start(kith::parse::parse_source(&string_name).expect("parse string listen"))
+            .and_then(|mut world| world.run_until_idle())
+            .expect_err("a string Listen does not match @Listen");
+    assert!(missed.message.contains("unmatched"), "{}", missed.message);
 }
 
 #[test]

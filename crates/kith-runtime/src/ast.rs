@@ -406,10 +406,7 @@ pub fn ping_pattern(kind: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": "then",
         "patterns": [
-            {
-                "kind": "equal",
-                "value": {"kind": "value.literal", "value": kind}
-            },
+            {"kind": "symbol", "name": kind},
             {
                 "kind": "variable",
                 "name": "n",
@@ -423,7 +420,7 @@ pub fn ping_object(kind: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": "sequence",
         "items": [
-            {"kind": "string", "values": [kind]},
+            {"kind": "symbol", "name": kind},
             {"kind": "reference", "name": "n"}
         ]
     })

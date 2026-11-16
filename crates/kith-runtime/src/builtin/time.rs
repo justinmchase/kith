@@ -179,7 +179,8 @@ pub fn instant_text(millis: i64) -> Result<String, Error> {
     let text = document
         .encode(false, DataLimits::default())
         .map_err(|error| Error::new(error.to_string()))?;
-    text.strip_prefix("@date\"")
+    text.strip_prefix("d\"")
+        .or_else(|| text.strip_prefix("@date\""))
         .and_then(|text| text.strip_suffix('"'))
         .map(str::to_string)
         .ok_or_else(|| Error::new("invalid instant"))

@@ -30,6 +30,14 @@ pub fn string(value: impl AsRef<str>) -> Doc {
     ))
 }
 
+pub fn symbol(value: impl AsRef<str>) -> Doc {
+    leaf(DataNode::Symbol(
+        RuntimeString::from_utf16(value.as_ref().encode_utf16().collect::<Vec<_>>())
+            .codec_text()
+            .clone(),
+    ))
+}
+
 pub fn bytes(value: Vec<u8>) -> Doc {
     leaf(DataNode::Bytes(value))
 }
@@ -83,6 +91,13 @@ pub fn as_number(doc: &Doc) -> Option<f64> {
 pub fn as_str(doc: &Doc) -> Option<String> {
     match root(doc) {
         DataNode::String(value) => value.to_utf8().ok(),
+        _ => None,
+    }
+}
+
+pub fn as_symbol(doc: &Doc) -> Option<String> {
+    match root(doc) {
+        DataNode::Symbol(value) => value.to_utf8().ok(),
         _ => None,
     }
 }
@@ -236,7 +251,7 @@ fn node_to_json(doc: &Doc, index: usize) -> Result<Json, Error> {
             }
             Ok(Json::Object(map))
         }
-        DataNode::Bytes(_) | DataNode::Date(_) => {
+        DataNode::Bytes(_) | DataNode::Date(_) | DataNode::Symbol(_) => {
             let sub = subdocument(doc, index).ok_or_else(|| Error::new("invalid codec node"))?;
             let text = sub
                 .encode(false, DataLimits::default())

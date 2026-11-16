@@ -28,6 +28,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
     - name: Install Kith CLI
       id: install
       shell: bash
@@ -69,16 +74,14 @@ runs:
         tmpdir="$(mktemp -d)"
         gh release download "${tag}" --repo "${INPUT_REPOSITORY}" --dir "${tmpdir}" \
           --pattern "${asset}" --pattern SHA256SUMS
-        expected="$(awk -v name="${asset}" '$2 == name { print $1; exit }' "${tmpdir}/SHA256SUMS")"
+        expected="$(awk -v name="${asset}" '{ gsub(/\r/, ""); if ($2 == name) { print $1; exit } }' "${tmpdir}/SHA256SUMS")"
         if [[ -z "${expected}" ]]; then
           echo "No checksum entry for ${asset}" >&2
           exit 1
         fi
-        if command -v sha256sum >/dev/null 2>&1; then
-          actual="$(sha256sum "${tmpdir}/${asset}" | awk '{ print $1 }')"
-        else
-          actual="$(shasum -a 256 "${tmpdir}/${asset}" | awk '{ print $1 }')"
-        fi
+        # Node reads the file as bytes. Windows Git Bash sha256sum opens it
+        # as text and reports a different digest for .exe assets.
+        actual="$(node -e 'const fs=require("fs");const c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "${tmpdir}/${asset}")"
         if [[ "${actual}" != "${expected}" ]]; then
           echo "Checksum mismatch for ${asset}" >&2
           exit 1

@@ -4,8 +4,8 @@ export Main;
 
 component Child {
   start {
-    on down "Ping" n:number {
-      send up "Pong" n;
+    on down @Ping n:number {
+      send up @Pong n;
     }
   }
 }
@@ -15,10 +15,10 @@ component Ping {
   child: Child;
 
   start {
-    on down "Ping" n:number {
-      send to child "Ping" n;
+    on down @Ping n:number {
+      send to child @Ping n;
     }
-    on up "Pong" n:number {
+    on up @Pong n:number {
       heard -> n;
     }
   }

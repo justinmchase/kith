@@ -50,11 +50,14 @@ The executable name MUST be `kith`. The initial surface MUST be:
   result. That is a stream binding, not a keyword. Constructing `Stdout`
   from `kith:stdio` takes over process stdout: pushed bytes are the process
   stdout, and `kith run` MUST NOT also write the result record. `print`
-  stays on process stderr. `"Exit" code` on `kith:process` sets the process
+  stays on process stderr. `@Exit code` on `kith:process` sets the process
   status after the turn and MUST NOT print a reply. Arguments after the
   program path, and after `kith run`'s own flags, are the frozen argv.
-  `--message` remains JSON for this slice (an object, a string, or an
-  array of send arguments). `run` MUST drain mailboxes and
+  `--message` is JSON when the text is JSON: an object, a string, or an
+  array of send arguments. When the text is not JSON, it is a data codec
+  record, so a symbol argument is `s"Name"`.
+  `kith run examples/ping.kith --message '[s"Ping" 7]'` injects the symbol
+  `Ping` and `7`. `run` MUST drain mailboxes and
   advance pending `send after` timers ([timers](./timers.spec.md)).
 
 ## Distribution
