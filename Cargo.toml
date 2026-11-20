@@ -3,20 +3,23 @@ name = "kith"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Kith runtime and CLI: components, message dispatch, and workflows on Uffda"
+description = "Kith CLI: parse, check, compile, and run .kith programs"
 repository = "https://github.com/justinmchase/kith"
-# GitHub Releases ship this binary. crates.io waits for kith-runtime.
+# GitHub Releases ship this binary. crates.io publishes kith-runtime.
 publish = false
+
+[workspace]
+members = ["crates/kith-runtime"]
+resolver = "2"
 
 [[bin]]
 name = "kith"
 path = "src/main.rs"
 
 [dependencies]
+kith-runtime = { path = "crates/kith-runtime", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-time = "0.3.55"
-uffda-heap = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468", default-features = false }
 uffda-runtime = { git = "https://github.com/justinmchase/uffda", rev = "61c06f3eb2dff9f9f399e110754691024b06e468", default-features = false }
 url = "2"
 

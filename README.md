@@ -40,8 +40,8 @@ kith run app.kith --message '[s"Ping" 7]'
 
 ## Install
 
-GitHub Releases ship the `kith` binary. A language links `kith-runtime`
-once that library is published; it does not shell out to this binary.
+GitHub Releases ship the `kith` binary. A language links [`kith-runtime`](https://crates.io/crates/kith-runtime)
+from crates.io; it does not shell out to this binary.
 
 ```sh
 curl -fsSL https://github.com/justinmchase/kith/releases/latest/download/install.sh | bash

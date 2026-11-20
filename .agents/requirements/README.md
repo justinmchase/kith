@@ -52,6 +52,7 @@ verify it cite it with `req:{id}`.
 - [Health check window](./runtime/003-health-check.requirement.md)
 - [Stdlib stream functions](./runtime/004-stdlib-streams.requirement.md)
 - [Async send join](./runtime/005-async-send.requirement.md)
+- [Library and CLI packages](./runtime/006-packages.requirement.md)
 
 ## Workflows
 
