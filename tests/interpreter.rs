@@ -893,7 +893,15 @@ fn child_workflow_completes_to_parent() {
     let program = scene_program(
         vec![parent, child],
         vec![unit],
-        instance("ParentFlow", None, vec![]),
+        instance(
+            "ParentFlow",
+            None,
+            vec![instance(
+                "ChildFlow",
+                Some("Start"),
+                vec![instance("Unit", Some("Start"), vec![])],
+            )],
+        ),
     );
     let mut world = World::start(program).expect("start");
     world.inject(json!({"kind": "Go"})).unwrap();
@@ -923,7 +931,11 @@ fn snapshot_restore_continues_a_run() {
     let program = scene_program(
         vec![task_flow("Flow", "Child")],
         vec![child],
-        instance("Flow", None, vec![]),
+        instance(
+            "Flow",
+            None,
+            vec![instance("Child", Some("Start"), vec![])],
+        ),
     );
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "Ping", "n": 7})).unwrap();
@@ -1022,7 +1034,10 @@ workflow Sale {
 }
 
 export scene Main {
-  Sale();
+  Sale() {
+    pay = ChargeCard();
+    fulfill = Fulfill();
+  }
 }
 "#,
     )
@@ -1054,6 +1069,119 @@ export scene Main {
     assert_eq!(output["quantity"], json!(3.0));
     assert_eq!(output["charged"], json!("a-1"));
     assert_eq!(output["ticket"], json!("t-1"));
+}
+
+#[test]
+// req:workflows-010
+fn scene_assigns_every_task_step() {
+    let missing = kith::parse::parse_source(
+        r#"
+export ChargeCard;
+export Sale;
+export Main;
+component ChargeCard {
+  start { else complete { kind: "Paid" }; }
+}
+workflow Sale {
+  start pay: ChargeCard -> succeed;
+}
+export scene Main { Sale(); }
+"#,
+    )
+    .expect("parse");
+    let err = World::check(&missing).expect_err("missing assignment");
+    assert!(
+        err.message.contains("step pay must be assigned"),
+        "{}",
+        err.message
+    );
+
+    let inline = kith::parse::parse_source(
+        r#"
+export ChargeCard;
+export Sale;
+export Main;
+component ChargeCard {
+  start { else complete { kind: "Paid" }; }
+}
+workflow Sale {
+  start pay: ChargeCard -> stock;
+  stock: pick { else -> done; };
+  done: succeed;
+}
+export scene Main {
+  Sale() {
+    pay = ChargeCard();
+    stock = ChargeCard();
+  }
+}
+"#,
+    )
+    .expect("parse");
+    let err = World::check(&inline).expect_err("inline assignment");
+    assert!(
+        err.message.contains("inline step stock"),
+        "{}",
+        err.message
+    );
+
+    let wrong = kith::parse::parse_source(
+        r#"
+export ChargeCard;
+export Other;
+export Sale;
+export Main;
+component ChargeCard {
+  start { else complete { kind: "Paid" }; }
+}
+component Other {
+  start { else complete { kind: "Other" }; }
+}
+workflow Sale {
+  start pay: ChargeCard -> succeed;
+}
+export scene Main {
+  Sale() {
+    pay = Other();
+  }
+}
+"#,
+    )
+    .expect("parse");
+    let err = World::check(&wrong).expect_err("wrong kind");
+    assert!(
+        err.message.contains("step pay expects ChargeCard"),
+        "{}",
+        err.message
+    );
+
+    let assigned = kith::parse::parse_source(
+        r#"
+export ChargeCard;
+export Sale;
+export Main;
+component ChargeCard {
+  start { else complete { kind: "Paid" accountId: "a-1" }; }
+}
+workflow Sale {
+  start pay: ChargeCard -> succeed;
+}
+export scene Main {
+  Sale() {
+    pay = ChargeCard();
+  }
+}
+"#,
+    )
+    .expect("parse");
+    World::check(&assigned).expect("assigned");
+    let mut world = World::start(assigned).expect("start");
+    world.inject(json!({"kind": "Go"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(
+        world.output(world.root_id()).unwrap()["accountId"],
+        json!("a-1")
+    );
 }
 
 fn order_program() -> kith::ast::Program {

@@ -90,6 +90,8 @@ workflow Order {
 
 export scene Main {
   Order() {
+    validate = ValidateOrder();
+    pay = ChargeCard();
     Carrier() {
       ship = MockShip();
     }

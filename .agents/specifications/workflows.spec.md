@@ -60,8 +60,13 @@ capitals.
 - A scene root MAY be a workflow or a component. `kith run` and `World::start`
   run that instance. When the root is a workflow, inject starts the run.
 - A workflow MUST have exactly one `start` step.
-- A task or map kind MUST exist and MUST NOT require unfilled ports unless a
-  scene prototype supplies that tree.
+- A task or map kind MUST exist. A task step is not inline: the scene
+  construction of that workflow MUST assign it with `name = Kind()`, where
+  `name` is the step name and `Kind` is the step body. Check MUST fail when
+  that assignment is missing or the kind differs. `pick`, `fanout`, `pass`,
+  `run`, `succeed`, and `fail` are inline. The scene MUST NOT assign an
+  inline step. An inline map kind that declares ports still needs an unnamed
+  prototype, as below.
 - `complete V` on a work item MUST send `V` to the waiting workflow and count
   down the join set. For a map, `V` MUST be sent to the reducer as one item.
   The reducer's `complete` after `else` (including when the list is empty)
@@ -109,6 +114,16 @@ workflow Order {
   reject: fail "invalid order";
   decline: fail "payment declined";
 }
+
+export scene Main {
+  Order() {
+    validate = ValidateOrder();
+    pay = ChargeCard();
+    Carrier() {
+      ship = MockShip();
+    }
+  }
+}
 ```
 
 ```kith
@@ -153,9 +168,11 @@ what a step may read are defined in [Working value](#working-value).
   `fail E`. `->` is the only edge token. `then` is not a workflow edge.
   `pick` is exclusive: the step has no further `->`, and a clause MUST NOT
   inline a fanout. A clause routes to a step that MAY be a fanout.
-- **task** `name: Kind -> Name` — spawn `Kind`, send this step's input, wait
-  for `complete` (Step Functions Task). The completion is this step's output
-  and is kept under `name`.
+- **task** `name: Kind -> Name` — spawn the scene assignment `name = Kind()`,
+  send this step's input, wait for `complete` (Step Functions Task). The
+  completion is this step's output and is kept under `name`. A task in a
+  graph executed by `run`, which the scene did not construct, has no
+  assignment and spawns a bare instance when `Kind` declares no ports.
 - **map** `name: Pattern fanout Expression with Kind into Acc(Init) -> Name`
   — Expression is the list (Step Functions Map). The pattern MAY be omitted
   when the list expression needs no destructure. Spawn one `Kind` per
@@ -179,9 +196,16 @@ what a step may read are defined in [Working value](#working-value).
   Its fields are expressions, evaluated in the scope of the step that is
   leaving. Absent the object, the next input is the step output.
 
-Scene children under a workflow are **prototypes**, not live children. A task
-or map that names that kind clones the prototype tree (ports filled). Otherwise
-it spawns a bare instance (no ports allowed).
+`validate = ValidateOrder()` and `pay = ChargeCard()` assign the task steps.
+Those steps are not inline: the body is a component kind. `stock`, `paid`,
+`fulfill`, `reject`, and `decline` are inline, so the scene does not assign
+them. `Carrier()` stays an unnamed prototype because the inline fan-out
+spawns a kind that declares the port `ship`.
+
+Scene children under a workflow are step assignments or prototypes, not live
+children. A task clones the assignment whose name is the step name. An
+unnamed child is a prototype: a map that names that kind clones it (ports
+filled). A kind with ports and no prototype MUST fail check.
 
 ### Working value
 

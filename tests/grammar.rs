@@ -185,7 +185,7 @@ fn import_source_parses_fanout_and_join() {
 }
 
 #[test]
-// req:grammar-001 req:workflows-002 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
+// req:grammar-001 req:workflows-002 req:workflows-005 req:workflows-008 req:workflows-010 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
 fn order_source_parses_tasks_picks_and_map() {
     let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
     let order = program.workflow("Order").expect("Order");
@@ -262,6 +262,21 @@ fn order_source_parses_tasks_picks_and_map() {
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");
     assert_eq!(last.pattern["kind"], "any");
+    let scene = program
+        .scenes
+        .iter()
+        .find(|scene| scene.name == "Main")
+        .expect("Main");
+    let assigned = &scene.root.children;
+    assert!(assigned.iter().any(|child| {
+        child.key.as_deref() == Some("validate") && child.component == "ValidateOrder"
+    }));
+    assert!(assigned.iter().any(|child| {
+        child.key.as_deref() == Some("pay") && child.component == "ChargeCard"
+    }));
+    assert!(assigned
+        .iter()
+        .any(|child| child.key.is_none() && child.component == "Carrier"));
     let carrier = program.component("Carrier").expect("Carrier");
     assert!(carrier
         .ports
@@ -323,7 +338,9 @@ workflow Flow {
 }
 
 export scene Main {
-  Flow();
+  Flow() {
+    go = Unit();
+  }
 }
 "#,
     )

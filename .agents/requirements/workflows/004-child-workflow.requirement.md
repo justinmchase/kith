@@ -10,8 +10,9 @@ spec_ref: .agents/specifications/workflows.spec.md#declaration
 
 Preconditions:
 
-- A parent workflow's start task names another workflow. The child succeeds
-  with a payload.
+- A parent workflow's start task names another workflow. The scene assigns
+  that step, and assigns the child's task step. The child succeeds with a
+  payload.
 
 Expected behavior:
 

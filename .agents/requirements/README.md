@@ -65,6 +65,7 @@ verify it cite it with `req:{id}`.
 - [Dynamic run](./workflows/007-dynamic-run.requirement.md)
 - [Step pattern and into init](./workflows/008-step-pattern-into.requirement.md)
 - [Step completion by name](./workflows/009-step-completion.requirement.md)
+- [Scene assigns task steps](./workflows/010-scene-assigns-steps.requirement.md)
 
 ## Grammar
 

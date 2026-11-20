@@ -933,7 +933,7 @@ impl World {
                 }
                 Err(Error::new(format!("no choice matched on {}", step.name)))
             }
-            StepBody::Task { component } => self.spawn_task(id, component, working),
+            StepBody::Task { component } => self.spawn_task(id, &step.name, component, working),
             StepBody::Map {
                 items,
                 component,
@@ -965,12 +965,51 @@ impl World {
     fn spawn_task(
         &mut self,
         id: ActorId,
+        step_name: &str,
         component: &str,
         working: Doc,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let child = self.spawn_work(id, component)?;
+        let child = self.spawn_assigned(id, step_name, component)?;
         self.arm_join(id, [child].into_iter().collect(), 1, None);
         self.start_work(child, working)
+    }
+
+    /// A scene assigns a task step by name. A `run` graph has no assignment
+    /// and spawns a bare instance when the kind declares no ports.
+    fn spawn_assigned(
+        &mut self,
+        parent: ActorId,
+        step_name: &str,
+        kind: &str,
+    ) -> Result<ActorId, Error> {
+        let prototype = self.instances[&parent].run.as_ref().and_then(|run| {
+            run.prototypes
+                .iter()
+                .find(|node| node.key.as_deref() == Some(step_name) && node.component == kind)
+                .cloned()
+        });
+        let child = if let Some(node) = prototype {
+            self.spawn_instance(&node, Some(parent))?
+        } else {
+            if let Some(declared) = self.program.kind(kind) {
+                if !declared.ports.is_empty() {
+                    return Err(Error::new(format!(
+                        "step {step_name} assigns {kind}, which declares ports"
+                    )));
+                }
+            }
+            self.spawn_kind(kind, Some(parent))?
+        };
+        self.instances
+            .get_mut(&parent)
+            .expect("actor")
+            .children
+            .push(ChildRef {
+                id: child,
+                key: Some(step_name.to_string()),
+                component: kind.to_string(),
+            });
+        Ok(child)
     }
 
     fn spawn_map(
@@ -1034,7 +1073,7 @@ impl World {
         let prototype = self.instances[&parent].run.as_ref().and_then(|run| {
             run.prototypes
                 .iter()
-                .find(|node| node.component == kind)
+                .find(|node| node.key.is_none() && node.component == kind)
                 .cloned()
         });
         if prototype.is_none() {
@@ -2519,24 +2558,62 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
         let prototypes: HashSet<&str> = node
             .children
             .iter()
+            .filter(|child| child.key.is_none())
             .map(|child| child.component.as_str())
             .collect();
-        for step in &workflow.steps {
-            let kinds = match &step.body {
-                StepBody::Task { component } => vec![component.as_str()],
-                StepBody::Map {
-                    component, reduce, ..
-                } => vec![component.as_str(), reduce.as_str()],
-                _ => vec![],
+        let mut assigned = HashSet::new();
+        for child in &node.children {
+            let Some(key) = child.key.as_deref() else {
+                continue;
             };
-            for component in kinds {
-                if let Some(kind) = program.kind(component) {
-                    if !kind.ports.is_empty() && !prototypes.contains(component) {
+            if !assigned.insert(key.to_string()) {
+                return Err(Error::new(format!("duplicate step assignment {key}")));
+            }
+            let Some(step) = workflow.step(key) else {
+                return Err(Error::new(format!("unknown step assignment {key}")));
+            };
+            match &step.body {
+                StepBody::Task { component } if component == &child.component => {}
+                StepBody::Task { component } => {
+                    return Err(Error::new(format!(
+                        "step {key} expects {component} but scene assigned {}",
+                        child.component
+                    )));
+                }
+                _ => {
+                    return Err(Error::new(format!(
+                        "inline step {key} must not be assigned in the scene"
+                    )));
+                }
+            }
+        }
+        for step in &workflow.steps {
+            match &step.body {
+                StepBody::Task { component } => {
+                    if !assigned.contains(step.name.as_str()) {
                         return Err(Error::new(format!(
-                            "fanout kind {component} must not declare ports"
+                            "workflow {} step {} must be assigned in the scene",
+                            workflow.name, step.name
                         )));
                     }
+                    if program.kind(component).is_none() && program.workflow(component).is_none() {
+                        return Err(Error::new(format!("unknown step kind {component}")));
+                    }
                 }
+                StepBody::Map {
+                    component, reduce, ..
+                } => {
+                    for kind_name in [component.as_str(), reduce.as_str()] {
+                        if let Some(kind) = program.kind(kind_name) {
+                            if !kind.ports.is_empty() && !prototypes.contains(kind_name) {
+                                return Err(Error::new(format!(
+                                    "fanout kind {kind_name} must not declare ports"
+                                )));
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         for child in &node.children {

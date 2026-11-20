@@ -34,16 +34,17 @@ capitals.
 
 - A scene MUST have exactly one top-level instance. That instance MAY be a
   component or a workflow. It is the program root when the scene is run.
-- `name = Kind() { ... }` MUST fill port `name` with one instance of `Kind`.
+- `name = Kind() { ... }` under a component MUST fill port `name` with one
+  instance of `Kind`.
 - `Kind() { ... }` with no `name =` MUST add an unnamed child of that kind.
+- When the parent is a component, check MUST fail if `name = Kind()` names a
+  port the parent does not declare, or fills a port with the wrong kind.
+- When the parent is a workflow, `name = Kind()` assigns the task step
+  `name`. The workflow chapter defines which steps require that assignment.
 - A scene MUST NOT share an instance between two parents.
 - Check MUST fail if a construction names an unknown kind.
 - Check MUST fail if two children under one parent use the same port name.
-- Check MUST fail if a parent instance omits a declared port.
-- Check MUST fail if `name = Kind()` does not match the port's declared kind
-  (`a: A` filled with `a = B()`).
-- Check MUST fail if `name = Kind()` names a port the parent kind does not
-  declare.
+- Check MUST fail if a component instance omits a declared port.
 - `kith run` and `World::start` MUST run the unique exported scene of the
   program. A program that exports no scene, or more than one scene, MUST be
   rejected. Check MUST fail if the scene root names an unknown kind.
@@ -64,16 +65,19 @@ export scene Main {
 - `scene Name { ... }` declares a named scene.
 - `Kind()` constructs an instance of `Kind`. The top-level construction has no
   port name.
-- `name = Kind() { ... }` fills port `name`. Nested braces are further children
-  of that instance.
-- Bare `Kind() { ... }` is an unnamed child of the surrounding instance.
+- `name = Kind() { ... }` under a component fills port `name`. Nested braces
+  are further children of that instance. Under a workflow, the same form
+  assigns the task step of that name.
+- Bare `Kind() { ... }` is an unnamed child of the surrounding instance. Under
+  a workflow it is a prototype for an inline map kind.
 - `export scene Name` or `export Name;` (when `Name` is a scene) makes the
   scene the program's run target when it is the unique exported scene.
 
 The normative ping program is in [components](./components.spec.md#declaration).
 Its scene is `Main`: a `Ping` component root with port `child` filled by
-`Child`. Scene children under a workflow are prototypes cloned when a task or
-map names that kind; see [workflows](./workflows.spec.md#declaration).
+`Child`. Under a workflow, named children assign task steps and unnamed
+children are prototypes cloned when an inline map names that kind; see
+[workflows](./workflows.spec.md#declaration).
 
 ### Import and export
 
