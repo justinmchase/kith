@@ -46,39 +46,6 @@ fn object_pattern_matches_ping_and_rejects_pong() {
 }
 
 #[test]
-// req:workflows-003
-fn reduce_step_adds_one_to_the_accumulator() {
-    let pattern = json!({
-        "kind": "over",
-        "keys": {
-            "total": {
-                "kind": "variable",
-                "name": "total",
-                "pattern": {"kind": "any"}
-            }
-        }
-    });
-    let bindings = match_message(&pattern, &json!({"total": 1.0}))
-        .expect("match")
-        .expect("accumulator should match");
-    assert_eq!(
-        evaluate(
-            &json!({
-                "kind": "invocation",
-                "expression": {"kind": "reference", "name": "add"},
-                "args": [
-                    {"kind": "reference", "name": "total"},
-                    {"kind": "number", "value": 1}
-                ]
-            }),
-            &bindings,
-        )
-        .expect("add"),
-        json!(2.0)
-    );
-}
-
-#[test]
 // req:uffda-host-003 req:components-017
 fn then_pattern_matches_a_sequence_and_rejects_wrong_shape() {
     let pattern = json!({

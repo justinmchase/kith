@@ -11,8 +11,6 @@ pub struct Program {
     #[serde(default)]
     pub components: Vec<Component>,
     #[serde(default)]
-    pub workflows: Vec<Workflow>,
-    #[serde(default)]
     pub scenes: Vec<Scene>,
     /// Pure functions bound from a built-in import.
     #[serde(default)]
@@ -48,68 +46,6 @@ pub struct Component {
     #[serde(default)]
     pub ports: Vec<Port>,
     pub states: Vec<State>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Workflow {
-    pub kind: String,
-    pub name: String,
-    pub start: String,
-    pub steps: Vec<FlowStep>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct FlowStep {
-    pub name: String,
-    #[serde(default)]
-    pub start: bool,
-    #[serde(default)]
-    pub pattern: Option<Json>,
-    pub body: StepBody,
-    #[serde(default)]
-    pub next: Option<Next>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum StepBody {
-    #[serde(rename = "task")]
-    Task { component: String },
-    #[serde(rename = "map")]
-    Map {
-        items: Json,
-        component: String,
-        reduce: String,
-        #[serde(default)]
-        init: Option<Json>,
-    },
-    #[serde(rename = "choice")]
-    Choice { clauses: Vec<ChoiceClause> },
-    #[serde(rename = "pass")]
-    Pass { value: Json },
-    #[serde(rename = "run")]
-    Run { path: String },
-    #[serde(rename = "succeed")]
-    Succeed {},
-    #[serde(rename = "fail")]
-    Fail { error: Json },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum Next {
-    #[serde(rename = "goto")]
-    Goto { step: String },
-    #[serde(rename = "succeed")]
-    Succeed {},
-    #[serde(rename = "fail")]
-    Fail { error: Json },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ChoiceClause {
-    pub pattern: Json,
-    pub step: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -213,14 +149,7 @@ pub enum Statement {
     Goto { state: String },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum KindSort {
-    Component,
-    Workflow,
-}
-
 pub struct Kind<'a> {
-    pub sort: KindSort,
     pub name: &'a str,
     pub fields: &'a [Field],
     pub ports: &'a [Port],
@@ -233,28 +162,13 @@ impl Program {
             .find(|component| component.name == name)
     }
 
-    pub fn workflow(&self, name: &str) -> Option<&Workflow> {
-        self.workflows.iter().find(|workflow| workflow.name == name)
-    }
-
     pub fn kind(&self, name: &str) -> Option<Kind<'_>> {
-        if let Some(component) = self.component(name) {
-            return Some(Kind {
-                sort: KindSort::Component,
-                name: component.name.as_str(),
-                fields: &component.fields,
-                ports: &component.ports,
-            });
-        }
-        if let Some(workflow) = self.workflow(name) {
-            return Some(Kind {
-                sort: KindSort::Workflow,
-                name: workflow.name.as_str(),
-                fields: &[],
-                ports: &[],
-            });
-        }
-        None
+        let component = self.component(name)?;
+        Some(Kind {
+            name: component.name.as_str(),
+            fields: &component.fields,
+            ports: &component.ports,
+        })
     }
 
     pub fn scene(&self, name: &str) -> Option<&Scene> {
@@ -294,21 +208,6 @@ impl Component {
 
     pub fn port(&self, name: &str) -> Option<&Port> {
         self.ports.iter().find(|port| port.name == name)
-    }
-}
-
-impl Workflow {
-    pub fn start_step(&self) -> Option<&FlowStep> {
-        let starts: Vec<_> = self.steps.iter().filter(|step| step.start).collect();
-        match starts.as_slice() {
-            [step] => Some(*step),
-            [] => self.steps.iter().find(|step| step.name == self.start),
-            _ => None,
-        }
-    }
-
-    pub fn step(&self, name: &str) -> Option<&FlowStep> {
-        self.steps.iter().find(|step| step.name == name)
     }
 }
 
@@ -382,7 +281,6 @@ pub fn ping_program() -> Program {
                 }]
             }
         ],
-        "workflows": [],
         "scenes": [{
             "kind": "scene",
             "name": "Main",

@@ -14,9 +14,8 @@ capitals.
 
 - A chapter MUST use a term from this glossary only with the meaning given here.
 - A keyword that names one of these concepts MUST be the term itself (for
-  example `component`, `workflow`, `scene`, `send`, `to`, `fanout`, `with`,
-  `into`, `then`, `pick`, `else`, `goto`, `run`, `succeed`, `fail`,
-  `complete`, `after`, `up`, `down`, `self`, `init`, `or`).
+  example `component`, `scene`, `send`, `to`, `else`, `goto`, `complete`,
+  `after`, `up`, `down`, `self`, `init`, `or`).
 - A new concept MUST be added here before a chapter relies on it.
 - Kith MUST NOT take Coleslaw's domain terms (aggregate, manager, reactor,
   controller, command, event as Coleslaw defines them). Those belong to
@@ -28,18 +27,20 @@ capitals.
 - **Module**: one Kith source file.
 - **Built-in module**: a module named `kith:` plus one lowercase name. The
   host registers its declaration with the Uffda resolver. It is not
-  downloaded and not locked. An import map does not rewrite it.
+  downloaded and not locked. An import map does not rewrite it. Its
+  functions and rules come from that declaration. Its components are host
+  drivers.
 - **Rule**: a pattern exported by a module. After import it is a pattern
   name, in the same scope as `number` and `string`. Matching it does not
   send and does not read a clock.
 - **Package**: modules published together under one name and version, imported
   as Uffda's packages are.
 - **Root**: the instance that has no parent. A running program has one root:
-  the top-level instance of its exported scene (a component or a workflow).
-- **Scene**: a named instance tree that constructs workflow and component
-  kinds, fills ports, and may add unnamed children.
+  the top-level component instance of its exported scene.
+- **Scene**: a named instance tree that constructs component kinds, fills
+  ports, and may add unnamed children.
 - **Port**: a typed named slot on a component for one child
-  (`name: Kind;`). `Kind` is a component or a workflow. The scene fills it.
+  (`name: Kind;`). `Kind` is a component. The scene fills it.
   `send to name` addresses that instance.
 
 ## Uffda
@@ -64,7 +65,7 @@ capitals.
 - **Component**: a named, composable kind with a state machine, optional
   fields, and optional ports. Instances of a component are constructed by a
   scene. A component is not a subtype of another component.
-- **Instance**: one running component or workflow, with its own identity, state,
+- **Instance**: one running component, with its own identity, state,
   children, and mailbox.
 - **Child**: an instance owned by another instance. Ownership is has-a.
 - **Parent**: the instance that owns a child. An instance other than the root
@@ -114,7 +115,12 @@ capitals.
 - **Machine state**: the state the machine is in, plus the values of its fields.
 - **Goto**: a component statement (`goto Name`) that enters another declared
   state of this instance. It is a terminal: at most one per handler, last
-  if present, exclusive with `complete`. It is not a workflow `then`.
+  if present, exclusive with `complete`.
+- **Complete**: finishing a component (`complete V`). The payload is sent
+  up (except at the root). Complete is a terminal: at most one per
+  handler, last if present, exclusive with `goto`. It is not a machine
+  state. The instance stays in the state that ran `complete` and MUST NOT
+  run another transition.
 
 ## Dispatch
 
@@ -130,43 +136,12 @@ capitals.
 - **Ready**: an actor that has at least one message in its mailbox, or a
   transition actor whose work can proceed.
 
-## Workflows
+## Host
 
-- **Workflow**: a flow graph (task, map, choice, pass, run, succeed, fail) in
-  the family of AWS Step Functions. It is not a component state machine. The
-  graph is a value. A scene MAY run a workflow as its root.
-- **Step**: one node in a workflow graph. It is not an actor. Completing it
-  follows `then` (or a choice clause).
-- **Run**: one execution of a graph, serializable and restorable.
-- **Complete**: finishing a component or nested workflow as a work item
-  (`complete V`). The payload is sent up (except at the root) and is the
-  step output. Complete is a terminal: at most one per handler, last if
-  present, exclusive with `goto`. It is not a machine state. The instance
-  stays in the state that ran `complete` and MUST NOT run another
-  transition.
 - **Print**: the host function `(print V…)`, the same as
   `(writeLine stdout V…)`. It is not a statement and MUST NOT complete the
   instance. It is not the `Stderr` component.
-- **Built-in module**: a `kith:` module registered in the binary. Its
-  functions and rules come from that declaration. Its components are host
-  drivers.
 - **Frozen argv**: the program arguments captured at start, after `kith run`
   flags and the program path. Later reads see that copy.
 - **Frozen env**: the process environment captured at start. Later reads see
   that copy and MUST NOT re-read the operating system.
-- **Child workflow**: a workflow instance owned by another workflow or by a
-  component. Ownership is has-a.
-- **Fan-out**: a map step (`fanout Expression with Kind into Acc`) that
-  spawns one work item per list element.
-- **Join**: fan-in of those work items into one accumulator instance, then
-  `then`.
-- **Into**: names the accumulator component for a map (`into Acc`). That
-  component holds the aggregate in its fields, takes each item, then
-  `complete`s on `else`.
-- **Progress**: a tree of branches and leaves as work fans out and back in,
-  rolled up into completed and total counts, plus any progress content the
-  program reports.
-- **Stream**: a sequence of messages that may arrive over the life of an
-  instance, not only at its start.
-- **Cluster**: a set of processes that may run workflow instances. Which
-  process runs an instance is not part of the program's meaning.

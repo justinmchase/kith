@@ -20,7 +20,6 @@ Expected behavior:
   MUST be offered init in its start state.
 - HealthCheck MUST `send self` `@Tick` from `on init`.
 - Unmatched init on Http and Client MUST be dropped with no error.
-- Workflows and fan-out work items MUST NOT be offered init.
 - `on down`, `on up`, `on self`, `else`, and a handler with no route MUST
   NOT match init.
 

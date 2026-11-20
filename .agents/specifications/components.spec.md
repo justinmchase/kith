@@ -49,10 +49,7 @@ capitals.
   expression statements, complete, and change the machine's state. It MUST
   NOT wait by blocking the dispatcher. The
   first executable slice MUST NOT spawn or destroy children; scene-constructed
-  children exist for the parent's lifetime. Dynamic spawn is a
-  [workflow](./workflows.spec.md) concern. A component MUST NOT use `fanout`,
-  `then`, `pick`, `run`, `succeed`, or `fail`. A component MAY `complete V` so
-  it can be a task or map work item.
+  children exist for the parent's lifetime. A component MAY `complete V`.
 
 ### Routing
 
@@ -83,8 +80,7 @@ A component declaration names the kind, optional fields, optional ports, and
 the machine. A scene constructs instances and fills ports.
 
 The normative ping program is a parent/child machine. `Ping` owns `Child` by
-port; they talk with `send to` and `send up`. Workflows are a different
-primitive ([workflows](./workflows.spec.md)).
+port; they talk with `send to` and `send up`.
 
 ```kith
 component Child {
@@ -119,14 +115,14 @@ export scene Main {
 - `component Name { ... }` declares a kind. Instances of that kind are created
   by a scene.
 - `field name: pattern = expression` is local state. Every write MUST
-  match `pattern` as a Uffda scalar value: the init, `name -> E`, and
-  `into` field arguments. A miss MUST fail that write with a diagnostic.
+  match `pattern` as a Uffda scalar value: the init and `name -> E`.
+  A miss MUST fail that write with a diagnostic.
   `= expression` MAY be omitted; a missing init is **null**. `number?`
   matches null or a number and MUST NOT match a string: Uffda Maybe that
   skips a present non-null value is not a match for a stored field.
   The value used is the value that matched.
 - `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
-  `Kind` is a component or a workflow.
+  `Kind` is a component.
 - `start { ... }` is the start state with implicit name `Start`. That name
   is not a `goto` target. Use unnamed start when the machine never returns
   to it. `start Name { ... }` names the start; `goto Name` returns there.
@@ -152,10 +148,8 @@ export scene Main {
   parent sending a child's reply shape is unmatched down; a child sending
   a parent's request shape continues up.
 - `on item: any { ... }` is a capture: the whole message is bound as `item`.
-  A map accumulator uses that for each completion; see
-  [reduce](./workflows.spec.md#declaration). `on @Ping n:number` is Then
-  of the symbol `Ping` and a payload. It matches that symbol and `n`, and
-  MUST NOT match the string `"Ping"`.
+  `on @Ping n:number` is Then of the symbol `Ping` and a payload. It matches
+  that symbol and `n`, and MUST NOT match the string `"Ping"`.
 - `else { ... }` is the default transition. It MUST be last if present. It
   is the same handler as `on any`: it matches any remaining message. `else`
   MAY be a single statement: `else complete { kind: "Summarize" total };`.
@@ -165,8 +159,7 @@ export scene Main {
   `state Name` of this component. Unnamed `start { }` is not a target:
   `goto Start` MUST fail check unless the start was declared `start Start`.
   An unknown name MUST fail check. `goto` is a terminal: see
-  [terminal statements](#terminal-statements). Workflows change step with
-  `then` / `pick`, not `goto`.
+  [terminal statements](#terminal-statements).
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 
@@ -321,20 +314,18 @@ A handler body is a synchronous prefix followed by at most one terminal.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
-  dropped with no error, including at the root. Workflows and later
-  fan-out work items MUST NOT be offered init.
-- The first slice MUST NOT spawn extra children of a constructed kind. Fan-out
-  is [workflows](./workflows.spec.md).
+  dropped with no error, including at the root.
+- The first slice MUST NOT spawn extra children of a constructed kind.
 
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
 accept the same shape constructed without parsing. Serialized trees, program
-artifacts, and workflow snapshots MUST use the Uffda data codec, not JSON.
+artifacts, and snapshots MUST use the Uffda data codec, not JSON.
 Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 `variable`, `invocation`, `number`, `resolve`, …).
 
-- `{ kind: "program", imports: [Import], exports: [Export], components: [Component], workflows: [Workflow], scenes: [Scene] }`
+- `{ kind: "program", imports: [Import], exports: [Export], components: [Component], scenes: [Scene] }`
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
 - `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
@@ -376,8 +367,7 @@ One prefix MUST project that pattern, not a Then of length one.
 ## Example
 
 Injecting the symbol `Ping` and `7` at `Ping` MUST `send to child`, Child
-MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`. The Order
-workflow is in [workflows](./workflows.spec.md#example).
+MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
 
 ## Why this design
 

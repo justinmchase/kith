@@ -3,7 +3,6 @@
 This chapter defines the dispatcher: the runtime that routes messages, treats
 components and in-flight transitions as actors, and parallelizes independent
 work. Component sends are defined in [components](./components.spec.md).
-Workflow joins and fan-out are defined in [workflows](./workflows.spec.md).
 Terms are defined in the [glossary](./glossary.spec.md).
 
 ## Conventions
@@ -14,10 +13,10 @@ capitals.
 
 ## Definitions
 
-- **Component actor**: the actor for one component or workflow instance. Its
-  mailbox holds messages routed to that instance.
+- **Component actor**: the actor for one component instance. Its mailbox
+  holds messages routed to that instance.
 - **Transition actor**: the actor for one in-flight transition whose work is
-  not yet complete, such as fan-out work or a join waiting on children.
+  not yet complete, such as a join waiting on an async send.
 - **Schedule**: the dispatcher's choice of which ready actor runs next.
 - **Turn**: one actor taking one message (or one transition-actor step),
   running at most one transition of a component actor, and enqueuing the sends
@@ -48,8 +47,8 @@ capitals.
 
 - The dispatcher MUST be allowed to run ready actors of different instances in
   parallel.
-- Fan-out children and sibling transition actors MUST be allowed to run in
-  parallel with each other.
+- Sibling component actors MUST be allowed to run in parallel with each
+  other.
 - Parallelism MUST NOT change a single actor's per-message semantics. It only
   interleaves independent actors.
 
@@ -96,8 +95,8 @@ capitals.
 
 ### Transition actors
 
-- A transition MAY spawn transition actors for work that proceeds off the
-  component turn: each fan-out item, a join, or other declared waiting work.
+- A transition MAY leave work for the dispatcher that proceeds off the
+  component turn, such as a delayed or async send.
 - A transition actor has a mailbox only for the completions it needs. It MUST
   NOT be a second way to address the component.
 - When a transition actor completes, the dispatcher MUST enqueue an outcome
@@ -114,24 +113,14 @@ capitals.
   mailbox; it does not run a transition.
 - Routing to a destroyed instance MUST drop the message.
 
-### Clustering
-
-- A workflow's component actor MAY run on any process in the cluster. The
-  dispatcher on that process owns the actor while it is there.
-- Moving an actor MUST NOT reorder messages already in its mailbox, and MUST
-  NOT duplicate a completed turn. How that is achieved is
-  [workflows](./workflows.spec.md#clustered-execution).
-
 ## Why this design
 
 - **Actors rather than a call stack.** Calls would nest transitions of
   different instances on one thread and hide parallelism. Mailboxes make
   "one instance at a time" and "many instances at once" the same mechanism.
-- **Transitions as actors, not only components.** If only instances were
-  actors, every concurrent piece of work would have to be a declared child.
-  Fan-out of a stream would force a child kind per item even when the parent
-  has no has-a relationship beyond the join. Transition actors are the
-  in-flight work of a step; children remain the structured has-a tree.
+- **Transitions as actors, not only components.** Delayed and async sends
+  are in-flight work the dispatcher owns. Children remain the structured
+  has-a tree.
 - **Outcomes as messages.** Returning to the middle of a turn after await would
   reintroduce a stack and make machine state visible mid-transition. Completing
   work by a new message keeps every change a transition in a known state.
@@ -144,8 +133,7 @@ capitals.
 - **Priority.** Whether some messages skip ahead in a mailbox.
 - **Reentrancy to self.** Whether a send to self is always a later turn
   (as above) or MAY be taken before other mail.
-- **How much of a transition is synchronous.** Whether spawning is the only
-  way to wait, or a transition body MAY be a sequence of steps each run as
-  transition actors.
+- **How much of a transition is synchronous.** Whether `send after` is the
+  only way to wait, or a transition body MAY pause and resume.
 - **Supervision.** Failure, restart, and poison messages belong to the planned
   `supervision` chapter.

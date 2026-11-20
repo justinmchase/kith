@@ -54,17 +54,6 @@ verify it cite it with `req:{id}`.
 - [Async send join](./runtime/005-async-send.requirement.md)
 - [Library and CLI packages](./runtime/006-packages.requirement.md)
 
-## Workflows
-
-- [Distinct primitive](./workflows/001-distinct-and-root.requirement.md)
-- [Then and pick](./workflows/002-goto-steps.requirement.md)
-- [Map fan-out and reduce](./workflows/003-fanout-join.requirement.md)
-- [Child workflow](./workflows/004-child-workflow.requirement.md)
-- [Order wait, confirm, summarize](./workflows/005-ping-workflow.requirement.md)
-- [Snapshot and restore](./workflows/006-snapshot-restore.requirement.md)
-- [Dynamic run](./workflows/007-dynamic-run.requirement.md)
-- [Step pattern and into init](./workflows/008-step-pattern-into.requirement.md)
-
 ## Grammar
 
 - [Parse to syntax tree](./grammar/001-parse-ast.requirement.md)

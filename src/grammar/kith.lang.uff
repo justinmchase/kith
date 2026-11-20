@@ -29,7 +29,7 @@ rule Import =
 rule ExportName = n:Identifier -> { kind: "export", name: n };
 
 rule ExportList =
-  "export" not "scene" not "component" not "workflow" f:ExportName r:ExportName* ";"
+  "export" not "scene" not "component" f:ExportName r:ExportName* ";"
   -> (flat [[f] (flat r)])
 ;
 
@@ -44,10 +44,10 @@ rule Field =
   )
 ;
 
-# A member that names a child component or workflow: `name: Kind;`.
+# A member that names a child component: `name: Kind;`.
 rule Port =
-  not "field" not "start" not "state" not "step" not "join" not "else" not "goto"
-  not "with" not "into" not "fanout" not "after" not "self" not "init" not "or"
+  not "field" not "start" not "state" not "else" not "goto"
+  not "after" not "self" not "init" not "or"
   n:Identifier ":" k:Identifier ";"
   -> { kind: "port", component: k, name: n }
 ;
@@ -339,89 +339,6 @@ rule ComponentDeclaration =
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
 ;
 
-rule FlowTarget =
-  | ("succeed" -> { kind: "succeed" })
-  | ("fail" e:Expression -> { kind: "fail", error: e })
-  | (n:Identifier -> { kind: "goto", step: n })
-;
-
-rule FlowThen = "then" t:FlowTarget -> t;
-
-rule ChoiceClause =
-  | (
-    "else" "-" ">" n:Identifier ";"
-    -> { pattern: { kind: "any" }, step: n }
-  )
-  | (
-    "(" p:Pattern ")" "-" ">" n:Identifier ";"
-    -> { pattern: p, step: n }
-  )
-;
-
-rule MapInit =
-  "(" keys:MessageObjectEntries? ")"
-  -> { kind: "object", keys: (coalesce keys []) }
-;
-
-# Same Then as `on`: an Over `{ items: any orderId: any }`, a grouped
-# `(Pattern)`, or a capture. `->` is Kith's edge, so the pattern is not a
-# top-level Uffda Then (that would eat `->` / `{`).
-rule StepHead =
-  | (p:OnThen "-" ">" -> p)
-  | (ok -> null)
-;
-
-rule StepBody =
-  | (
-    "fanout" e:Expression "with" k:Identifier "into" r:Identifier i:MapInit?
-    -> { kind: "map", items: e, component: k, reduce: r, init: i }
-  )
-  | ("run" p:Identifier -> { kind: "run", path: p })
-  | ("pass" e:Expression -> { kind: "pass", value: e })
-  | ("pick" "{" c:ChoiceClause* "}" -> { kind: "choice", clauses: c })
-  | ("succeed" -> { kind: "succeed" })
-  | ("fail" e:Expression -> { kind: "fail", error: e })
-  | (k:Identifier -> { kind: "task", component: k })
-;
-
-rule FlowStep =
-  | (
-    "start" n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
-    -> {
-      name: n,
-      start: true,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
-    }
-  )
-  | (
-    "start" h:StepHead b:StepBody t:FlowThen? ";"
-    -> {
-      name: "Start",
-      start: true,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
-    }
-  )
-  | (
-    n:Identifier ":" h:StepHead b:StepBody t:FlowThen? ";"
-    -> {
-      name: n,
-      start: false,
-      pattern: h,
-      body: b,
-      next: (coalesce t { kind: "succeed" })
-    }
-  )
-;
-
-rule WorkflowDeclaration =
-  "workflow" n:Identifier "{" s:FlowStep+ "}"
-  -> { kind: "workflow", name: n, start: "Start", steps: s }
-;
-
 rule NamedChild =
   k:Identifier "=" n:Identifier "(" ")" b:InstanceBody? ";"?
   -> {
@@ -479,13 +396,12 @@ rule ScenePart =
   | BareScene
 ;
 
-func ProgramFrom<i:any e:any c:any w:any s:any> =
+func ProgramFrom<i:any e:any c:any s:any> =
   {
     kind: "program",
     imports: i,
     exports: (flat [(flat e) (flat (pluck s "exports"))]),
     components: c,
-    workflows: w,
     scenes: (flat (pluck s "scenes"))
   }
 ;
@@ -494,10 +410,9 @@ rule Program =
   i:Import*
   e:ExportList*
   c:ComponentDeclaration*
-  w:WorkflowDeclaration*
   s:ScenePart*
   end
-  -> (ProgramFrom i e c w s)
+  -> (ProgramFrom i e c s)
 ;
 
 [Language { id: "kith", name: "Kith", extensions: [".kith"] }]

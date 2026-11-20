@@ -1,7 +1,7 @@
 ---
 id: components-011
 title: Carrier dispatches to MockShip, which send-after (rand 1 3) up Delivered
-spec_ref: .agents/specifications/components.spec.md#sending; .agents/specifications/timers.spec.md#mechanism; .agents/specifications/workflows.spec.md#waiting-for-an-outside-message
+spec_ref: .agents/specifications/components.spec.md#sending; .agents/specifications/timers.spec.md#mechanism
 ---
 
 # Mock ship callback
@@ -10,9 +10,9 @@ spec_ref: .agents/specifications/components.spec.md#sending; .agents/specificati
 
 Preconditions:
 
-- `examples/order.kith` declares `MockShip` and `Carrier` with port
-  `ship: MockShip`. The scene fills `ship = MockShip()` under a Carrier
-  prototype.
+- `MockShip` and `Carrier` are components. Carrier has port
+  `ship: MockShip`. The exported scene root is Carrier with
+  `ship = MockShip()`.
 
 Expected behavior:
 
@@ -20,8 +20,8 @@ Expected behavior:
   `goto Shipping`.
 - MockShip MUST `(writeLine stdout { kind: "InTransit" … })` and
   `send after (rand 1 3) up { kind: "Delivered" }`.
-- After `run_until_idle`, each Carrier MUST still be in `Shipping` and MUST
-  own a `MockShip` child. The Order run MUST NOT yet succeed.
+- After `run_until_idle`, Carrier MUST still be in `Shipping` and MUST
+  own a `MockShip` child. It MUST NOT be completed yet.
 - `World::run` MUST deliver those timers. Shipping MUST match `Delivered` and
   `complete` `Shipped`.
 

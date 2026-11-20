@@ -56,15 +56,6 @@ fn parse_check_compile_and_run_ping() {
 
     let dir = std::env::temp_dir().join(format!("kith-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let bad = dir.join("bad.kith");
-    std::fs::write(
-        &bad,
-        "export Broken;\nexport Main;\nworkflow Broken {\n  Idle: succeed;\n}\nexport scene Main {\n  Broken()\n}\n",
-    )
-    .unwrap();
-    let rejected = run(&["check", bad.to_str().unwrap()]);
-    assert!(!rejected.status.success(), "missing start state must fail");
-
     let no_scene = dir.join("noscene.kith");
     std::fs::write(
         &no_scene,
@@ -157,14 +148,6 @@ fn parse_does_not_resolve_imports_but_check_does() {
     assert!(ran.status.success(), "{}", stderr(&ran));
     let fields = decode(&String::from_utf8_lossy(&ran.stdout)).expect("run codec");
     assert_eq!(fields["heard"], json!(7.0));
-}
-
-#[test]
-// req:workflows-005
-fn check_order_workflow() {
-    let order = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/order.kith");
-    let checked = run(&["check", order.to_str().unwrap()]);
-    assert!(checked.status.success(), "{}", stderr(&checked));
 }
 
 #[test]

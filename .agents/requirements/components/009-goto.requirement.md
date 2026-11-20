@@ -10,8 +10,8 @@ spec_ref: .agents/specifications/components.spec.md#declaration
 
 Preconditions:
 
-- `Carrier` in `examples/order.kith` starts in `Waiting` and declares
-  `state Shipping`.
+- `Carrier` starts in `Waiting` and declares `state Shipping`. The
+  exported scene root is that component.
 
 Expected behavior:
 

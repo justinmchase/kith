@@ -10,9 +10,10 @@ spec_ref: .agents/specifications/components.spec.md#declaration; .agents/specifi
 
 Preconditions:
 
-- `Summarize` in `examples/order.kith` declares `field orderId: any;`,
-  `field total: number = 0;`, `start {`, `on item: any`, and
-  `else complete { kind: "Summarize" orderId total };`.
+- `Summarize` declares `field orderId: any = "o-1";`,
+  `field total: number = 0;`, `start {`, `on down { kind: "Item" }`, and
+  `else complete { kind: "Summarize" orderId total };`. It is the exported
+  scene root.
 
 Expected behavior:
 
@@ -21,8 +22,9 @@ Expected behavior:
 - The last handler MUST be `else` (pattern `any`) whose body is one
   `complete` whose object has keys `kind`, `orderId`, and `total`
   (shorthand `orderId` / `total` for `orderId: orderId` / `total: total`).
-- After two delivered items the Order run MUST succeed with
-  `{ kind: "Summarize", orderId: "o-1", total: 2 }`.
+- One `{ kind: "Item" }` MUST set `total` to `1` and MUST NOT complete.
+  A later message that misses that `on` MUST `complete`
+  `{ kind: "Summarize", orderId: "o-1", total: 1 }`.
 
 Postconditions:
 

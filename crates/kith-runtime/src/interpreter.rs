@@ -1,4 +1,4 @@
-use crate::ast::{Field, FlowStep, Instance, Next, Program, Statement, StepBody, Workflow};
+use crate::ast::{Field, Instance, Program, Statement};
 use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::doc::{self, Doc};
@@ -12,7 +12,6 @@ enum Route {
     Inject,
     Down,
     Up,
-    Join,
     Init,
     SelfSend,
 }
@@ -21,13 +20,6 @@ struct ChildRef {
     id: ActorId,
     key: Option<String>,
     component: String,
-}
-
-struct JoinSet {
-    remaining: HashSet<ActorId>,
-    total: u64,
-    completed: u64,
-    reducer: Option<ActorId>,
 }
 
 #[derive(Clone)]
@@ -58,23 +50,6 @@ enum Callee {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RunStatus {
-    Running,
-    Succeeded,
-    Failed,
-}
-
-struct WorkflowRun {
-    status: RunStatus,
-    step: String,
-    input: Doc,
-    output: Doc,
-    output_json: Json,
-    definition: Workflow,
-    prototypes: Vec<Instance>,
-}
-
 struct InstanceState {
     kind: String,
     parent: Option<ActorId>,
@@ -85,8 +60,6 @@ struct InstanceState {
     completed: bool,
     completion: Option<Doc>,
     completion_json: Option<Json>,
-    join: Option<JoinSet>,
-    run: Option<WorkflowRun>,
     driver: Option<Driver>,
 }
 
@@ -163,9 +136,6 @@ impl World {
             check_routes(component)?;
             check_effects(component)?;
         }
-        for workflow in &program.workflows {
-            check_workflow(program, workflow)?;
-        }
         check_instance(program, &scene.root)?;
         Ok(())
     }
@@ -210,11 +180,7 @@ impl World {
     }
 
     pub fn output(&self, id: ActorId) -> Option<&Json> {
-        let instance = self.instances.get(&id)?;
-        if let Some(run) = &instance.run {
-            return Some(&run.output_json);
-        }
-        instance.completion_json.as_ref()
+        self.instances.get(&id)?.completion_json.as_ref()
     }
 
     pub fn child(&self, id: ActorId, port: &str) -> Option<ActorId> {
@@ -262,14 +228,6 @@ impl World {
         self.instances.get(&id)?.completion_json.as_ref()
     }
 
-    pub fn progress(&self, id: ActorId) -> Option<Json> {
-        let join = self.instances.get(&id)?.join.as_ref()?;
-        Some(json!({
-            "completed": join.completed,
-            "total": join.total,
-        }))
-    }
-
     pub fn result_document(&self) -> Doc {
         if let Some(output) = self.output_document(self.root_id()) {
             return output;
@@ -283,11 +241,7 @@ impl World {
     }
 
     fn output_document(&self, id: ActorId) -> Option<Doc> {
-        let instance = self.instances.get(&id)?;
-        if let Some(run) = &instance.run {
-            return Some(run.output.clone());
-        }
-        instance.completion.clone()
+        self.instances.get(&id)?.completion.clone()
     }
 
     pub fn prints(&self) -> &[Json] {
@@ -418,13 +372,6 @@ impl World {
     }
 
     pub fn inject_document(&mut self, message: Doc) -> Result<(), Error> {
-        if self.instances[&self.root_id()].run.is_some() {
-            let sends = self.start_run(self.root_id(), message)?;
-            for (to, message, route) in sends {
-                self.deliver(to, message, route)?;
-            }
-            return Ok(());
-        }
         self.deliver(self.root_id(), message, Route::Inject)
     }
 
@@ -714,16 +661,6 @@ impl World {
         parent: Option<ActorId>,
     ) -> Result<ActorId, Error> {
         let id = self.spawn_kind(&node.component, parent)?;
-        if self.instances[&id].run.is_some() {
-            if let Some(run) = self
-                .instances
-                .get_mut(&id)
-                .and_then(|instance| instance.run.as_mut())
-            {
-                run.prototypes = node.children.clone();
-            }
-            return Ok(id);
-        }
         let mut children = Vec::new();
         for child in &node.children {
             let child_id = self.spawn_instance(child, Some(id))?;
@@ -738,12 +675,7 @@ impl World {
     }
 
     fn enqueue_inits(&mut self) -> Result<(), Error> {
-        let mut ids: Vec<_> = self
-            .instances
-            .iter()
-            .filter(|(_, instance)| instance.run.is_none())
-            .map(|(id, _)| *id)
-            .collect();
+        let mut ids: Vec<_> = self.instances.keys().copied().collect();
         ids.sort_by_key(|id| id.0);
         for id in ids {
             self.deliver(id, doc::null(), Route::Init)?;
@@ -752,9 +684,6 @@ impl World {
     }
 
     fn spawn_kind(&mut self, kind: &str, parent: Option<ActorId>) -> Result<ActorId, Error> {
-        if let Some(workflow) = self.program.workflow(kind).cloned() {
-            return self.spawn_workflow(workflow, parent);
-        }
         let component = self
             .program
             .component(kind)
@@ -791,8 +720,6 @@ impl World {
                 completed: false,
                 completion: None,
                 completion_json: None,
-                join: None,
-                run: None,
                 driver: self.driver_for(kind),
             },
         );
@@ -809,243 +736,6 @@ impl World {
             .any(|name| name == kind)
             .then(|| builtin::initial_driver(kind))
             .flatten()
-    }
-
-    fn spawn_workflow(
-        &mut self,
-        workflow: Workflow,
-        parent: Option<ActorId>,
-    ) -> Result<ActorId, Error> {
-        let start = workflow
-            .start_step()
-            .ok_or_else(|| Error::new(format!("workflow {} has no start", workflow.name)))?
-            .name
-            .clone();
-        let id = ActorId(self.next_id);
-        self.next_id += 1;
-        self.dispatcher.register(id);
-        self.instances.insert(
-            id,
-            InstanceState {
-                kind: workflow.name.clone(),
-                parent,
-                children: Vec::new(),
-                fields: HashMap::new(),
-                field_json: HashMap::new(),
-                state: start.clone(),
-                completed: false,
-                completion: None,
-                completion_json: None,
-                join: None,
-                run: Some(WorkflowRun {
-                    status: RunStatus::Running,
-                    step: start,
-                    input: doc::null(),
-                    output: doc::null(),
-                    output_json: Json::Null,
-                    definition: workflow,
-                    prototypes: Vec::new(),
-                }),
-                driver: None,
-            },
-        );
-        Ok(id)
-    }
-
-    fn start_run(&mut self, id: ActorId, input: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        if let Some(run) = self
-            .instances
-            .get_mut(&id)
-            .and_then(|instance| instance.run.as_mut())
-        {
-            run.input = input.clone();
-            run.output = input.clone();
-            run.output_json = project(&input)?;
-            run.status = RunStatus::Running;
-        }
-        self.enter_current(id)
-    }
-
-    fn enter_current(&mut self, id: ActorId) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let (step, output) = {
-            let run = self.instances[&id]
-                .run
-                .as_ref()
-                .ok_or_else(|| Error::new("not a workflow"))?;
-            let step = run
-                .definition
-                .step(&run.step)
-                .cloned()
-                .ok_or_else(|| Error::new(format!("unknown step {}", run.step)))?;
-            (step, run.output.clone())
-        };
-        self.enter_step(id, &step, output)
-    }
-
-    fn enter_step(
-        &mut self,
-        id: ActorId,
-        step: &FlowStep,
-        working: Doc,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        if let Some(run) = self
-            .instances
-            .get_mut(&id)
-            .and_then(|instance| instance.run.as_mut())
-        {
-            run.step = step.name.clone();
-            run.output = working.clone();
-        }
-        let bindings = match &step.pattern {
-            Some(pattern) => bind_step(pattern, &working, &self.program.rules)?,
-            None => bindings_from(&working),
-        };
-        match &step.body {
-            StepBody::Succeed {} => self.succeed(id, working),
-            StepBody::Fail { error } => {
-                let value = self.eval(error, &bindings)?;
-                self.fail(id, value)
-            }
-            StepBody::Pass { value } => {
-                let output = self.eval(value, &bindings)?;
-                self.advance(id, output, step.next.as_ref())
-            }
-            StepBody::Choice { clauses } => {
-                for clause in clauses {
-                    if match_program(&clause.pattern, &working, &self.program.rules)?.is_some() {
-                        return self.goto_named(id, &clause.step);
-                    }
-                }
-                Err(Error::new(format!("no choice matched on {}", step.name)))
-            }
-            StepBody::Task { component } => self.spawn_task(id, component, working),
-            StepBody::Map {
-                items,
-                component,
-                reduce,
-                init,
-            } => self.spawn_map(id, items, component, reduce, init.as_ref(), &bindings),
-            StepBody::Run { path } => {
-                let plan = doc::get(&working, path)
-                    .ok_or_else(|| Error::new(format!("run path {path} missing")))?;
-                // A dynamic workflow plan is a Kith syntax tree.
-                let definition = workflow_from_value(doc::to_json(&plan)?)?;
-                let child = self.spawn_workflow(definition, Some(id))?;
-                let kind = self.instances[&child].kind.clone();
-                self.instances
-                    .get_mut(&id)
-                    .expect("actor")
-                    .children
-                    .push(ChildRef {
-                        id: child,
-                        key: None,
-                        component: kind,
-                    });
-                self.arm_join(id, [child].into_iter().collect(), 1, None);
-                self.start_run(child, working)
-            }
-        }
-    }
-
-    fn spawn_task(
-        &mut self,
-        id: ActorId,
-        component: &str,
-        working: Doc,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let child = self.spawn_work(id, component)?;
-        self.arm_join(id, [child].into_iter().collect(), 1, None);
-        self.start_work(child, working)
-    }
-
-    fn spawn_map(
-        &mut self,
-        id: ActorId,
-        items_expr: &Json,
-        component: &str,
-        reduce: &str,
-        init: Option<&Json>,
-        bindings: &HashMap<String, Doc>,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let reducer = self.spawn_work(id, reduce)?;
-        if let Some(init) = init {
-            let value = self.eval(init, bindings)?;
-            self.apply_fields(reducer, value)?;
-        }
-        let items = self.eval(items_expr, bindings)?;
-        let items = doc::items(&items).ok_or_else(|| Error::new("fanout expects a list"))?;
-        let mut children = Vec::new();
-        for (index, item) in items.into_iter().enumerate() {
-            let child = self.spawn_work(id, component)?;
-            children.push((
-                child,
-                doc::object([
-                    ("kind", doc::string("Item")),
-                    ("item", item),
-                    ("index", doc::number(index as f64)),
-                ]),
-            ));
-        }
-        let remaining: HashSet<_> = children.iter().map(|(child, _)| *child).collect();
-        let total = remaining.len() as u64;
-        self.arm_join(id, remaining, total, Some(reducer));
-        if children.is_empty() {
-            return self.end_accumulator(reducer);
-        }
-        let mut sends = Vec::new();
-        for (child, message) in children {
-            sends.extend(self.start_work(child, message)?);
-        }
-        Ok(sends)
-    }
-
-    fn start_work(
-        &mut self,
-        child: ActorId,
-        message: Doc,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        if self.instances[&child].run.is_some() {
-            self.start_run(child, message)
-        } else {
-            Ok(vec![(child, message, Route::Down)])
-        }
-    }
-
-    fn end_accumulator(&mut self, child: ActorId) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        Ok(vec![(child, doc::null(), Route::Join)])
-    }
-
-    fn spawn_work(&mut self, parent: ActorId, kind: &str) -> Result<ActorId, Error> {
-        let prototype = self.instances[&parent].run.as_ref().and_then(|run| {
-            run.prototypes
-                .iter()
-                .find(|node| node.component == kind)
-                .cloned()
-        });
-        if prototype.is_none() {
-            if let Some(declared) = self.program.kind(kind) {
-                if !declared.ports.is_empty() {
-                    return Err(Error::new(format!(
-                        "fanout kind {kind} must not declare ports"
-                    )));
-                }
-            }
-        }
-        let child = if let Some(node) = prototype {
-            self.spawn_instance(&node, Some(parent))?
-        } else {
-            self.spawn_kind(kind, Some(parent))?
-        };
-        self.instances
-            .get_mut(&parent)
-            .expect("actor")
-            .children
-            .push(ChildRef {
-                id: child,
-                key: None,
-                component: kind.to_string(),
-            });
-        Ok(child)
     }
 
     fn match_declared_field(&self, fields: &[Field], name: &str, value: &Doc) -> Result<(), Error> {
@@ -1079,115 +769,6 @@ impl World {
         Ok(())
     }
 
-    fn apply_fields(&mut self, id: ActorId, value: Doc) -> Result<(), Error> {
-        let kind = self.instances[&id].kind.clone();
-        let Some(map) = doc::entries(&value) else {
-            return Err(Error::new(format!(
-                "into {kind} expected an object of fields"
-            )));
-        };
-        for (name, field_value) in map {
-            if !self.instances[&id].fields.contains_key(&name) {
-                return Err(Error::new(format!("unknown field {name} on {kind}")));
-            }
-            self.write_field(id, &name, field_value)?;
-        }
-        Ok(())
-    }
-
-    fn arm_join(
-        &mut self,
-        id: ActorId,
-        remaining: HashSet<ActorId>,
-        total: u64,
-        reducer: Option<ActorId>,
-    ) {
-        self.instances.get_mut(&id).expect("actor").join = Some(JoinSet {
-            remaining,
-            total,
-            completed: 0,
-            reducer,
-        });
-    }
-
-    fn current_next(&self, id: ActorId) -> Option<Next> {
-        let run = self.instances.get(&id)?.run.as_ref()?;
-        run.definition.step(&run.step)?.next.clone()
-    }
-
-    fn goto_named(&mut self, id: ActorId, name: &str) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let (step, output) = {
-            let run = self.instances[&id]
-                .run
-                .as_ref()
-                .ok_or_else(|| Error::new("not a workflow"))?;
-            let step = run
-                .definition
-                .step(name)
-                .cloned()
-                .ok_or_else(|| Error::new(format!("unknown step {name}")))?;
-            (step, run.output.clone())
-        };
-        self.enter_step(id, &step, output)
-    }
-
-    fn advance(
-        &mut self,
-        id: ActorId,
-        output: Doc,
-        next: Option<&Next>,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        if let Some(run) = self
-            .instances
-            .get_mut(&id)
-            .and_then(|instance| instance.run.as_mut())
-        {
-            run.output = output.clone();
-            run.output_json = project(&output)?;
-        }
-        match next {
-            None | Some(Next::Succeed {}) => self.succeed(id, output),
-            Some(Next::Fail { error }) => {
-                let value = self.eval(error, &bindings_from(&output))?;
-                self.fail(id, value)
-            }
-            Some(Next::Goto { step }) => self.goto_named(id, step),
-        }
-    }
-
-    fn succeed(&mut self, id: ActorId, output: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        {
-            let instance = self.instances.get_mut(&id).expect("actor");
-            instance.completed = true;
-            instance.completion = Some(output.clone());
-            instance.completion_json = Some(project(&output)?);
-            if let Some(run) = instance.run.as_mut() {
-                run.status = RunStatus::Succeeded;
-                run.output = output.clone();
-                run.output_json = project(&output)?;
-            }
-        }
-        self.finish_to_parent(id, output)
-    }
-
-    fn fail(&mut self, id: ActorId, error: Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        {
-            let instance = self.instances.get_mut(&id).expect("actor");
-            instance.completed = true;
-            instance.completion = Some(error.clone());
-            instance.completion_json = Some(project(&error)?);
-            if let Some(run) = instance.run.as_mut() {
-                run.status = RunStatus::Failed;
-                run.output = error.clone();
-                run.output_json = project(&error)?;
-            }
-        }
-        Err(Error::new(format!(
-            "workflow failed: {}",
-            doc::encode(&error).unwrap_or_else(|_| "error".to_string())
-        )))
-    }
-
     fn finish_to_parent(
         &mut self,
         id: ActorId,
@@ -1196,9 +777,6 @@ impl World {
         let Some(parent) = self.instances[&id].parent else {
             return Ok(vec![]);
         };
-        if self.instances[&parent].run.is_some() {
-            return self.on_work_complete(parent, id, output);
-        }
         Ok(vec![(parent, output, Route::Up)])
     }
 
@@ -1213,19 +791,6 @@ impl World {
                 return Ok(vec![]);
             }
             return self.drive(id, message);
-        }
-        if self.instances[&id].run.is_some() {
-            return match route {
-                Route::Join => {
-                    let next = self.current_next(id);
-                    self.instances.get_mut(&id).expect("actor").join = None;
-                    self.advance(id, message.clone(), next.as_ref())
-                }
-                Route::Inject => self.start_run(id, message.clone()),
-                Route::Up | Route::Init => Ok(vec![]),
-                Route::Down => Err(Error::new("workflow does not take down messages")),
-                Route::SelfSend => Err(Error::new("workflow does not take self messages")),
-            };
         }
         let (kind_name, state_name, fields, completed, parent) = {
             let instance = self
@@ -1253,20 +818,6 @@ impl World {
             .iter()
             .find(|state| state.name == state_name)
             .ok_or_else(|| Error::new("unknown state"))?;
-        if route == Route::Join {
-            let Some(handler) = state.handlers.iter().rev().find(|handler| {
-                handler.item.is_none()
-                    && handler.pattern.get("kind").and_then(Json::as_str) == Some("any")
-            }) else {
-                return unmatched(route, &kind_name, self.instances[&id].parent, message);
-            };
-            let mut bindings = HashMap::new();
-            for (name, value) in &fields {
-                bindings.insert(name.clone(), value.clone());
-            }
-            bind_world(&mut bindings);
-            return self.run_statements(id, &handler.body, &bindings);
-        }
         for handler in &state.handlers {
             if !route_matches(&handler.route, route) {
                 continue;
@@ -1390,65 +941,6 @@ impl World {
             }
         }
         Ok(sends)
-    }
-
-    fn on_work_complete(
-        &mut self,
-        parent: ActorId,
-        child: ActorId,
-        payload: Doc,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let Some(join) = self
-            .instances
-            .get(&parent)
-            .and_then(|instance| instance.join.as_ref())
-        else {
-            return Ok(vec![]);
-        };
-        if join.reducer == Some(child) {
-            self.instances.get_mut(&parent).expect("actor").join = None;
-            let next = self.current_next(parent);
-            return self.advance(parent, payload, next.as_ref());
-        }
-        let reducer = join.reducer;
-        let removed = self
-            .instances
-            .get_mut(&parent)
-            .and_then(|instance| instance.join.as_mut())
-            .is_some_and(|join| join.remaining.remove(&child));
-        if !removed {
-            return Ok(vec![]);
-        }
-        if let Some(join) = self
-            .instances
-            .get_mut(&parent)
-            .and_then(|instance| instance.join.as_mut())
-        {
-            join.completed += 1;
-        }
-        if let Some(reducer) = reducer {
-            let mut sends = self.start_work(reducer, payload)?;
-            let empty = self
-                .instances
-                .get(&parent)
-                .and_then(|instance| instance.join.as_ref())
-                .is_some_and(|join| join.remaining.is_empty());
-            if empty {
-                sends.extend(self.end_accumulator(reducer)?);
-            }
-            return Ok(sends);
-        }
-        let done = self
-            .instances
-            .get(&parent)
-            .and_then(|instance| instance.join.as_ref())
-            .is_some_and(|join| join.remaining.is_empty());
-        if !done {
-            return Ok(vec![]);
-        }
-        self.instances.get_mut(&parent).expect("actor").join = None;
-        let next = self.current_next(parent);
-        self.advance(parent, payload, next.as_ref())
     }
 
     fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
@@ -2235,14 +1727,6 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
     Ok(())
 }
 
-fn bind_step(
-    pattern: &Json,
-    working: &Doc,
-    rules: &[String],
-) -> Result<HashMap<String, Doc>, Error> {
-    match_program(pattern, working, rules)?.ok_or_else(|| Error::new("step pattern missed"))
-}
-
 fn match_program(
     pattern: &Json,
     message: &Doc,
@@ -2279,35 +1763,6 @@ fn match_handler(
     Ok(Some(bindings))
 }
 
-fn bindings_from(value: &Doc) -> HashMap<String, Doc> {
-    doc::entries(value)
-        .map(|entries| entries.into_iter().collect())
-        .unwrap_or_default()
-}
-
-fn workflow_from_value(value: Json) -> Result<Workflow, Error> {
-    if value.get("kind").and_then(Json::as_str) == Some("task") {
-        let component = value
-            .get("component")
-            .and_then(Json::as_str)
-            .ok_or_else(|| Error::new("dynamic task missing component"))?
-            .to_string();
-        return Ok(Workflow {
-            kind: "workflow".into(),
-            name: "Dynamic".into(),
-            start: "Start".into(),
-            steps: vec![FlowStep {
-                name: "Start".into(),
-                start: true,
-                pattern: None,
-                body: StepBody::Task { component },
-                next: Some(Next::Succeed {}),
-            }],
-        });
-    }
-    serde_json::from_value(value).map_err(|error| Error::new(error.to_string()))
-}
-
 fn unmatched(
     route: Route,
     kind: &str,
@@ -2324,7 +1779,6 @@ fn unmatched(
         }
         Route::Down => Err(Error::new(format!("unmatched down to {kind}"))),
         Route::Inject => Err(Error::new("unmatched injected message")),
-        Route::Join => Err(Error::new(format!("no join handler on {kind}"))),
         Route::Init => Ok(vec![]),
         Route::SelfSend => Err(Error::new(format!("unmatched self on {kind}"))),
     }
@@ -2422,89 +1876,11 @@ fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Erro
     Ok(())
 }
 
-fn check_workflow(program: &Program, workflow: &Workflow) -> Result<(), Error> {
-    if workflow.start_step().is_none() {
-        return Err(Error::new(format!(
-            "workflow {} must declare exactly one start step",
-            workflow.name
-        )));
-    }
-    let names: HashSet<_> = workflow
-        .steps
-        .iter()
-        .map(|step| step.name.as_str())
-        .collect();
-    for step in &workflow.steps {
-        match &step.body {
-            StepBody::Task { component } => {
-                if program.kind(component).is_none() {
-                    return Err(Error::new(format!("unknown step kind {component}")));
-                }
-            }
-            StepBody::Map {
-                component, reduce, ..
-            } => {
-                for kind in [component, reduce] {
-                    if program.kind(kind).is_none() {
-                        return Err(Error::new(format!("unknown step kind {kind}")));
-                    }
-                }
-            }
-            StepBody::Choice { clauses } => {
-                for clause in clauses {
-                    if !names.contains(clause.step.as_str()) {
-                        return Err(Error::new(format!("unknown step {}", clause.step)));
-                    }
-                }
-            }
-            _ => {}
-        }
-        if let Some(Next::Goto { step }) = &step.next {
-            if !names.contains(step.as_str()) {
-                return Err(Error::new(format!("unknown step {step}")));
-            }
-        }
-    }
-    Ok(())
-}
-
 fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
-    if let Some(workflow) = program.workflow(&node.component) {
-        let prototypes: HashSet<&str> = node
-            .children
-            .iter()
-            .map(|child| child.component.as_str())
-            .collect();
-        for step in &workflow.steps {
-            let kinds = match &step.body {
-                StepBody::Task { component } => vec![component.as_str()],
-                StepBody::Map {
-                    component, reduce, ..
-                } => vec![component.as_str(), reduce.as_str()],
-                _ => vec![],
-            };
-            for component in kinds {
-                if let Some(kind) = program.kind(component) {
-                    if !kind.ports.is_empty() && !prototypes.contains(component) {
-                        return Err(Error::new(format!(
-                            "fanout kind {component} must not declare ports"
-                        )));
-                    }
-                }
-            }
-        }
-        for child in &node.children {
-            check_instance(program, child)?;
-        }
-        return Ok(());
-    }
     let ports: Vec<(String, String)> = {
         let kind = program
             .kind(&node.component)
             .ok_or_else(|| Error::new(format!("unknown kind {}", node.component)))?;
-        if !kind.ports.is_empty() && node.children.is_empty() {
-            // spawned bare by a map/task without prototype — checked at spawn/check_workflow
-        }
         kind.ports
             .iter()
             .map(|port| (port.name.clone(), port.component.clone()))
@@ -2554,31 +1930,6 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
             ("component", doc::string(&child.component)),
         ])
     }));
-    let join = match &instance.join {
-        None => doc::null(),
-        Some(join) => doc::object([
-            (
-                "remaining",
-                doc::array(
-                    join.remaining
-                        .iter()
-                        .map(|ActorId(id)| doc::number(*id as f64)),
-                ),
-            ),
-            ("total", doc::number(join.total as f64)),
-            ("completed", doc::number(join.completed as f64)),
-            (
-                "reducer",
-                join.reducer
-                    .map(|ActorId(id)| doc::number(id as f64))
-                    .unwrap_or_else(doc::null),
-            ),
-        ]),
-    };
-    let run = match &instance.run {
-        None => doc::null(),
-        Some(run) => run_document(run)?,
-    };
     Ok(doc::object([
         ("id", doc::number(id as f64)),
         ("kind", doc::string(&instance.kind)),
@@ -2605,8 +1956,6 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
             "completion",
             instance.completion.clone().unwrap_or_else(doc::null),
         ),
-        ("join", join),
-        ("run", run),
         (
             "driver",
             instance
@@ -2618,36 +1967,11 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
     ]))
 }
 
-fn run_document(run: &WorkflowRun) -> Result<Doc, Error> {
-    Ok(doc::object([
-        (
-            "status",
-            doc::string(match run.status {
-                RunStatus::Running => "running",
-                RunStatus::Succeeded => "succeeded",
-                RunStatus::Failed => "failed",
-            }),
-        ),
-        ("step", doc::string(&run.step)),
-        ("input", run.input.clone()),
-        ("output", run.output.clone()),
-        // Workflow syntax trees are JSON. They are embedded in the snapshot here.
-        ("definition", syntax_document(&run.definition)?),
-        ("prototypes", syntax_document(&run.prototypes)?),
-    ]))
-}
-
-fn syntax_document(value: &impl serde::Serialize) -> Result<Doc, Error> {
-    let json = serde_json::to_value(value).map_err(|error| Error::new(error.to_string()))?;
-    doc::from_json(&json)
-}
-
 fn snapshot_route(route: Route) -> &'static str {
     match route {
         Route::Inject => "inject",
         Route::Down => "down",
         Route::Up => "up",
-        Route::Join => "join",
         Route::Init => "init",
         Route::SelfSend => "self",
     }
@@ -2657,7 +1981,6 @@ fn restore_route(value: Option<&str>) -> Route {
     match value {
         Some("down") => Route::Down,
         Some("up") => Route::Up,
-        Some("join") => Route::Join,
         Some("init") => Route::Init,
         Some("self") => Route::SelfSend,
         _ => Route::Inject,
@@ -2738,31 +2061,6 @@ fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
             .into_iter()
             .collect::<HashMap<_, _>>();
     let field_json = project_map(&fields)?;
-    let join = doc::get(entry, "join")
-        .filter(|value| !doc::is_null(value))
-        .map(|value| {
-            let remaining = doc::items(&doc::get(&value, "remaining").unwrap_or_else(doc::null))
-                .unwrap_or_default()
-                .iter()
-                .filter_map(doc::as_u64)
-                .map(ActorId)
-                .collect();
-            JoinSet {
-                remaining,
-                total: doc::as_u64(&doc::get(&value, "total").unwrap_or_else(doc::null))
-                    .unwrap_or(0),
-                completed: doc::as_u64(&doc::get(&value, "completed").unwrap_or_else(doc::null))
-                    .unwrap_or(0),
-                reducer: doc::get(&value, "reducer")
-                    .filter(|item| !doc::is_null(item))
-                    .and_then(|item| doc::as_u64(&item))
-                    .map(ActorId),
-            }
-        });
-    let run = match doc::get(entry, "run") {
-        Some(value) if !doc::is_null(&value) => Some(restore_run(&value)?),
-        _ => None,
-    };
     let completion = doc::get(entry, "completion").filter(|value| !doc::is_null(value));
     let completion_json = completion.as_ref().map(project).transpose()?;
     Ok(InstanceState {
@@ -2776,37 +2074,10 @@ fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
             .unwrap_or(false),
         completion,
         completion_json,
-        join,
-        run,
         driver: doc::get(entry, "driver")
             .filter(|value| !doc::is_null(value))
             .as_ref()
             .and_then(builtin::driver_from),
-    })
-}
-
-fn restore_run(value: &Doc) -> Result<WorkflowRun, Error> {
-    let definition: Workflow =
-        serde_json::from_value(doc::to_json(&required(value, "definition")?)?)
-            .map_err(|error| Error::new(error.to_string()))?;
-    let prototypes = serde_json::from_value(doc::to_json(
-        &doc::get(value, "prototypes").unwrap_or_else(|| doc::array([])),
-    )?)
-    .map_err(|error| Error::new(error.to_string()))?;
-    let input = doc::get(value, "input").unwrap_or_else(doc::null);
-    let output = doc::get(value, "output").unwrap_or_else(doc::null);
-    Ok(WorkflowRun {
-        status: match doc::as_str(&doc::get(value, "status").unwrap_or_else(doc::null)).as_deref() {
-            Some("succeeded") => RunStatus::Succeeded,
-            Some("failed") => RunStatus::Failed,
-            _ => RunStatus::Running,
-        },
-        step: doc::as_str(&doc::get(value, "step").unwrap_or_else(doc::null)).unwrap_or_default(),
-        input,
-        output: output.clone(),
-        output_json: project(&output)?,
-        definition,
-        prototypes,
     })
 }
 
