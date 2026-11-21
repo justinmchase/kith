@@ -10,15 +10,15 @@ spec_ref: .agents/specifications/components.spec.md#declaration; .agents/specifi
 
 Preconditions:
 
-- `ValidateOrder` in `examples/order.kith` declares a typed `on` and an
-  `else` in that order.
+- A component declares a typed `on` and an `else` in that order, and is
+  the exported scene root.
 
 Expected behavior:
 
 - The program MUST parse. The `else` handler MUST be the last handler of
   that state and MUST have pattern `any`.
-- Injecting `{ kind: "Nope" }` MUST still take that default and fail the
-  Order run with `invalid order`.
+- Injecting `{ kind: "Nope" }` MUST take that default and `complete`
+  `{ kind: "Rejected" }`.
 
 Postconditions:
 

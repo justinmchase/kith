@@ -233,8 +233,6 @@ fn host_component(name: &str) -> Component {
 fn occupied(program: &Program, name: &str) -> Option<&'static str> {
     if program.component(name).is_some() {
         Some("component")
-    } else if program.workflow(name).is_some() {
-        Some("workflow")
     } else if program.scene(name).is_some() {
         Some("scene")
     } else if program.functions.iter().any(|item| item == name) {

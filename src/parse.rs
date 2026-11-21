@@ -1,4 +1,4 @@
-use crate::ast::{Component, Program, Scene, Workflow};
+use crate::ast::{Component, Program, Scene};
 use crate::codec::decode;
 use crate::error::Error;
 use crate::json_util::from_uffda_value;
@@ -178,7 +178,6 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
             }
             let had_component = program.component(name).is_some();
             let had_binding = had_component
-                || program.workflow(name).is_some()
                 || program.scene(name).is_some()
                 || program.functions.iter().any(|item| item == name)
                 || program.rules.iter().any(|item| item == name);
@@ -187,8 +186,6 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
                 if !had_component && dep.host_kinds.iter().any(|kind| kind == name) {
                     crate::builtin::reexport(&mut program, name, &[], &[], true);
                 }
-            } else if let Some(workflow) = dep.workflow(name).cloned() {
-                merge_workflow(&mut program, workflow);
             } else if let Some(scene) = dep.scene(name).cloned() {
                 merge_scene(&mut program, scene);
             } else if !had_binding
@@ -200,7 +197,7 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
                 continue;
             } else {
                 return Err(Error::new(format!(
-                    "{name} is exported by {} but is not a component, workflow, or scene",
+                    "{name} is exported by {} but is not a component or scene",
                     import.module_url
                 )));
             }
@@ -212,12 +209,6 @@ fn load_module(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, E
 fn merge_component(program: &mut Program, component: Component) {
     if program.component(&component.name).is_none() {
         program.components.push(component);
-    }
-}
-
-fn merge_workflow(program: &mut Program, workflow: Workflow) {
-    if program.workflow(&workflow.name).is_none() {
-        program.workflows.push(workflow);
     }
 }
 

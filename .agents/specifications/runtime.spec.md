@@ -1,7 +1,7 @@
 # Runtime
 
 This chapter defines how Kith's runtime sits on Uffda's: what it reuses,
-what it implements itself, and why components and workflows are not
+what it implements itself, and why components are not
 Uffda runtime types. Dispatch semantics are in [dispatch](./dispatch.spec.md).
 The operator surface is in [CLI](./cli.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
@@ -18,7 +18,7 @@ capitals.
   languages, matches patterns, evaluates expressions, resolves `.uff` modules,
   and holds values.
 - **Kith runtime**: this language's interpreter. It owns the instance tree,
-  mailboxes, routing, actor turns, fan-out, join, and clustered placement.
+  mailboxes, routing, and actor turns.
 - **Grammar pipeline**: Kith's language, authored as `.uff`, compiled by the
   Uffda CLI to `.uff.ast` artifacts, and embedded in the `kith` binary.
 - **Program pipeline**: `.kith` modules parsed by that grammar, with relative
@@ -26,7 +26,7 @@ capitals.
 
 ## Axioms
 
-- Uffda does not know what a component, scene, workflow, actor, or mailbox is.
+- Uffda does not know what a component, scene, actor, or mailbox is.
 - Matching a message and evaluating an expression are Uffda's work. Scheduling
   those matches as turns of actors is Kith's work.
 - A Kith program is not a Uffda module declaration. Lowering `.kith` source
@@ -62,7 +62,7 @@ capitals.
 
 ### Do not extend Uffda for actors
 
-- Kith MUST NOT require Uffda to add component, workflow, actor, mailbox, or
+- Kith MUST NOT require Uffda to add component, actor, mailbox, or
   cluster types to its runtime.
 - Kith MUST NOT encode dispatch as a Uffda pattern over a message stream, or
   as a host future inside expression evaluation. Mailboxes and schedules are
@@ -226,8 +226,7 @@ state Fetching {
 The mock `(http_get url)` delivers `{ status: 200, url }` after one
 virtual second. A real host driver MAY replace that delay with a socket;
 the program shape is the send and the `on`. N URLs known in source are N
-arguments. N unknown until runtime remains workflow `fanout` plus a
-reducer.
+arguments.
 
 A child capability (the same shape as MockShip) MAY still take a request
 **down** and `send after` a response **up**. A real host driver for that

@@ -32,8 +32,8 @@ capitals.
 
 ## Constraints
 
-- A scene MUST have exactly one top-level instance. That instance MAY be a
-  component or a workflow. It is the program root when the scene is run.
+- A scene MUST have exactly one top-level instance. That instance is a
+  component. It is the program root when the scene is run.
 - `name = Kind() { ... }` MUST fill port `name` with one instance of `Kind`.
 - `Kind() { ... }` with no `name =` MUST add an unnamed child of that kind.
 - A scene MUST NOT share an instance between two parents.
@@ -72,8 +72,7 @@ export scene Main {
 
 The normative ping program is in [components](./components.spec.md#declaration).
 Its scene is `Main`: a `Ping` component root with port `child` filled by
-`Child`. Scene children under a workflow are prototypes cloned when a task or
-map names that kind; see [workflows](./workflows.spec.md#declaration).
+`Child`.
 
 ### Import and export
 

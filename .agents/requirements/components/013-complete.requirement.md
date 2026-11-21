@@ -1,7 +1,7 @@
 ---
 id: components-013
 title: complete sends up, does not goto, and takes no further turns
-spec_ref: .agents/specifications/components.spec.md#sending; .agents/specifications/glossary.spec.md#workflows
+spec_ref: .agents/specifications/components.spec.md#sending; .agents/specifications/glossary.spec.md#machines
 ---
 
 # Complete is not a state

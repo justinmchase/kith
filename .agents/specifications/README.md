@@ -8,7 +8,7 @@ statements.
 Kith sits between [Uffda](https://github.com/justinmchase/uffda) and higher-level
 languages such as [Coleslaw](https://github.com/justinmchase/coleslaw). Uffda
 supplies grammars, patterns, and expressions. Kith supplies components, scenes,
-workflows, and the actor dispatcher. A language built on Kith MUST use these
+and the actor dispatcher. A language built on Kith MUST use these
 primitives rather than redefining them.
 
 ## Chapters
@@ -24,9 +24,6 @@ primitives rather than redefining them.
   and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and
   transitions as actors and parallelizes independent work.
-- [Workflows](./workflows.spec.md): AWS Step Functions-style flow graphs
-  (task, map, choice, pass, run, succeed, fail), dynamic graphs, and
-  serializable runs.
 - [Runtime](./runtime.spec.md): the split between Uffda's matcher and Kith's
   actor interpreter, and how the `kith` binary consumes crates.io.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
@@ -45,7 +42,6 @@ shape.
 
 - `supervision`: what happens when an actor fails, and how a parent restarts or
   stops its children.
-- `persistence`: what of a durable workflow or component is stored, and how a
+- `persistence`: what of a durable component is stored, and how a
   relocated actor resumes.
-- `machines`: shared state-machine rules if components and workflows should not
-  each carry their own copy.
+- `machines`: whether component state-machine rules should be their own chapter.

@@ -148,68 +148,78 @@ fn import_list_parses_and_relative_files_resolve() {
     .unwrap();
     std::fs::write(
         dir.join("main.kith"),
-        "import \"./child.kith\" Child;\nexport Main;\nworkflow Box {\n  start succeed;\n}\nexport scene Main {\n  Box()\n}\n",
+        "import \"./child.kith\" Child;\nexport Main;\ncomponent Box {\n  start {}\n}\nexport scene Main {\n  Box()\n}\n",
     )
     .unwrap();
     let err = resolve_program(&dir.join("main.kith")).expect_err("missing export");
     assert!(err.message.contains("not exported"));
 }
 
-#[test]
-// req:grammar-001 req:workflows-003
-fn import_source_parses_fanout_and_join() {
-    let source = include_str!("../examples/import.kith");
-    let program = parse_source(source).expect("parse import.kith");
-    let import = program.workflow("Import").expect("Import");
-    let pattern = import.steps[0].pattern.as_ref().expect("Start pattern");
-    assert_eq!(pattern["kind"], "over");
-    assert!(pattern["keys"].get("items").is_some());
-    assert!(matches!(
-        import.steps[0].body,
-        kith::ast::StepBody::Map { ref component, ref reduce, .. }
-            if component == "Worker" && reduce == "Count"
-    ));
-    let count = program.component("Count").expect("Count");
-    assert!(count.fields.iter().any(|field| field.name == "total"));
-    let fold = &count.states[0].handlers[0];
-    assert_eq!(fold.pattern["kind"], "variable");
-    assert_eq!(fold.pattern["name"], "item");
-    assert!(fold.item.is_none());
-    let last = count.states[0].handlers.last().expect("else");
-    assert_eq!(last.pattern["kind"], "any");
-    World::check(&program).expect("import checks");
-}
 
 #[test]
-// req:grammar-001 req:workflows-005 req:workflows-008 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001 req:components-012
-fn order_source_parses_tasks_picks_and_map() {
-    let program = parse_source(include_str!("../examples/order.kith")).expect("parse order.kith");
-    let order = program.workflow("Order").expect("Order");
-    assert!(order.steps.iter().any(|step| step.start
-        && matches!(
-            step.body,
-            kith::ast::StepBody::Task { ref component } if component == "ValidateOrder"
-        )));
-    assert!(order
-        .steps
-        .iter()
-        .any(|step| matches!(step.body, kith::ast::StepBody::Choice { .. })));
-    let fulfill = order
-        .steps
-        .iter()
-        .find(|step| step.name == "Fulfill")
-        .expect("Fulfill");
-    let pattern = fulfill.pattern.as_ref().expect("Fulfill pattern");
-    assert_eq!(pattern["kind"], "over");
-    assert!(pattern["keys"].get("items").is_some());
-    assert!(pattern["keys"].get("orderId").is_some());
-    assert!(matches!(
-        &fulfill.body,
-        kith::ast::StepBody::Map { component, reduce, init, .. }
-            if component == "Carrier"
-                && reduce == "Summarize"
-                && init.is_some()
-    ));
+// req:grammar-001 req:components-008 req:components-009 req:components-010 req:components-011 req:dispatch-003 req:runtime-001
+fn carrier_and_summarize_parse() {
+    let program = parse_source(
+        r#"
+export ValidateOrder;
+export MockShip;
+export Carrier;
+export Summarize;
+export Main;
+component ValidateOrder {
+  start {
+    on { kind: "Order" id: any } {
+      complete { kind: "Accepted" };
+    }
+    else {
+      complete { kind: "Rejected" };
+    }
+  }
+}
+component MockShip {
+  start {
+    on down { kind: "Dispatch" item: any index: number } {
+      (writeLine stdout { kind: "InTransit", item: item, index: index });
+      send after (rand 1 3) up { kind: "Delivered" };
+    }
+  }
+}
+component Carrier {
+  field item: string = "";
+  field index: number = 0;
+  ship: MockShip;
+  start Waiting {
+    on down { kind: "Item" item: any index: number } {
+      item -> item;
+      index -> index;
+      send to ship { kind: "Dispatch" item index };
+      goto Shipping;
+    }
+  }
+  state Shipping {
+    on up { kind: "Delivered" } {
+      complete { kind: "Shipped" item index };
+    }
+  }
+}
+component Summarize {
+  field orderId: any;
+  field total: number = 0;
+  start {
+    on item: any {
+      total -> (add total 1);
+    }
+    else complete { kind: "Summarize" orderId total };
+  }
+}
+export scene Main {
+  Carrier() {
+    ship = MockShip();
+  }
+}
+"#,
+    )
+    .expect("parse components");
     let summarize = program.component("Summarize").expect("Summarize");
     assert!(summarize.fields.iter().any(|field| field.name == "total"));
     assert!(summarize.fields.iter().any(|field| field.name == "orderId"));
@@ -225,7 +235,8 @@ fn order_source_parses_tasks_picks_and_map() {
     assert_eq!(done.route, ["up", "down", "self"]);
     assert!(matches!(
         done.body.last(),
-        Some(kith::ast::Statement::Complete { .. })
+        Some(kith::ast::Statement::Complete { message })
+            if message["kind"] == "object"
     ));
     let validate = program.component("ValidateOrder").expect("ValidateOrder");
     let last = validate.states[0].handlers.last().expect("else");
@@ -257,12 +268,9 @@ fn order_source_parses_tasks_picks_and_map() {
     assert_eq!(shipping.handlers[0].route, ["up"]);
     let scene = &program.scene("Main").expect("Main").root;
     assert!(scene.children.iter().any(|child| {
-        child.component == "Carrier"
-            && child.children.iter().any(|nested| {
-                nested.key.as_deref() == Some("ship") && nested.component == "MockShip"
-            })
+        child.key.as_deref() == Some("ship") && child.component == "MockShip"
     }));
-    World::check(&program).expect("order checks");
+    World::check(&program).expect("component scene checks");
 }
 
 #[test]

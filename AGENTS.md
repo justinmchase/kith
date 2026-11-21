@@ -1,7 +1,7 @@
 # Kith agent instructions
 
 Kith is a runtime layer on [Uffda](https://github.com/justinmchase/uffda):
-components, message dispatch, and workflows. Higher-level languages such as
+components, scenes, and message dispatch. Higher-level languages such as
 [Coleslaw](https://github.com/justinmchase/coleslaw) are built on Kith; they
 MUST NOT redefine these primitives.
 

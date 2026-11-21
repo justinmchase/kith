@@ -3,12 +3,12 @@ name = "kith-runtime"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Kith runtime: components, message dispatch, and workflows on Uffda"
+description = "Kith runtime: components, scenes, and message dispatch on Uffda"
 repository = "https://github.com/justinmchase/kith"
 homepage = "https://github.com/justinmchase/kith"
 documentation = "https://docs.rs/kith-runtime"
 readme = "README.md"
-keywords = ["kith", "uffda", "workflow", "actor"]
+keywords = ["kith", "uffda", "actor", "scene"]
 categories = ["compilers"]
 publish = true
 

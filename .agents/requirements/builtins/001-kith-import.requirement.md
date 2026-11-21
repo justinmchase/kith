@@ -22,7 +22,7 @@ Expected behavior:
   MUST NOT rewrite it. `load_path` for that URL MUST fail.
 - `kith:data`, `kith:stream`, and `kith:time` MUST bind the named function,
   component, or rule. A missing name MUST fail. A name that collides with a
-  local component, workflow, scene, function, or rule MUST fail.
+  local component, scene, function, or rule MUST fail.
 - `kith:Data`, `kith:`, and `kith:fs/promises` MUST fail as an invalid kith
   import specifier. `kith:dns` MUST fail as an unknown built-in module.
   A `jsr:` specifier MUST still fail as an unsupported import specifier.

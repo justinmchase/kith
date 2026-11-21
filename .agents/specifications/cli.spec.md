@@ -32,8 +32,7 @@ The executable name MUST be `kith`. The initial surface MUST be:
 
 - Invalid input and runtime failures MUST produce diagnostics and a nonzero
   exit.
-- `parse` and `check` MUST NOT construct component actors, send messages, or
-  start workflows.
+- `parse` and `check` MUST NOT construct component actors or send messages.
 - `compile` MUST be reproducible from the same sources and grammar artifacts.
 - `run` MUST execute only compiled trees: if given source, it compiles first
   (in memory or to the artifact path) and then interprets.
@@ -43,8 +42,8 @@ The executable name MUST be `kith`. The initial surface MUST be:
   one file's syntax tree as a Uffda data codec record and MUST NOT resolve
   imports. `check` and `compile` MUST resolve relative `.kith` imports before
   checking. `compile` MUST write a `.kith.ast` data codec artifact. `run` MUST
-  print a data codec record of the root component's fields, or of the
-  workflow succeed output when the root is a workflow. Writes to the
+  print a data codec record of the root component's fields, or of its
+  completion when the root has `complete`d. Writes to the
   program's `stdout` stream (`(writeLine stdout V)`, `(print V)`) MUST go
   to process stderr as data codec records so process stdout stays the run
   result. That is a stream binding, not a keyword. Constructing `Stdout`

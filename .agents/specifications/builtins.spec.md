@@ -36,7 +36,7 @@ capitals.
   `:` and is neither `kith:` nor a relative path MUST fail as an unsupported
   import specifier.
 - The names after the specifier are the exports to bind. A missing export
-  MUST fail resolution. A name that collides with a component, workflow,
+  MUST fail resolution. A name that collides with a component,
   scene, function, or rule already in that file MUST fail resolution.
 - `kith parse` MUST NOT load the imported module. `kith check` and `kith run`
   MUST.
