@@ -84,7 +84,10 @@ capitals.
 - **To**: a route to a named port (`send to`).
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`). `on up` matches only that route at the receiver.
-- **Down**: a route toward direct children of a kind (`send down`). `on down`
+- **Down**: a route toward direct children a pattern selects (`send down
+  Pattern V` or `send down any V`). A component name in that pattern is a
+  looks-like match, not declared-kind equality. `any` matches every direct
+  child. The message is the value after the selector. `on down`
   matches a `send to` / `send down` to this instance, and an inject. It
   does not match `send self` or init.
 - **Self**: a route to this instance (`send self`). Taken on a later turn.

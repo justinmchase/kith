@@ -1,7 +1,7 @@
 # Components
 
 This chapter defines components: kinds with fields, typed ports, and state
-machines, and sending messages to a port, down by kind, or up the tree a
+machines, and sending messages to a port, down by a pattern, or up the tree a
 [scene](./scenes.spec.md) built. Dispatch of those messages is defined in
 [dispatch](./dispatch.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
@@ -36,7 +36,7 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down` a kind.
+  reached only through their parent: `send to` a port, or `send down` a pattern.
 
 ### Behavior
 
@@ -53,7 +53,7 @@ capitals.
 
 ### Routing
 
-- A send MUST name a direction: `send to` a port, `send down` a kind,
+- A send MUST name a direction: `send to` a port, `send down` a pattern,
   `send up`, or `send self`. Routing is explicit only: there is no capture
   phase, and an unhandled message MUST NOT travel up unless the send was
   `send up`. A send with no route is invalid; self is not implied.
@@ -62,10 +62,21 @@ capitals.
   the root MUST be dropped with no error.
 - `send to name V` offers `V` to the child that fills port `name`. An unknown
   port MUST fail that send with a diagnostic.
-- `send down Kind V` offers `V` to each direct child of kind `Kind`, including
-  a named port whose kind is `Kind`. It MUST NOT skip a generation. Zero
-  matching children MUST fail that send with a diagnostic.
-- `send down any V` offers `V` to every direct child. Zero children MUST fail.
+- A selector is a pattern. `send down Pattern V` offers `V` to each direct
+  child the pattern selects, a port child and an unnamed child together when
+  both satisfy it. The message is the value after the selector. A bare
+  `send down Kind` with no message is not a form. When a component name
+  appears as that selector, it is a looks-like match: another component,
+  including a mock, matches when it satisfies the pattern. It does not have
+  to be that declared kind. Satisfying a named component compares shape, not
+  the declared name. The candidate declares the same port names, and each of
+  those ports' selectors is satisfied by this same rule. Its handlers have
+  the same routes and message patterns, whichever state they sit in. Fields
+  are not compared. A component satisfies a selector that names it because
+  that shape is its own. It MUST NOT skip a generation. Zero matching
+  children MUST fail that send with a diagnostic.
+- `send down any V` is that send where the pattern is `any`. `any` matches
+  every direct child. Zero children MUST fail.
 - An unmatched handler at a selected child MUST fail that send with a
   diagnostic; it MUST NOT be forwarded to the child's children.
 - Several matching children MUST each receive one send, independently.
@@ -166,9 +177,15 @@ export scene Main {
 ### Sending
 
 - `send to name V…` sends the message to the named port.
-- `send down Kind V…` sends the message to each direct child of that kind.
+- `send down Pattern V…` sends the message to each direct child the pattern
+  selects. A component name in `Pattern` is a looks-like match, as
+  [routing](#routing) defines. The message is the value after the selector.
 - `send down any V…` sends the message to every direct child.
-- `send up V…` sends the message toward the parent.
+- `send up V…` sends the message toward the parent. An unnamed child's
+  `send up` is this same ancestor walk. The parent matches it with `on up`.
+  There is one `send up` route. It is not delivered to siblings. `send to`
+  MUST NOT address an unnamed child, and the unnamed child MUST NOT gain a
+  port name.
 - `send self V…` sends the message to this instance. It is taken on a later
   turn and matches a handler whose route list includes `self` (`on self`,
   `on up or self`, unqualified `on`). It MUST NOT match `on down` alone.
@@ -350,8 +367,10 @@ MUST project `name: "Start"` and `named: false`. `start Name` and
 `state Name` MUST project `named: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
-MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
-MUST be `null` when the send is `send down any`. `handler.item` MAY be omitted
+MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`,
+when set, is the component name used as a looks-like selector, not a
+declared-kind equality. It MUST be `null` when the selector is `any`.
+`message` is required. `handler.item` MAY be omitted
 when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
 Unqualified `on` and `else` MUST project `["up", "down", "self"]`. `on init`
@@ -385,9 +404,10 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
-  a kind. `to` names the port; `down` names the kind; `up` is the ancestor
-  chain; `self` is this instance on a later turn. A missing route would look
-  like a parent sending down.
+  a kind. `to` names the port; `down` is a pattern, and a component name
+  there is a looks-like match rather than declared-kind equality; `up` is
+  the ancestor chain; `self` is this instance on a later turn. A missing
+  route would look like a parent sending down.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then

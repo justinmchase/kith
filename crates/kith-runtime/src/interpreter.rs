@@ -1,4 +1,4 @@
-use crate::ast::{Field, Instance, Program, Statement};
+use crate::ast::{Component, Field, Instance, Program, Statement};
 use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::doc::{self, Doc};
@@ -950,7 +950,9 @@ impl World {
                 instance
                     .children
                     .iter()
-                    .filter(|child| kind.is_none_or(|kind| child.component == kind))
+                    .filter(|child| {
+                        kind.is_none_or(|name| looks_like(&self.program, &child.component, name))
+                    })
                     .map(|child| child.id)
                     .collect()
             })
@@ -1495,6 +1497,71 @@ impl World {
             Route::Inject
         }
     }
+}
+
+fn looks_like(program: &Program, candidate: &str, selector: &str) -> bool {
+    let mut stack = HashSet::new();
+    looks_like_rec(program, candidate, selector, &mut stack)
+}
+
+fn looks_like_rec(
+    program: &Program,
+    candidate: &str,
+    selector: &str,
+    stack: &mut HashSet<(String, String)>,
+) -> bool {
+    if candidate == selector {
+        return program.component(candidate).is_some();
+    }
+    if !stack.insert((candidate.to_string(), selector.to_string())) {
+        return true;
+    }
+    let (Some(left), Some(right)) = (program.component(candidate), program.component(selector))
+    else {
+        return false;
+    };
+    if handler_protocol(left) != handler_protocol(right) {
+        return false;
+    }
+    let left_ports = port_protocol(left);
+    let right_ports = port_protocol(right);
+    if left_ports.len() != right_ports.len() {
+        return false;
+    }
+    for ((left_name, left_kind), (right_name, right_kind)) in left_ports.iter().zip(&right_ports) {
+        if left_name != right_name || !looks_like_rec(program, left_kind, right_kind, stack) {
+            return false;
+        }
+    }
+    true
+}
+
+fn handler_protocol(component: &Component) -> Vec<(Vec<String>, String, String)> {
+    let mut rows = Vec::new();
+    for state in &component.states {
+        for handler in &state.handlers {
+            let mut route = handler.route.clone();
+            route.sort();
+            let item = handler
+                .item
+                .as_ref()
+                .map(Json::to_string)
+                .unwrap_or_default();
+            rows.push((route, handler.pattern.to_string(), item));
+        }
+    }
+    rows.sort();
+    rows
+}
+
+fn port_protocol(component: &Component) -> Vec<(String, String)> {
+    let mut ports: Vec<_> = component
+        .ports
+        .iter()
+        .map(|port| (port.name.clone(), port.component.clone()))
+        .collect();
+    ports.sort();
+    ports
 }
 
 fn route_matches(expected: &[String], route: Route) -> bool {

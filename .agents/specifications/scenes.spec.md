@@ -20,7 +20,10 @@ capitals.
 - **Port fill**: `name = Kind()` under a parent, assigning that instance to the
   parent's declared port `name`.
 - **Unnamed child**: `Kind()` under a parent with no port name. It belongs to
-  the parent's child collection and is reached only by kind.
+  the parent's child collection. `send to` cannot address it. `send down`
+  can, by the looks-like pattern in
+  [routing](./components.spec.md#routing). Its `send up` is the same ancestor
+  walk as a port child's.
 
 ## Axioms
 
@@ -93,7 +96,8 @@ Its scene is `Main`: a `Ping` component root with port `child` filled by
 
 - **Ports versus the graph.** `child: Child;` on a component is a Unity-style
   serialized field: a typed collaborator the scene must fill. Unnamed
-  `Logger()` children are extra hierarchy, reached by kind, not extra ports.
+  `Logger()` children are extra hierarchy, reached by a `send down` pattern,
+  not extra ports.
 - **Scene still builds the tree.** The kind names the ports; the scene says
   which instances exist and how they nest. Sharing an instance would give it
   two parents and break send-up.
