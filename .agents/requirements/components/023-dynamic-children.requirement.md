@@ -27,9 +27,12 @@ Expected behavior:
 - Release before that instance runs MUST drop the mailbox, init included.
 - The new child MUST be unnamed. It MUST NOT fill or replace a port on the
   parent. Ports on the spawning parent stay the scene's fills.
-- If the new kind declares ports, the construction MUST fill them under the
-  scene rules: known kind, declared kind, no missing port, no duplicate port
-  name. Nested unnamed children follow those same rules.
+- If the new component declares ports, the construction MUST fill them under
+  the scene rules: the name resolves, the fill satisfies the port's
+  looks-like pattern, no missing port, no duplicate port name. A port fill
+  is that pattern match. It MUST NOT require the child's declared kind to
+  equal the component named on the port. A mock MAY fill the port when it
+  satisfies the pattern. Nested unnamed children follow those same rules.
 - A key, when the transition supplies one, MUST be a value that transition
   already computed, or null when it supplies none. The program MUST NOT read
   a runtime-minted identity. The same machine state and the same enabling

@@ -1,6 +1,6 @@
 ---
 id: components-020
-title: An unnamed child sends up on the same route, and send down Kind selects a port child and an unnamed child of that kind together
+title: An unnamed child sends up on the same route, and one send down selects a port child and an unnamed child that both satisfy the pattern
 spec_ref: .agents/specifications/components.spec.md#routing; .agents/specifications/components.spec.md#sending
 ---
 
@@ -11,15 +11,18 @@ spec_ref: .agents/specifications/components.spec.md#routing; .agents/specificati
 Preconditions:
 
 - A parent has one direct child that fills a port and one unnamed direct
-  child. The two children may be the same kind. The parent may also have an
-  unnamed child of a different kind.
+  child. Either child matches when it satisfies the selector pattern. Neither
+  match requires the child's declared kind to equal a named component.
 - The unnamed child has no port name.
 
 Expected behavior:
 
-- `send down Kind` MUST deliver one send to each direct child of that kind.
-  A port child of kind `Kind` and an unnamed child of kind `Kind` MUST both
-  receive that send. A child of another kind MUST NOT.
+- `send down Pattern V` MUST deliver one send to each direct child the
+  pattern selects. A port child and an unnamed child that both satisfy the
+  pattern MUST both receive that send. A component name in the pattern is a
+  looks-like match, including a mock. The message is `V`. A bare `send down
+  Kind` with no message is not a form.
+- `send down any V` MUST deliver to every direct child.
 - `send to` a port MUST deliver only to the child that fills that port. It
   MUST NOT deliver to an unnamed sibling, and the unnamed child MUST NOT
   gain a port name.
@@ -29,6 +32,6 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. `components-003` still covers a port child beside an unnamed
-  child of a different kind. The specs audit does not fail when no test
-  cites this id.
+- Tests: none. A test of looks-like selection would have to implement that
+  match in the runtime. That runtime is unchanged. The specs audit does not
+  fail when no test cites this id.

@@ -35,14 +35,19 @@ capitals.
 
 - A scene MUST have exactly one top-level instance. That instance is a
   component. It is the program root when the scene is run.
-- `name = Kind() { ... }` MUST fill port `name` with one instance of `Kind`.
-- `Kind() { ... }` with no `name =` MUST add an unnamed child of that kind.
+- `name = Kind() { ... }` MUST fill port `name` with one instance that
+  satisfies the port's pattern. The instance does not have to be the
+  component named on the port. A mock MAY fill it when it satisfies that
+  pattern.
+- `Kind() { ... }` with no `name =` MUST add an unnamed child constructed
+  as that component.
 - A scene MUST NOT share an instance between two parents.
 - Check MUST fail if a construction names an unknown kind.
 - Check MUST fail if two children under one parent use the same port name.
 - Check MUST fail if a parent instance omits a declared port.
-- Check MUST fail if `name = Kind()` does not match the port's declared kind
-  (`a: A` filled with `a = B()`).
+- Check MUST fail if a port fill does not satisfy the port's pattern. A
+  different declared kind is not, by itself, that failure. There is no is-a
+  bind on the declared kind.
 - Check MUST fail if `name = Kind()` names a port the parent kind does not
   declare.
 - `kith run` and `World::start` MUST run the unique exported scene of the
@@ -93,8 +98,9 @@ Its scene is `Main`: a `Ping` component root with port `child` filled by
 ## Why this design
 
 - **Ports versus the graph.** `child: Child;` on a component is a Unity-style
-  serialized field: a typed collaborator the scene must fill. Unnamed
-  `Logger()` children are extra hierarchy, reached by kind, not extra ports.
+  serialized field: a looks-like collaborator the scene must fill. Unnamed
+  `Logger()` children are extra hierarchy, reached by a `send down` pattern,
+  not extra ports.
 - **Scene still builds the tree.** The kind names the ports; the scene says
   which instances exist and how they nest. Sharing an instance would give it
   two parents and break send-up.

@@ -21,11 +21,13 @@ capitals.
   A field declared on the component is in scope in every state. A field may
   instead name the states it belongs to
   ([state-scoped fields](#state-scoped-fields)). It is still one field.
-- **Port**: a typed named slot for one child instance, filled by a scene.
+- **Port**: a named slot for one child instance, filled by a scene. The
+  component name on the port is a looks-like selector, not an is-a bind.
 
 ## Axioms
 
-- A component is a kind. It is not a kind of another component.
+- A component is a kind. It is not a kind of another component. There is no
+  is-a bind on a component's declared kind.
 - An instance other than the root has exactly one parent.
 - An instance's machine state changes only by completing a transition.
 - The only communication that causes behavior is a message.
@@ -40,8 +42,9 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down` (a kind,
-  `any`, or a filter). The parent does not receive its children as a value.
+  reached only through their parent: `send to` a port, or `send down` a
+  pattern (`send down Pattern V`, `send down any V`, or a filter). The parent
+  does not receive its children as a value.
 
 ### Behavior
 
@@ -61,9 +64,8 @@ capitals.
 
 ### Routing
 
-- A send MUST name a direction: `send to` a port, `send down` (a kind,
-  `any`, or a filter), `send up`, or `send self`. Routing is explicit only:
-  there is no capture
+- A send MUST name a direction: `send to` a port, `send down` a pattern,
+  `send up`, or `send self`. Routing is explicit only: there is no capture
   phase, and an unhandled message MUST NOT travel up unless the send was
   `send up`. A send with no route is invalid; self is not implied.
 - `send up` offers the message to the parent, then to that parent's parent,
@@ -75,28 +77,33 @@ capitals.
   port MUST fail that send with a diagnostic. An unnamed child has no port
   name, so `send to` cannot address it, and the child MUST NOT gain a port
   name. `send to` a port does not deliver to an unnamed sibling.
-- `send down Kind V` offers `V` to each direct child of kind `Kind`. One such
-  send selects a port child and an unnamed child of that same kind together.
-  The unnamed child may be scene-constructed or dynamic. It MUST NOT skip a
-  generation. Zero matching children MUST fail that send with a diagnostic.
-  `send down Other` does not deliver to a child whose kind is not `Other`.
-- `send down any V` offers `V` to every direct child. Zero children MUST fail.
-  Kind equality and `any` keep these failure rules. Neither is a filter.
-- A filtered `send down` is a third form. Finding a child is this send. The
-  parent does not receive the children as a value. Its source spelling is
-  open ([open questions](#open-questions)). The filter matches a Uffda
-  pattern against the record the parent already holds for each direct child,
-  and against nothing else. That record is
-  `{ kind, port, key }`. `kind` is the component kind. `port` is the port
-  name, or null when the child is unnamed. `key` is the glossary
-  [key](./glossary.spec.md#components-and-trees). A scene-constructed child's
-  `key` is null, including a port child: the scene instance node's `key`
-  field holds the port name, and that name is this record's `port`, not a
-  non-null key. A dynamic child's `port` is null, and its `key` is the value
-  the transition supplied, or null. The record does not include the child's
-  fields, machine state, or mailbox. Each match gets its own send, and the
-  child matches that send with `on down`. Zero matches MUST fail the send
-  with a diagnostic.
+- A selector is a pattern. `send down Pattern V` offers `V` to each direct
+  child the pattern selects. The message is the value after the selector.
+  A bare `send down Kind` with no message is not a form. When a component
+  name appears as that selector, it is a looks-like match: another component,
+  including a mock, matches when it satisfies the pattern. It does not have
+  to be that declared kind. One such send selects a port child and an unnamed
+  child together when both satisfy the pattern, whether the unnamed child was
+  constructed by the scene or by a transition. It MUST NOT skip a generation.
+  Zero matching children MUST fail that send with a diagnostic.
+- `send down any V` is `send down Pattern V` where the pattern is `any`.
+  `any` matches every direct child. Zero children MUST fail. These failure
+  rules are the selector's rules. They are not a declared-kind check.
+- A filtered `send down` matches a Uffda pattern the parent holds for each
+  direct child. Finding a child is this send. The parent does not receive
+  the children as a value. Its source spelling is open
+  ([open questions](#open-questions)). The pattern may match the port name,
+  if the child has one, and the [key](./glossary.spec.md#components-and-trees).
+  A component name in the pattern is the same looks-like match, not an
+  equality check on the child's declared kind. The pattern MUST NOT require
+  that declared kind to equal a named component. It does not see the child's
+  fields, machine state, or mailbox. `port` is the port name, or null when
+  the child is unnamed. A scene-constructed child's `key` is null, including
+  a port child: the scene instance node's `key` field holds the port name,
+  and that name is `port`, not a non-null key. A dynamic child's `port` is
+  null, and its `key` is the value the transition supplied, or null. Each
+  match gets its own send, and the child matches that send with `on down`.
+  Zero matches MUST fail the send with a diagnostic.
 - An unmatched handler at a selected child MUST fail that send with a
   diagnostic; it MUST NOT be forwarded to the child's children. The same
   rule applies to a child a filter selected.
@@ -156,8 +163,11 @@ export scene Main {
   The value used is the value that matched. This field is in scope in every
   state. A field that instead names the states it belongs to is specified
   in [state-scoped fields](#state-scoped-fields). That spelling is open.
-- `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
-  `Kind` is a component.
+- `name: Kind;` is a port: one child bound as `name`. The spelling stays
+  `name: Kind`. `Kind` is a selector pattern, not an is-a bind. A component
+  name there is a looks-like match: the child, including a mock, matches
+  when it satisfies that pattern. It does not have to be the declared
+  component `Kind`.
 - `start { ... }` is the start state with implicit name `Start`. That name
   is not a `goto` target. Use unnamed start when the machine never returns
   to it. `start Name { ... }` names the start; `goto Name` returns there.
@@ -215,12 +225,17 @@ spellings are open ([open questions](#open-questions)). They MUST NOT change
 
 - `send to name V…` sends the message to the named port. An unnamed child has
   no port name, so `send to` cannot address it.
-- `send down Kind V…` sends the message to each direct child of that kind, a
-  port child and an unnamed child of that kind together.
-- `send down any V…` sends the message to every direct child.
-- A filtered `send down` sends the message to each direct child whose record
-  matches, one send each. The parent does not receive those children as a
-  value. `send down Kind` and `send down any` are not this form.
+- `send down Pattern V…` sends the message to each direct child the pattern
+  selects, a port child and an unnamed child together when both satisfy it.
+  A component name in `Pattern` is a looks-like match, not declared-kind
+  equality. The message is the value after the selector. `send down Kind`
+  with no message is not a form.
+- `send down any V…` sends the message to every direct child. `any` is that
+  pattern.
+- A filtered `send down` sends the message to each direct child its pattern
+  selects, one send each. The parent does not receive those children as a
+  value. The pattern MUST NOT require the child's declared kind to equal a
+  named component.
 - `send up V…` sends the message toward the parent. An unnamed child uses
   this same send. The parent matches it with `on up`.
 - `send self V…` sends the message to this instance. It is taken on a later
@@ -421,12 +436,15 @@ after it. Release before that instance runs drops the mailbox, init included.
 
 The new child is unnamed in the parent's collection. It does not fill or
 replace a port on the parent. Ports on the spawning parent stay the fills
-the scene built. `send to` cannot address the new child. `send down` of its
-kind selects it with the other direct children of that kind.
+the scene built. `send to` cannot address the new child. A `send down`
+selects it together with the other direct children that satisfy that
+selector.
 
-If the new kind declares ports, the construction fills them under the scene
-rules in [scenes](./scenes.spec.md#constraints): known kind, declared kind,
-no missing port, no duplicate port name. Nested unnamed children in that
+If the new component declares ports, the construction fills them under the
+scene rules in [scenes](./scenes.spec.md#constraints): the name resolves, the
+fill satisfies the port's looks-like pattern, no missing port, no duplicate
+port name. A port here is that pattern match, not an is-a bind on the
+declared kind. Nested unnamed children in that
 construction follow the same rules. Check MUST fail in those cases, as it
 does for a scene. Those nested children are created with the new instance
 and held for that instance's life. They are not further dynamic children the
@@ -566,10 +584,14 @@ a dynamic child's glossary Key is that supplied value or null.
 `construct.key` is the expression for that glossary Key, not a port name.
 Omitted or null means a null key. `construct.children` MAY be omitted.
 When present they are instance nodes for the new child's own port fills and
-nested unnamed children. `sendDown.component`
-MUST be `null` when the send is `send down any`. A filtered `send down`
-records `filter: Pattern` on `sendDown` and MUST set `component` to `null`.
-Kind-only and `send down any` omit `filter` and keep the shape above.
+nested unnamed children. `sendDown.component`, when set, is the component name used as a looks-like
+selector. It is not a declared-kind equality. It MUST be `null` when the
+selector is `any`. `message` is required: a bare `send down` with no message
+is not a form. A filtered `send down` records `filter: Pattern` on
+`sendDown` and MUST set `component` to `null`. That pattern MUST NOT require
+the child's declared kind to equal a named component. A component name in it
+is a looks-like match. Name selectors and `any` omit `filter` and keep the
+shape above.
 A release statement has no decided tree tag or child-designation fields.
 It MUST NOT be projected as `assign`, `send`, `goto`, or `complete`.
 `handler.item` MAY be omitted
@@ -606,16 +628,19 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
-  a kind. `to` names the port; `down` names the kind, every child, or a
-  filter; `up` is the ancestor chain; `self` is this instance on a later
+  a kind. `to` names the port; `down` is a pattern, and a component name
+  there is a looks-like match rather than declared-kind equality; `up` is
+  the ancestor chain; `self` is this instance on a later
   turn. A missing route would look
   like a parent sending down.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
   `goto` is the only order that needs to exist.
-- **The filter sees the parent's record.** Matching a child's fields would
-  read another instance. The parent already holds kind, port name, and key.
+- **The filter sees what the parent holds.** Matching a child's fields would
+  read another instance. The parent holds the selector pattern, the port
+  name, and the key. A component name in that pattern is looks-like, not
+  an is-a check on the declared kind.
 - **Destruction is not a message.** A handler on destroy would be supervision.
   Unreachability drops the instance between turns and does not run it.
 - **State conditions do not select the handler.** The message pattern stays

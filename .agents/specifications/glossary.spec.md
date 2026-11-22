@@ -39,9 +39,10 @@ capitals.
   the top-level component instance of its exported scene.
 - **Scene**: a named instance tree that constructs component kinds, fills
   ports, and may add unnamed children.
-- **Port**: a typed named slot on a component for one child
-  (`name: Kind;`). `Kind` is a component. The scene fills it.
-  `send to name` addresses that instance.
+- **Port**: a named slot on a component for one child (`name: Kind;`).
+  `Kind` is a looks-like selector, not an is-a bind on the declared
+  component. A mock matches when it satisfies that pattern. The scene fills
+  it. `send to name` addresses that instance.
 
 ## Uffda
 
@@ -77,7 +78,9 @@ capitals.
   it is the same kind of instance as a scene-constructed child. It lives
   until that parent releases it or the parent is destroyed.
 - **Key**: a value the parent holds for a direct child, separate from the
-  child's kind and from its port name. A filtered `send down` may match it.
+  selector pattern and from its port name. A filtered `send down` may match
+  it. The filter MUST NOT treat this value, or a component name, as an
+  equality check on the child's declared kind.
   A scene-constructed child's key is null, whether or not it fills a port.
   The scene instance node's `key` field is that port name, or null; it is
   not this value. A dynamic child's key is the value the constructing
@@ -99,9 +102,13 @@ capitals.
 - **To**: a route to a named port (`send to`).
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`). `on up` matches only that route at the receiver.
-- **Down**: a route toward direct children (`send down`): one kind, every
-  direct child (`any`), or a filter over the record the parent holds for
-  each child. `on down` matches a `send to` / `send down` to this instance,
+- **Down**: a route toward direct children (`send down Pattern V` or
+  `send down any V`). The selector is a pattern. A component name there is
+  a looks-like match, not declared-kind equality. `any` matches every direct
+  child. A filter matches a pattern the parent holds and MUST NOT require
+  the child's declared kind to equal a named component. The message is the
+  value after the selector. `on down` matches a `send to` / `send down` to
+  this instance,
   and an inject. It does not match `send self` or init.
 - **Self**: a route to this instance (`send self`). Taken on a later turn.
   A handler matches it when its route list includes `self`. Unqualified
