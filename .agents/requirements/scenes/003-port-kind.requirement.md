@@ -23,6 +23,6 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:scenes-003`) still runs the unchanged
-  runtime, which rejects a different declared kind. That run does not
-  establish this requirement.
+- Tests: `tests/interpreter.rs` (`req:scenes-003`) rejects a fill that does
+  not satisfy the port pattern. `tests/lifetime.rs` (`req:components-020`)
+  accepts a mock fill that does.

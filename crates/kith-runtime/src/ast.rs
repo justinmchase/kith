@@ -56,6 +56,9 @@ pub struct Field {
     pub pattern: Option<Json>,
     #[serde(default)]
     pub init: Option<Json>,
+    /// Omitted means the field is in scope in every state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub states: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -96,6 +99,11 @@ pub struct State {
     pub named: bool,
     #[serde(default)]
     pub handlers: Vec<Handler>,
+    /// Tree properties. Omitted means the state does not declare the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<Json>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<Json>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -134,7 +142,20 @@ pub enum Statement {
         message: Json,
         #[serde(default)]
         after: Option<Json>,
+        /// Set on a filtered send, which also sets `component` to null.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Json>,
     },
+    #[serde(rename = "construct")]
+    Construct {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<Json>,
+        #[serde(default)]
+        children: Vec<Instance>,
+    },
+    #[serde(rename = "release")]
+    Release { filter: Json },
     #[serde(rename = "send")]
     Send {
         message: Json,

@@ -1,4 +1,4 @@
-use crate::ast::{Field, Instance, Program, Statement};
+use crate::ast::{Component, Field, Instance, Program, Statement};
 use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::doc::{self, Doc};
@@ -18,8 +18,13 @@ enum Route {
 
 struct ChildRef {
     id: ActorId,
+    /// Port name. Null when the child is unnamed.
     key: Option<String>,
     component: String,
+    /// Scene-constructed children stay for the parent's whole life.
+    scene: bool,
+    /// Glossary key. Null for every scene-constructed child.
+    glossary_key: Doc,
 }
 
 #[derive(Clone)]
@@ -114,6 +119,52 @@ impl Drop for World {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Target {
+    Live(ActorId),
+    Fresh(usize),
+}
+
+struct FreshChild {
+    component: String,
+    key: Doc,
+    children: Vec<Instance>,
+    released: bool,
+}
+
+struct ParentSnap {
+    fields: HashMap<String, Doc>,
+    field_json: HashMap<String, Json>,
+    state: String,
+    completed: bool,
+    completion: Option<Doc>,
+    completion_json: Option<Json>,
+}
+
+struct DraftTimer {
+    delay_ms: u64,
+    target: Target,
+    message: Doc,
+    route: Route,
+    join: Option<u64>,
+    slot: Option<usize>,
+}
+
+struct DraftJoin {
+    id: u64,
+    remaining: usize,
+    slots: Vec<Option<Doc>>,
+    target: Target,
+    route: Route,
+}
+
+struct Outbox {
+    next_join: u64,
+    sends: Vec<(Target, Doc, Route)>,
+    timers: Vec<DraftTimer>,
+    joins: Vec<DraftJoin>,
+}
+
 impl World {
     pub fn check(program: &Program) -> Result<(), Error> {
         if program.kind != "program" {
@@ -131,6 +182,9 @@ impl World {
                 )));
             }
             check_ports(program, &component.ports)?;
+            check_fields(component)?;
+            check_handler_scope(component)?;
+            check_constructs(program, component)?;
             check_gotos(component)?;
             check_terminals(component)?;
             check_routes(component)?;
@@ -204,6 +258,20 @@ impl World {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Glossary key the parent holds for this child. Null for a scene-constructed child.
+    pub fn glossary_key(&self, id: ActorId) -> Option<Json> {
+        let parent = self.instances.get(&id)?.parent?;
+        let key = self
+            .instances
+            .get(&parent)?
+            .children
+            .iter()
+            .find(|child| child.id == id)?
+            .glossary_key
+            .clone();
+        project(&key).ok()
     }
 
     pub fn kind(&self, id: ActorId) -> Option<&str> {
@@ -385,6 +453,7 @@ impl World {
             for (to, message, route) in sends {
                 self.deliver(to, message, route)?;
             }
+            self.collect_unreachable();
         }
     }
 
@@ -417,10 +486,11 @@ impl World {
                 if let Some(message) = self.fill_join(join_id, slot, timer.message)? {
                     self.deliver(timer.to, message, timer.route)?;
                 }
-            } else {
+            } else if self.instances.contains_key(&timer.to) {
                 self.deliver(timer.to, timer.message, timer.route)?;
             }
         }
+        self.collect_unreachable();
         Ok(true)
     }
 
@@ -663,11 +733,19 @@ impl World {
         let id = self.spawn_kind(&node.component, parent)?;
         let mut children = Vec::new();
         for child in &node.children {
-            let child_id = self.spawn_instance(child, Some(id))?;
+            let child_id = match self.spawn_instance(child, Some(id)) {
+                Ok(child_id) => child_id,
+                Err(err) => {
+                    self.remove_tree(id);
+                    return Err(err);
+                }
+            };
             children.push(ChildRef {
                 id: child_id,
                 key: child.key.clone(),
                 component: child.component.clone(),
+                scene: true,
+                glossary_key: doc::null(),
             });
         }
         self.instances.get_mut(&id).expect("parent").children = children;
@@ -689,25 +767,11 @@ impl World {
             .component(kind)
             .ok_or_else(|| Error::new(format!("unknown kind {kind}")))?
             .clone();
-        let start = component
-            .start_state()
-            .ok_or_else(|| Error::new(format!("kind {kind} has no start")))?
-            .name
-            .clone();
+        let (start, fields) = self.initial_fields(&component)?;
+        let field_json = project_map(&fields)?;
         let id = ActorId(self.next_id);
         self.next_id += 1;
         self.dispatcher.register(id);
-        let mut fields = HashMap::new();
-        for field in &component.fields {
-            let value = if let Some(init) = &field.init {
-                self.eval(init, &HashMap::new())?
-            } else {
-                doc::null()
-            };
-            self.match_declared_field(&component.fields, &field.name, &value)?;
-            fields.insert(field.name.clone(), value);
-        }
-        let field_json = project_map(&fields)?;
         self.instances.insert(
             id,
             InstanceState {
@@ -727,6 +791,32 @@ impl World {
             self.suppress_result = true;
         }
         Ok(id)
+    }
+
+    fn initial_fields(
+        &mut self,
+        component: &Component,
+    ) -> Result<(String, HashMap<String, Doc>), Error> {
+        let start = component
+            .start_state()
+            .ok_or_else(|| Error::new(format!("kind {} has no start", component.name)))?
+            .name
+            .clone();
+        let mut fields = HashMap::new();
+        for field in &component.fields {
+            if !field_in_state(field, &start) {
+                continue;
+            }
+            let value = if let Some(init) = &field.init {
+                self.eval(init, &HashMap::new())?
+            } else {
+                doc::null()
+            };
+            self.match_declared_field(&component.fields, &field.name, &value)?;
+            fields.insert(field.name.clone(), value);
+        }
+        self.match_state_conditions(component, &start, &fields)?;
+        Ok((start, fields))
     }
 
     fn driver_for(&self, kind: &str) -> Option<Driver> {
@@ -751,33 +841,6 @@ impl World {
         } else {
             Err(Error::new(format!("field {name} did not match")))
         }
-    }
-
-    fn write_field(&mut self, id: ActorId, name: &str, value: Doc) -> Result<(), Error> {
-        let kind = self.instances[&id].kind.clone();
-        let fields = self
-            .program
-            .component(&kind)
-            .ok_or_else(|| Error::new("unknown kind"))?
-            .fields
-            .clone();
-        self.match_declared_field(&fields, name, &value)?;
-        let projected = project(&value)?;
-        let instance = self.instances.get_mut(&id).expect("actor");
-        instance.field_json.insert(name.to_string(), projected);
-        instance.fields.insert(name.to_string(), value);
-        Ok(())
-    }
-
-    fn finish_to_parent(
-        &mut self,
-        id: ActorId,
-        output: Doc,
-    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let Some(parent) = self.instances[&id].parent else {
-            return Ok(vec![]);
-        };
-        Ok(vec![(parent, output, Route::Up)])
     }
 
     fn handle(
@@ -839,13 +902,40 @@ impl World {
         statements: &[Statement],
         bindings: &HashMap<String, Doc>,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
-        let mut sends = Vec::new();
+        let kind_name = self.instances[&id].kind.clone();
+        let component = self
+            .program
+            .component(&kind_name)
+            .ok_or_else(|| Error::new("unknown kind"))?
+            .clone();
+        let from_state = self.instances[&id].state.clone();
         let mut bindings = bindings.clone();
+        let mut assigns: HashMap<String, Doc> = HashMap::new();
+        let mut goto: Option<String> = None;
+        let mut completion: Option<Doc> = None;
+        let mut fresh: Vec<FreshChild> = Vec::new();
+        let mut released_live: HashSet<ActorId> = HashSet::new();
+        let mut outbox = Outbox {
+            next_join: self.next_join,
+            sends: Vec::new(),
+            timers: Vec::new(),
+            joins: Vec::new(),
+        };
+
         for statement in statements {
             match statement {
                 Statement::Assign { field, expression } => {
+                    let declared = component
+                        .fields
+                        .iter()
+                        .find(|item| item.name == *field)
+                        .ok_or_else(|| Error::new(format!("unknown field {field}")))?;
+                    if !field_in_state(declared, &from_state) {
+                        return Err(Error::new(format!("field {field} is not in scope")));
+                    }
                     let value = self.eval(expression, &bindings)?;
-                    self.write_field(id, field, value.clone())?;
+                    self.match_declared_field(&component.fields, field, &value)?;
+                    assigns.insert(field.clone(), value.clone());
                     bindings.insert(field.clone(), value);
                 }
                 Statement::SendUp { message, after } => {
@@ -853,12 +943,12 @@ impl World {
                         .parent
                         .ok_or_else(|| Error::new("send up from root"))?;
                     self.enqueue_send(
-                        parent,
+                        Target::Live(parent),
                         message,
                         after.as_ref(),
                         Route::Up,
                         &bindings,
-                        &mut sends,
+                        &mut outbox,
                     )?;
                 }
                 Statement::SendTo {
@@ -872,99 +962,503 @@ impl World {
                         .find(|child| child.key.as_deref() == Some(port.as_str()))
                         .ok_or_else(|| Error::new(format!("unknown port {port}")))?;
                     self.enqueue_send(
-                        child.id,
+                        Target::Live(child.id),
                         message,
                         after.as_ref(),
                         Route::Down,
                         &bindings,
-                        &mut sends,
+                        &mut outbox,
                     )?;
                 }
                 Statement::SendDown {
-                    component,
+                    component: selector,
                     message,
                     after,
+                    filter,
                 } => {
-                    let selected = self.select_children(id, component.as_deref());
+                    if filter.is_some() && selector.is_some() {
+                        return Err(Error::new(
+                            "filtered send down must not set a component selector",
+                        ));
+                    }
+                    let selected = self.select_down(
+                        id,
+                        selector.as_deref(),
+                        filter.as_ref(),
+                        &fresh,
+                        &released_live,
+                    )?;
                     if selected.is_empty() {
                         return Err(Error::new("no child matched send down"));
                     }
-                    for child_id in selected {
+                    for target in selected {
                         self.enqueue_send(
-                            child_id,
+                            target,
                             message,
                             after.as_ref(),
                             Route::Down,
                             &bindings,
-                            &mut sends,
+                            &mut outbox,
                         )?;
                     }
                 }
                 Statement::Send { message, after } => {
                     self.enqueue_send(
-                        id,
+                        Target::Live(id),
                         message,
                         after.as_ref(),
                         Route::SelfSend,
                         &bindings,
-                        &mut sends,
+                        &mut outbox,
                     )?;
                 }
                 Statement::Expr { expression } => {
                     let _ = self.eval(expression, &bindings)?;
                 }
-                Statement::Goto { state } => {
-                    let kind = self.instances[&id].kind.clone();
-                    let known = self.program.component(&kind).is_some_and(|component| {
-                        component
-                            .states
-                            .iter()
-                            .any(|declared| declared.named && declared.name == *state)
+                Statement::Construct {
+                    component: child_kind,
+                    key,
+                    children,
+                } => {
+                    if self.program.component(child_kind).is_none() {
+                        return Err(Error::new(format!("unknown kind {child_kind}")));
+                    }
+                    let key_doc = if let Some(key) = key {
+                        self.eval(key, &bindings)?
+                    } else {
+                        doc::null()
+                    };
+                    let node = Instance {
+                        kind: "instance".into(),
+                        component: child_kind.clone(),
+                        key: None,
+                        children: children.clone(),
+                    };
+                    check_instance(&self.program, &node)?;
+                    fresh.push(FreshChild {
+                        component: child_kind.clone(),
+                        key: key_doc,
+                        children: children.clone(),
+                        released: false,
                     });
+                }
+                Statement::Release { filter } => {
+                    self.record_release(id, filter, &mut fresh, &mut released_live)?;
+                }
+                Statement::Goto { state } => {
+                    let known = component
+                        .states
+                        .iter()
+                        .any(|declared| declared.named && declared.name == *state);
                     if !known {
                         return Err(Error::new(format!("unknown state {state}")));
                     }
-                    self.instances.get_mut(&id).expect("actor").state = state.clone();
+                    goto = Some(state.clone());
                     break;
                 }
                 Statement::Complete { message } => {
-                    let value = self.eval(message, &bindings)?;
-                    {
-                        let instance = self.instances.get_mut(&id).expect("actor");
-                        instance.completed = true;
-                        instance.completion = Some(value.clone());
-                        instance.completion_json = Some(project(&value)?);
-                    }
-                    sends.extend(self.finish_to_parent(id, value)?);
+                    completion = Some(self.eval(message, &bindings)?);
                     break;
                 }
+            }
+        }
+
+        let to_state = goto.unwrap_or_else(|| from_state.clone());
+        let current = self.instances[&id].fields.clone();
+        let proposed =
+            self.propose_fields(&component, &from_state, &to_state, &current, &assigns)?;
+        self.match_state_conditions(&component, &to_state, &proposed)?;
+
+        let snap = {
+            let instance = &self.instances[&id];
+            ParentSnap {
+                fields: instance.fields.clone(),
+                field_json: instance.field_json.clone(),
+                state: instance.state.clone(),
+                completed: instance.completed,
+                completion: instance.completion.clone(),
+                completion_json: instance.completion_json.clone(),
+            }
+        };
+        {
+            let field_json = project_map(&proposed)?;
+            let instance = self.instances.get_mut(&id).expect("actor");
+            instance.fields = proposed;
+            instance.field_json = field_json;
+            instance.state = to_state;
+            if let Some(value) = completion.clone() {
+                instance.completed = true;
+                instance.completion = Some(value.clone());
+                instance.completion_json = Some(project(&value)?);
+            }
+        }
+        if let Some(value) = completion {
+            if let Some(parent) = self.instances[&id].parent {
+                outbox.sends.push((Target::Live(parent), value, Route::Up));
+            }
+        }
+
+        let mut spawned: Vec<(usize, ActorId)> = Vec::new();
+        for (index, child) in fresh.iter().enumerate() {
+            if child.released {
+                continue;
+            }
+            let node = Instance {
+                kind: "instance".into(),
+                component: child.component.clone(),
+                key: None,
+                children: child.children.clone(),
+            };
+            match self.spawn_instance(&node, Some(id)) {
+                Ok(child_id) => spawned.push((index, child_id)),
+                Err(err) => {
+                    for (_, child_id) in &spawned {
+                        self.remove_tree(*child_id);
+                    }
+                    self.restore_parent(id, snap);
+                    return Err(err);
+                }
+            }
+        }
+        for (index, child_id) in &spawned {
+            let child = &fresh[*index];
+            self.instances
+                .get_mut(&id)
+                .expect("parent")
+                .children
+                .push(ChildRef {
+                    id: *child_id,
+                    key: None,
+                    component: child.component.clone(),
+                    scene: false,
+                    glossary_key: child.key.clone(),
+                });
+            self.deliver(*child_id, doc::null(), Route::Init)?;
+        }
+        self.instances
+            .get_mut(&id)
+            .expect("parent")
+            .children
+            .retain(|child| !released_live.contains(&child.id));
+
+        let fresh_ids: Vec<Option<ActorId>> = (0..fresh.len())
+            .map(|index| {
+                spawned
+                    .iter()
+                    .find(|(fresh_index, _)| *fresh_index == index)
+                    .map(|(_, child_id)| *child_id)
+            })
+            .collect();
+        self.commit_outbox(outbox, &fresh_ids)
+    }
+
+    fn restore_parent(&mut self, id: ActorId, snap: ParentSnap) {
+        let Some(instance) = self.instances.get_mut(&id) else {
+            return;
+        };
+        instance.fields = snap.fields;
+        instance.field_json = snap.field_json;
+        instance.state = snap.state;
+        instance.completed = snap.completed;
+        instance.completion = snap.completion;
+        instance.completion_json = snap.completion_json;
+    }
+
+    fn propose_fields(
+        &mut self,
+        component: &Component,
+        from_state: &str,
+        to_state: &str,
+        current: &HashMap<String, Doc>,
+        assigns: &HashMap<String, Doc>,
+    ) -> Result<HashMap<String, Doc>, Error> {
+        let mut proposed = HashMap::new();
+        for field in &component.fields {
+            if !field_in_state(field, to_state) {
+                continue;
+            }
+            if field_in_state(field, from_state) {
+                let value = assigns
+                    .get(&field.name)
+                    .or_else(|| current.get(&field.name))
+                    .cloned()
+                    .unwrap_or_else(doc::null);
+                proposed.insert(field.name.clone(), value);
+            } else {
+                let value = if let Some(init) = &field.init {
+                    self.eval(init, &HashMap::new())?
+                } else {
+                    doc::null()
+                };
+                self.match_declared_field(&component.fields, &field.name, &value)?;
+                proposed.insert(field.name.clone(), value);
+            }
+        }
+        Ok(proposed)
+    }
+
+    fn match_state_conditions(
+        &self,
+        component: &Component,
+        state: &str,
+        fields: &HashMap<String, Doc>,
+    ) -> Result<(), Error> {
+        let declared = component
+            .states
+            .iter()
+            .find(|item| item.name == state)
+            .ok_or_else(|| Error::new(format!("unknown state {state}")))?;
+        let object = doc::object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        if let Some(pattern) = &declared.entry {
+            if match_program(pattern, &object, &self.program.rules)?.is_none() {
+                return Err(Error::new(format!(
+                    "entry pattern did not match on {} in {state}",
+                    component.name
+                )));
+            }
+        }
+        if let Some(pattern) = &declared.post {
+            if match_program(pattern, &object, &self.program.rules)?.is_none() {
+                return Err(Error::new(format!(
+                    "post-condition did not match on {} in {state}",
+                    component.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn record_release(
+        &self,
+        id: ActorId,
+        filter: &Json,
+        fresh: &mut [FreshChild],
+        released_live: &mut HashSet<ActorId>,
+    ) -> Result<(), Error> {
+        let mut live_hits = Vec::new();
+        for child in &self.instances[&id].children {
+            if released_live.contains(&child.id) {
+                continue;
+            }
+            if !self.holds_match(
+                &child.component,
+                child.key.as_deref(),
+                &child.glossary_key,
+                filter,
+            )? {
+                continue;
+            }
+            if child.scene {
+                return Err(Error::new("release cannot drop a scene-constructed child"));
+            }
+            live_hits.push(child.id);
+        }
+        let mut fresh_hits = Vec::new();
+        for (index, child) in fresh.iter().enumerate() {
+            if child.released {
+                continue;
+            }
+            if self.holds_match(&child.component, None, &child.key, filter)? {
+                fresh_hits.push(index);
+            }
+        }
+        if live_hits.is_empty() && fresh_hits.is_empty() {
+            return Err(Error::new("no child matched release"));
+        }
+        released_live.extend(live_hits);
+        for index in fresh_hits {
+            fresh[index].released = true;
+        }
+        Ok(())
+    }
+
+    fn select_down(
+        &self,
+        id: ActorId,
+        selector: Option<&str>,
+        filter: Option<&Json>,
+        fresh: &[FreshChild],
+        released_live: &HashSet<ActorId>,
+    ) -> Result<Vec<Target>, Error> {
+        let mut selected = Vec::new();
+        for child in &self.instances[&id].children {
+            if released_live.contains(&child.id) {
+                continue;
+            }
+            if self.down_match(
+                &child.component,
+                child.key.as_deref(),
+                &child.glossary_key,
+                selector,
+                filter,
+            )? {
+                selected.push(Target::Live(child.id));
+            }
+        }
+        for (index, child) in fresh.iter().enumerate() {
+            if child.released {
+                continue;
+            }
+            if self.down_match(&child.component, None, &child.key, selector, filter)? {
+                selected.push(Target::Fresh(index));
+            }
+        }
+        Ok(selected)
+    }
+
+    fn down_match(
+        &self,
+        component: &str,
+        port: Option<&str>,
+        key: &Doc,
+        selector: Option<&str>,
+        filter: Option<&Json>,
+    ) -> Result<bool, Error> {
+        if let Some(filter) = filter {
+            return self.holds_match(component, port, key, filter);
+        }
+        match selector {
+            None => Ok(true),
+            Some(name) => Ok(looks_like(&self.program, component, name)),
+        }
+    }
+
+    fn holds_match(
+        &self,
+        component: &str,
+        port: Option<&str>,
+        key: &Doc,
+        filter: &Json,
+    ) -> Result<bool, Error> {
+        let (pattern, names) = split_looks_like(filter);
+        for name in &names {
+            if !looks_like(&self.program, component, name) {
+                return Ok(false);
+            }
+        }
+        if over_without_keys(&pattern) {
+            return Ok(true);
+        }
+        let record = doc::object([
+            ("port", port.map(doc::string).unwrap_or_else(doc::null)),
+            ("key", key.clone()),
+        ]);
+        Ok(match_program(&pattern, &record, &self.program.rules)?.is_some())
+    }
+
+    fn commit_outbox(
+        &mut self,
+        outbox: Outbox,
+        fresh_ids: &[Option<ActorId>],
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        let mut live_joins = HashSet::new();
+        for join in outbox.joins {
+            let Some(to) = resolve_target(join.target, fresh_ids) else {
+                continue;
+            };
+            live_joins.insert(join.id);
+            self.joins.insert(
+                join.id,
+                PendingJoin {
+                    remaining: join.remaining,
+                    slots: join.slots,
+                    to,
+                    route: join.route,
+                },
+            );
+        }
+        for timer in outbox.timers {
+            if timer.join.is_some_and(|id| !live_joins.contains(&id)) {
+                continue;
+            }
+            let Some(to) = resolve_target(timer.target, fresh_ids) else {
+                continue;
+            };
+            self.timers.push(Timer {
+                due: self.now.saturating_add(timer.delay_ms),
+                to,
+                message: timer.message,
+                route: timer.route,
+                join: timer.join,
+                slot: timer.slot,
+            });
+        }
+        self.next_join = outbox.next_join;
+        let mut sends = Vec::new();
+        for (target, message, route) in outbox.sends {
+            if let Some(to) = resolve_target(target, fresh_ids) {
+                sends.push((to, message, route));
             }
         }
         Ok(sends)
     }
 
-    fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
-        self.instances
-            .get(&id)
-            .map(|instance| {
-                instance
-                    .children
-                    .iter()
-                    .filter(|child| kind.is_none_or(|kind| child.component == kind))
-                    .map(|child| child.id)
-                    .collect()
-            })
-            .unwrap_or_default()
+    fn remove_tree(&mut self, id: ActorId) {
+        let mut stack = vec![id];
+        while let Some(current) = stack.pop() {
+            if let Some(instance) = self.instances.remove(&current) {
+                for child in instance.children {
+                    stack.push(child.id);
+                }
+            }
+            self.dispatcher.drop_actor(current);
+            self.routes.retain(|(actor, _), _| *actor != current);
+        }
+    }
+
+    fn collect_unreachable(&mut self) {
+        let mut reachable = HashSet::new();
+        let roots: Vec<ActorId> = self
+            .instances
+            .iter()
+            .filter(|(_, instance)| instance.parent.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        let mut stack = roots;
+        while let Some(id) = stack.pop() {
+            if !reachable.insert(id) {
+                continue;
+            }
+            if let Some(instance) = self.instances.get(&id) {
+                for child in &instance.children {
+                    stack.push(child.id);
+                }
+            }
+        }
+        let dead: Vec<ActorId> = self
+            .instances
+            .keys()
+            .copied()
+            .filter(|id| !reachable.contains(id))
+            .collect();
+        if dead.is_empty() {
+            return;
+        }
+        let dead_set: HashSet<ActorId> = dead.iter().copied().collect();
+        self.timers.retain(|timer| !dead_set.contains(&timer.to));
+        self.joins.retain(|_, join| !dead_set.contains(&join.to));
+        let join_ids: HashSet<u64> = self.joins.keys().copied().collect();
+        self.timers
+            .retain(|timer| timer.join.is_none_or(|id| join_ids.contains(&id)));
+        for id in &dead {
+            self.dispatcher.drop_actor(*id);
+            self.instances.remove(id);
+        }
+        self.routes.retain(|(id, _), _| !dead_set.contains(id));
     }
 
     fn enqueue_send(
         &mut self,
-        to: ActorId,
+        target: Target,
         message: &Json,
         after: Option<&Json>,
         route: Route,
         bindings: &HashMap<String, Doc>,
-        sends: &mut Vec<(ActorId, Doc, Route)>,
+        outbox: &mut Outbox,
     ) -> Result<(), Error> {
         let items = send_items(message);
         let mut slots = Vec::with_capacity(items.len());
@@ -985,9 +1479,9 @@ impl World {
             let value = assemble_slots(slots);
             if let Some(after) = after {
                 let delay = self.delay_ms(after, bindings)?;
-                self.timers.push(Timer {
-                    due: self.now.saturating_add(delay),
-                    to,
+                outbox.timers.push(DraftTimer {
+                    delay_ms: delay,
+                    target,
                     message: value,
                     route,
                     join: None,
@@ -995,27 +1489,32 @@ impl World {
                 });
                 return Ok(());
             }
-            sends.push((to, value, route));
+            outbox.sends.push((target, value, route));
             return Ok(());
         }
-        self.enqueue_join(to, route, slots)
+        self.enqueue_join(target, route, slots, outbox)
     }
 
-    fn enqueue_join(&mut self, to: ActorId, route: Route, slots: Vec<Slot>) -> Result<(), Error> {
-        let join_id = self.next_join;
-        self.next_join += 1;
+    fn enqueue_join(
+        &mut self,
+        target: Target,
+        route: Route,
+        slots: Vec<Slot>,
+        outbox: &mut Outbox,
+    ) -> Result<(), Error> {
+        let join_id = outbox.next_join;
+        outbox.next_join += 1;
         let mut filled = Vec::with_capacity(slots.len());
         let mut remaining = 0;
-        let mut timers = Vec::new();
         for (index, slot) in slots.into_iter().enumerate() {
             match slot {
                 Slot::Ready(value) => filled.push(Some(value)),
                 Slot::Async { delay_ms, value } => {
                     remaining += 1;
                     filled.push(None);
-                    timers.push(Timer {
-                        due: self.now.saturating_add(delay_ms),
-                        to,
+                    outbox.timers.push(DraftTimer {
+                        delay_ms,
+                        target,
                         message: value,
                         route,
                         join: Some(join_id),
@@ -1024,16 +1523,13 @@ impl World {
                 }
             }
         }
-        self.joins.insert(
-            join_id,
-            PendingJoin {
-                remaining,
-                slots: filled,
-                to,
-                route,
-            },
-        );
-        self.timers.extend(timers);
+        outbox.joins.push(DraftJoin {
+            id: join_id,
+            remaining,
+            slots: filled,
+            target,
+            route,
+        });
         Ok(())
     }
 
@@ -1497,6 +1993,135 @@ impl World {
     }
 }
 
+fn field_in_state(field: &Field, state: &str) -> bool {
+    match &field.states {
+        None => true,
+        Some(states) => states.iter().any(|name| name == state),
+    }
+}
+
+fn resolve_target(target: Target, fresh_ids: &[Option<ActorId>]) -> Option<ActorId> {
+    match target {
+        Target::Live(id) => Some(id),
+        Target::Fresh(index) => fresh_ids.get(index).copied().flatten(),
+    }
+}
+
+fn looks_like(program: &Program, candidate: &str, selector: &str) -> bool {
+    let mut stack = HashSet::new();
+    looks_like_rec(program, candidate, selector, &mut stack)
+}
+
+fn looks_like_rec(
+    program: &Program,
+    candidate: &str,
+    selector: &str,
+    stack: &mut HashSet<(String, String)>,
+) -> bool {
+    if candidate == selector {
+        return program.component(candidate).is_some();
+    }
+    if !stack.insert((candidate.to_string(), selector.to_string())) {
+        return true;
+    }
+    let (Some(left), Some(right)) = (program.component(candidate), program.component(selector))
+    else {
+        return false;
+    };
+    if handler_protocol(left) != handler_protocol(right) {
+        return false;
+    }
+    let left_ports = port_protocol(left);
+    let right_ports = port_protocol(right);
+    if left_ports.len() != right_ports.len() {
+        return false;
+    }
+    for ((left_name, left_kind), (right_name, right_kind)) in left_ports.iter().zip(&right_ports) {
+        if left_name != right_name || !looks_like_rec(program, left_kind, right_kind, stack) {
+            return false;
+        }
+    }
+    true
+}
+
+fn handler_protocol(component: &Component) -> Vec<(Vec<String>, String, String)> {
+    let mut rows = Vec::new();
+    for state in &component.states {
+        for handler in &state.handlers {
+            let mut route = handler.route.clone();
+            route.sort();
+            let item = handler
+                .item
+                .as_ref()
+                .map(Json::to_string)
+                .unwrap_or_default();
+            rows.push((route, handler.pattern.to_string(), item));
+        }
+    }
+    rows.sort();
+    rows
+}
+
+fn port_protocol(component: &Component) -> Vec<(String, String)> {
+    let mut ports: Vec<_> = component
+        .ports
+        .iter()
+        .map(|port| (port.name.clone(), port.component.clone()))
+        .collect();
+    ports.sort();
+    ports
+}
+
+fn split_looks_like(pattern: &Json) -> (Json, Vec<String>) {
+    let Some(map) = pattern.as_object() else {
+        return (pattern.clone(), Vec::new());
+    };
+    if map.get("kind").and_then(Json::as_str) != Some("over") {
+        return (pattern.clone(), Vec::new());
+    }
+    let Some(keys) = map.get("keys").and_then(Json::as_object) else {
+        return (pattern.clone(), Vec::new());
+    };
+    let mut names = Vec::new();
+    let mut rest = serde_json::Map::new();
+    for (key, value) in keys {
+        if key == "kind" || key == "component" {
+            if let Some(name) = equal_literal_string(value) {
+                names.push(name);
+                continue;
+            }
+        }
+        rest.insert(key.clone(), value.clone());
+    }
+    let mut cleaned = map.clone();
+    cleaned.insert("keys".to_string(), Json::Object(rest));
+    (Json::Object(cleaned), names)
+}
+
+fn equal_literal_string(pattern: &Json) -> Option<String> {
+    let map = pattern.as_object()?;
+    if map.get("kind").and_then(Json::as_str) != Some("equal") {
+        return None;
+    }
+    let value = map.get("value")?.as_object()?;
+    if value.get("kind").and_then(Json::as_str) != Some("value.literal") {
+        return None;
+    }
+    value.get("value")?.as_str().map(str::to_string)
+}
+
+fn over_without_keys(pattern: &Json) -> bool {
+    let Some(map) = pattern.as_object() else {
+        return false;
+    };
+    if map.get("kind").and_then(Json::as_str) != Some("over") {
+        return false;
+    }
+    map.get("keys")
+        .and_then(Json::as_object)
+        .is_none_or(|keys| keys.is_empty())
+}
+
 fn route_matches(expected: &[String], route: Route) -> bool {
     if expected.is_empty() {
         return route != Route::Init;
@@ -1719,6 +2344,12 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
                             check_send_arg(item, delayed, &component.name)?;
                         }
                     }
+                    Statement::Construct { key, .. } => {
+                        if let Some(key) = key {
+                            check_sync(key, &component.name)?;
+                        }
+                    }
+                    Statement::Release { .. } => {}
                     Statement::Goto { .. } => {}
                 }
             }
@@ -1863,6 +2494,173 @@ fn check_routes(component: &crate::ast::Component) -> Result<(), Error> {
     Ok(())
 }
 
+fn check_fields(component: &Component) -> Result<(), Error> {
+    let state_names: HashSet<&str> = component
+        .states
+        .iter()
+        .map(|state| state.name.as_str())
+        .collect();
+    let mut seen = HashSet::new();
+    for field in &component.fields {
+        if !seen.insert(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "duplicate field {} on {}",
+                field.name, component.name
+            )));
+        }
+        let Some(states) = &field.states else {
+            continue;
+        };
+        if states.is_empty() {
+            return Err(Error::new(format!(
+                "field {} on {} names no states",
+                field.name, component.name
+            )));
+        }
+        for state in states {
+            if !state_names.contains(state.as_str()) {
+                return Err(Error::new(format!(
+                    "field {} on {} names unknown state {state}",
+                    field.name, component.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_handler_scope(component: &Component) -> Result<(), Error> {
+    for state in &component.states {
+        for handler in &state.handlers {
+            let mut names = Vec::new();
+            for statement in &handler.body {
+                collect_statement_names(statement, &mut names);
+            }
+            check_names_in_scope(component, &state.name, &names)?;
+        }
+        for pattern in [&state.entry, &state.post] {
+            let Some(pattern) = pattern else {
+                continue;
+            };
+            let mut names = Vec::new();
+            collect_json_names(pattern, &mut names);
+            check_names_in_scope(component, &state.name, &names)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_names_in_scope(component: &Component, state: &str, names: &[String]) -> Result<(), Error> {
+    for name in names {
+        let Some(field) = component.fields.iter().find(|field| field.name == *name) else {
+            continue;
+        };
+        if !field_in_state(field, state) {
+            return Err(Error::new(format!(
+                "field {name} is not in scope in {state} on {}",
+                component.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn collect_statement_names(statement: &Statement, names: &mut Vec<String>) {
+    match statement {
+        Statement::Assign { field, expression } => {
+            names.push(field.clone());
+            collect_json_names(expression, names);
+        }
+        Statement::Expr { expression } => collect_json_names(expression, names),
+        Statement::SendUp { message, after }
+        | Statement::Send { message, after }
+        | Statement::SendTo { message, after, .. }
+        | Statement::SendDown { message, after, .. } => {
+            collect_json_names(message, names);
+            if let Some(after) = after {
+                collect_json_names(after, names);
+            }
+        }
+        Statement::Construct { key, .. } => {
+            if let Some(key) = key {
+                collect_json_names(key, names);
+            }
+        }
+        Statement::Complete { message } => collect_json_names(message, names),
+        Statement::Release { .. } | Statement::Goto { .. } => {}
+    }
+}
+
+fn collect_json_names(value: &Json, names: &mut Vec<String>) {
+    match value {
+        Json::Array(items) => {
+            for item in items {
+                collect_json_names(item, names);
+            }
+        }
+        Json::Object(map) => {
+            if map.get("kind").and_then(Json::as_str) == Some("reference") {
+                if let Some(name) = map.get("name").and_then(Json::as_str) {
+                    names.push(name.to_string());
+                }
+            }
+            if map.get("kind").and_then(Json::as_str) == Some("over") {
+                if let Some(keys) = map.get("keys").and_then(Json::as_object) {
+                    names.extend(keys.keys().cloned());
+                }
+            }
+            for child in map.values() {
+                collect_json_names(child, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_constructs(program: &Program, component: &Component) -> Result<(), Error> {
+    for state in &component.states {
+        for handler in &state.handlers {
+            for statement in &handler.body {
+                match statement {
+                    Statement::Construct {
+                        component: child,
+                        children,
+                        ..
+                    } => {
+                        if program.component(child).is_none() {
+                            return Err(Error::new(format!(
+                                "unknown kind {child} in {}",
+                                component.name
+                            )));
+                        }
+                        check_instance(
+                            program,
+                            &Instance {
+                                kind: "instance".into(),
+                                component: child.clone(),
+                                key: None,
+                                children: children.clone(),
+                            },
+                        )?;
+                    }
+                    Statement::SendDown {
+                        component: selector,
+                        filter,
+                        ..
+                    } if filter.is_some() && selector.is_some() => {
+                        return Err(Error::new(format!(
+                            "filtered send down must not set a component selector in {}",
+                            component.name
+                        )));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Error> {
     let mut port_names = HashSet::new();
     for port in ports {
@@ -1895,9 +2693,12 @@ fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
                 }
                 match ports.iter().find(|(name, _)| name == key) {
                     None => return Err(Error::new(format!("unknown port {key}"))),
-                    Some((_, expected)) if expected != &child.component => {
+                    Some((_, expected)) if !looks_like(program, &child.component, expected) => {
+                        if program.component(&child.component).is_none() {
+                            return Err(Error::new(format!("unknown kind {}", child.component)));
+                        }
                         return Err(Error::new(format!(
-                            "port {key} expects {expected} but scene filled {}",
+                            "port {key} expects {expected} but scene filled {} which does not satisfy it",
                             child.component
                         )));
                     }
@@ -1928,6 +2729,8 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
                 child.key.clone().map(doc::string).unwrap_or_else(doc::null),
             ),
             ("component", doc::string(&child.component)),
+            ("scene", doc::boolean(child.scene)),
+            ("glossaryKey", child.glossary_key.clone()),
         ])
     }));
     Ok(doc::object([
@@ -2052,6 +2855,9 @@ fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
                 key: doc::as_str(&doc::get(&child, "key").unwrap_or_else(doc::null)),
                 component: doc::as_str(&doc::get(&child, "component").unwrap_or_else(doc::null))
                     .unwrap_or_default(),
+                scene: doc::as_bool(&doc::get(&child, "scene").unwrap_or_else(doc::null))
+                    .unwrap_or(true),
+                glossary_key: doc::get(&child, "glossaryKey").unwrap_or_else(doc::null),
             });
         }
     }

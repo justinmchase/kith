@@ -41,6 +41,7 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test that stated this rule would have to implement the
-  pattern selector in the runtime. That runtime is unchanged. The specs
-  audit warns when no test cites this id and does not fail.
+- Tests: `tests/lifetime.rs` (`req:components-021`). The filter matches
+  `port`, `key`, and a looks-like component name. It does not see a child's
+  fields. Zero matches fail the send. An unmatched child does not forward
+  the message.

@@ -32,6 +32,8 @@ fn idle(name: &str, ports: Vec<Port>, handlers: Vec<Handler>) -> Component {
             start: true,
             named: true,
             handlers,
+            entry: None,
+            post: None,
         }],
     }
 }
@@ -45,6 +47,7 @@ fn counting(name: &str) -> Component {
             name: "seen".into(),
             pattern: None,
             init: Some(json!({"kind": "number", "value": 0})),
+            states: None,
         }],
         ports: vec![],
         states: vec![State {
@@ -62,6 +65,8 @@ fn counting(name: &str) -> Component {
                     expression: json!({"kind": "number", "value": 1}),
                 }],
             }],
+            entry: None,
+            post: None,
         }],
     }
 }
@@ -341,6 +346,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: Some("Child".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -352,6 +358,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: Some("Other".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -363,6 +370,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: None,
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
         ],
@@ -395,7 +403,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
-    assert_eq!(world.field(sibling, "seen"), Some(&json!(0.0)));
+    assert_eq!(world.field(sibling, "seen"), Some(&json!(1.0)));
 
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "OtherKind"})).unwrap();
@@ -403,7 +411,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
-    assert_eq!(world.field(child, "seen"), Some(&json!(0.0)));
+    assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
     assert_eq!(world.field(sibling, "seen"), Some(&json!(1.0)));
 
     let mut world = World::start(program).expect("start");
@@ -468,6 +476,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                     component: Some("Ghost".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -524,6 +533,7 @@ fn first_matching_handler_consumes_the_message() {
             name: "picked".into(),
             pattern: None,
             init: Some(json!({"kind": "number", "value": 0})),
+            states: None,
         }],
         ports: vec![],
         states: vec![State {
@@ -553,6 +563,8 @@ fn first_matching_handler_consumes_the_message() {
                     }],
                 },
             ],
+            entry: None,
+            post: None,
         }],
     };
     let program = scene_program(vec![one], instance("One", None, vec![]));

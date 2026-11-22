@@ -82,9 +82,16 @@ capitals.
   A bare `send down Kind` with no message is not a form. When a component
   name appears as that selector, it is a looks-like match: another component,
   including a mock, matches when it satisfies the pattern. It does not have
-  to be that declared kind. One such send selects a port child and an unnamed
-  child together when both satisfy the pattern, whether the unnamed child was
-  constructed by the scene or by a transition. It MUST NOT skip a generation.
+  to be that declared kind. Satisfying a named component compares shape, not
+  the declared name. The candidate declares the same port names, and each of
+  those ports' selectors is satisfied by this same rule. Its handlers have
+  the same routes and message patterns, whichever state they sit in. Fields
+  are not compared. A component satisfies a selector that names it because
+  that shape is its own, so a mock with the same ports and handlers matches,
+  and a different handler pattern or a different port does not. One such send
+  selects a port child and an unnamed child together when both satisfy the
+  pattern, whether the unnamed child was constructed by the scene or by a
+  transition. It MUST NOT skip a generation.
   Zero matching children MUST fail that send with a diagnostic.
 - `send down any V` is `send down Pattern V` where the pattern is `any`.
   `any` matches every direct child. Zero children MUST fail. These failure
@@ -96,7 +103,9 @@ capitals.
   if the child has one, and the [key](./glossary.spec.md#components-and-trees).
   A component name in the pattern is the same looks-like match, not an
   equality check on the child's declared kind. The pattern MUST NOT require
-  that declared kind to equal a named component. It does not see the child's
+  that declared kind to equal a named component. A top-level Over key
+  `component` or `kind` in that pattern names a looks-like selector. It is
+  not compared to the child's declared name. It does not see the child's
   fields, machine state, or mailbox. `port` is the port name, or null when
   the child is unnamed. A scene-constructed child's `key` is null, including
   a port child: the scene instance node's `key` field holds the port name,
@@ -558,6 +567,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendTo", port: string, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendDown", component: string | null, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "construct", component: string, key: Expression | null, children: [Instance] }`
+- `{ kind: "release", filter: Pattern }`
 - `{ kind: "send", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "complete", message: Expression | Sequence }`
 - `{ kind: "expr", expression: Expression }`
@@ -592,8 +602,11 @@ is not a form. A filtered `send down` records `filter: Pattern` on
 the child's declared kind to equal a named component. A component name in it
 is a looks-like match. Name selectors and `any` omit `filter` and keep the
 shape above.
-A release statement has no decided tree tag or child-designation fields.
-It MUST NOT be projected as `assign`, `send`, `goto`, or `complete`.
+A release statement's tree is `{ kind: "release", filter: Pattern }`. The
+pattern is the one a filtered `send down` matches, including a looks-like
+component name. The source spelling of that designation stays open
+([open questions](#open-questions)). It MUST NOT be projected as `assign`,
+`send`, `goto`, or `complete`.
 `handler.item` MAY be omitted
 when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
@@ -659,5 +672,5 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   The filtered `send down` does not decide it.
 - **Spelling.** Filter, construct, release, entry pattern, and post-condition
   need source spellings. They are new forms beside [declaration](#declaration),
-  not silent edits to `field`, `on`, or `send down Kind`. How a release
-  designates the child is part of that open spelling.
+  not silent edits to `field`, `on`, or `send down Kind`. The release tree
+  reuses the filtered-send pattern. The source spellings stay open.

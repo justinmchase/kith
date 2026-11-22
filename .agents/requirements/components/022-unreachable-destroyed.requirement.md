@@ -34,6 +34,8 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test that stated this rule would have to implement
-  collection in the runtime. That runtime is unchanged. The specs audit
-  warns when no test cites this id and does not fail.
+- Tests: `tests/lifetime.rs` (`req:components-022`). A release drops a
+  dynamic child and its descendants between turns, cancels an in-flight
+  send to that child, and leaves a scene-constructed child in place.
+  `complete` does not destroy a child. A `send up` the parent already
+  handled stays handled.

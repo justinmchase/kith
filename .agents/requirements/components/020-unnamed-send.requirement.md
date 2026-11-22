@@ -32,6 +32,8 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test of looks-like selection would have to implement that
-  match in the runtime. That runtime is unchanged. The specs audit does not
-  fail when no test cites this id.
+- Tests: `tests/lifetime.rs` (`req:components-020`) and
+  `tests/interpreter.rs` (`req:components-003`). A mock with the same ports
+  and handlers receives `send down Child`. A component with a different
+  handler pattern does not. `send down any` delivers to every direct child.
+  An unnamed child's `send up` is matched by the parent's `on up`.

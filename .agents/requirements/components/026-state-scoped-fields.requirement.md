@@ -40,6 +40,8 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test that stated this rule would have to implement
-  state-scoped fields in the runtime. That runtime is unchanged. The specs
-  audit warns when no test cites this id and does not fail.
+- Tests: `tests/lifetime.rs` (`req:components-026`). A scoped field persists
+  across `goto` inside its states, drops on the way out, and initializes
+  again on the way back in. Check fails when a handler or an entry pattern
+  names it outside that set, when two fields share a name, or when a listed
+  state is unknown.

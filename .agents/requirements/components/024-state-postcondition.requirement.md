@@ -36,6 +36,6 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test that stated this rule would have to implement state
-  conditions in the runtime. That runtime is unchanged. The specs audit
-  warns when no test cites this id and does not fail.
+- Tests: `tests/lifetime.rs` (`req:components-024`). A missed post-condition
+  leaves machine state unchanged and routes nothing, including on
+  `complete`. Creation checks it before init.

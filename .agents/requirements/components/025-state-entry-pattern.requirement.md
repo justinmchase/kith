@@ -34,6 +34,7 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: none. A test that stated this rule would have to implement state
-  conditions in the runtime. That runtime is unchanged. The specs audit
-  warns when no test cites this id and does not fail.
+- Tests: `tests/lifetime.rs` (`req:components-025`). Creation matches the
+  start state's entry pattern before its post-condition and before init. A
+  transition matches the destination entry pattern before commit. The entry
+  pattern does not choose the handler.

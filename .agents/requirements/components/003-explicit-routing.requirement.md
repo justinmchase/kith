@@ -33,6 +33,7 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:components-003`) still runs the
-  unchanged runtime, which selects by declared kind. That run does not
-  establish the looks-like rule.
+- Tests: `tests/interpreter.rs` (`req:components-003`) and
+  `tests/lifetime.rs` (`req:components-020`). `send down Child` delivers to
+  each direct child that satisfies `Child`, including a mock. A component
+  with a different handler pattern is not selected.
