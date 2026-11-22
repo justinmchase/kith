@@ -1,8 +1,9 @@
 # Components
 
 This chapter defines components: kinds with fields, typed ports, and state
-machines, and sending messages to a port, down by kind, or up the tree a
-[scene](./scenes.spec.md) built. Dispatch of those messages is defined in
+machines, and sending messages to a port, down to children, or up the tree a
+[scene](./scenes.spec.md) built. It also defines how long an instance lives
+and which fields a state holds. Dispatch of those messages is defined in
 [dispatch](./dispatch.spec.md). Terms are defined in the
 [glossary](./glossary.spec.md).
 
@@ -17,6 +18,9 @@ capitals.
 - **Component declaration**: the source that names a component, its fields, its
   ports, and its state machine.
 - **Field**: named state a component instance holds, matched by a pattern.
+  A field declared on the component is in scope in every state. A field may
+  instead name the states it belongs to
+  ([state-scoped fields](#state-scoped-fields)). It is still one field.
 - **Port**: a typed named slot for one child instance, filled by a scene.
 
 ## Axioms
@@ -36,38 +40,66 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down` a kind.
+  reached only through their parent: `send to` a port, or `send down` (a kind,
+  `any`, or a filter). The parent does not receive its children as a value.
 
 ### Behavior
 
 - A component MUST declare exactly one start state.
 - Choosing what happens MUST be done by a transition. Expressions MUST NOT send
-  messages or change machine state.
+  messages, change machine state, or construct or release children.
 - A transition MUST be deterministic: the same machine state and the same
-  matched message MUST produce the same field changes and the same sends.
+  matched message MUST produce the same field changes, the same sends, the
+  same children constructed or released, and the same entry-pattern and
+  post-condition matches.
 - A transition MAY send zero or more messages, change fields, evaluate
-  expression statements, complete, and change the machine's state. It MUST
-  NOT wait by blocking the dispatcher. The
-  first executable slice MUST NOT spawn or destroy children; scene-constructed
-  children exist for the parent's lifetime. A component MAY `complete V`.
+  expression statements, construct or release children, complete, and change
+  the machine's state. It MUST NOT wait by blocking the dispatcher.
+  Scene-constructed children exist for the parent's lifetime. A transition
+  MAY construct more children. A child the parent no longer holds MUST be
+  destroyed. A component MAY `complete V`.
 
 ### Routing
 
-- A send MUST name a direction: `send to` a port, `send down` a kind,
-  `send up`, or `send self`. Routing is explicit only: there is no capture
+- A send MUST name a direction: `send to` a port, `send down` (a kind,
+  `any`, or a filter), `send up`, or `send self`. Routing is explicit only:
+  there is no capture
   phase, and an unhandled message MUST NOT travel up unless the send was
   `send up`. A send with no route is invalid; self is not implied.
 - `send up` offers the message to the parent, then to that parent's parent,
-  until a transition consumes it or the root does not. An unmatched send up at
-  the root MUST be dropped with no error.
+  until a transition consumes it or the root does not. An unnamed child's
+  `send up`, whether the scene constructed it or a transition did, is this
+  same walk. The parent matches it with `on up`. There is one `send up`
+  route. An unmatched send up at the root MUST be dropped with no error.
 - `send to name V` offers `V` to the child that fills port `name`. An unknown
-  port MUST fail that send with a diagnostic.
-- `send down Kind V` offers `V` to each direct child of kind `Kind`, including
-  a named port whose kind is `Kind`. It MUST NOT skip a generation. Zero
-  matching children MUST fail that send with a diagnostic.
+  port MUST fail that send with a diagnostic. An unnamed child has no port
+  name, so `send to` cannot address it, and the child MUST NOT gain a port
+  name. `send to` a port does not deliver to an unnamed sibling.
+- `send down Kind V` offers `V` to each direct child of kind `Kind`. One such
+  send selects a port child and an unnamed child of that same kind together.
+  The unnamed child may be scene-constructed or dynamic. It MUST NOT skip a
+  generation. Zero matching children MUST fail that send with a diagnostic.
+  `send down Other` does not deliver to a child whose kind is not `Other`.
 - `send down any V` offers `V` to every direct child. Zero children MUST fail.
+  Kind equality and `any` keep these failure rules. Neither is a filter.
+- A filtered `send down` is a third form. Finding a child is this send. The
+  parent does not receive the children as a value. Its source spelling is
+  open ([open questions](#open-questions)). The filter matches a Uffda
+  pattern against the record the parent already holds for each direct child,
+  and against nothing else. That record is
+  `{ kind, port, key }`. `kind` is the component kind. `port` is the port
+  name, or null when the child is unnamed. `key` is the glossary
+  [key](./glossary.spec.md#components-and-trees). A scene-constructed child's
+  `key` is null, including a port child: the scene instance node's `key`
+  field holds the port name, and that name is this record's `port`, not a
+  non-null key. A dynamic child's `port` is null, and its `key` is the value
+  the transition supplied, or null. The record does not include the child's
+  fields, machine state, or mailbox. Each match gets its own send, and the
+  child matches that send with `on down`. Zero matches MUST fail the send
+  with a diagnostic.
 - An unmatched handler at a selected child MUST fail that send with a
-  diagnostic; it MUST NOT be forwarded to the child's children.
+  diagnostic; it MUST NOT be forwarded to the child's children. The same
+  rule applies to a child a filter selected.
 - Several matching children MUST each receive one send, independently.
 - A component MUST NOT send a message by calling another instance as a
   function.
@@ -113,14 +145,17 @@ export scene Main {
 ```
 
 - `component Name { ... }` declares a kind. Instances of that kind are created
-  by a scene.
+  by a scene, or by a parent's transition
+  ([dynamic children](#dynamic-children)). The instance is the same either way.
 - `field name: pattern = expression` is local state. Every write MUST
   match `pattern` as a Uffda scalar value: the init and `name -> E`.
   A miss MUST fail that write with a diagnostic.
   `= expression` MAY be omitted; a missing init is **null**. `number?`
   matches null or a number and MUST NOT match a string: Uffda Maybe that
   skips a present non-null value is not a match for a stored field.
-  The value used is the value that matched.
+  The value used is the value that matched. This field is in scope in every
+  state. A field that instead names the states it belongs to is specified
+  in [state-scoped fields](#state-scoped-fields). That spelling is open.
 - `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
   `Kind` is a component.
 - `start { ... }` is the start state with implicit name `Start`. That name
@@ -163,12 +198,31 @@ export scene Main {
 - `export Name;` and `export scene Name` are defined in
   [scenes](./scenes.spec.md#import-and-export).
 
+The forms above stay. The following forms sit beside them. Their source
+spellings are open ([open questions](#open-questions)). They MUST NOT change
+`field`, `on`, `send down Kind`, or `send down any`.
+
+- A filtered `send down`, specified in [routing](#routing).
+- A statement that constructs a direct child, and a statement that releases
+  a dynamic child, specified in [dynamic children](#dynamic-children) and
+  [identity and lifetime](#identity-and-lifetime).
+- An entry pattern and a post-condition on a state, specified in
+  [state conditions](#state-conditions).
+- A field that names the states it belongs to, specified in
+  [state-scoped fields](#state-scoped-fields).
+
 ### Sending
 
-- `send to name V…` sends the message to the named port.
-- `send down Kind V…` sends the message to each direct child of that kind.
+- `send to name V…` sends the message to the named port. An unnamed child has
+  no port name, so `send to` cannot address it.
+- `send down Kind V…` sends the message to each direct child of that kind, a
+  port child and an unnamed child of that kind together.
 - `send down any V…` sends the message to every direct child.
-- `send up V…` sends the message toward the parent.
+- A filtered `send down` sends the message to each direct child whose record
+  matches, one send each. The parent does not receive those children as a
+  value. `send down Kind` and `send down any` are not this form.
+- `send up V…` sends the message toward the parent. An unnamed child uses
+  this same send. The parent matches it with `on up`.
 - `send self V…` sends the message to this instance. It is taken on a later
   turn and matches a handler whose route list includes `self` (`on self`,
   `on up or self`, unqualified `on`). It MUST NOT match `on down` alone.
@@ -265,11 +319,12 @@ receiver sends a message back.
 
 A handler body is a synchronous prefix followed by at most one terminal.
 
-- Assign, expression statements, and `send` run on this turn, in order,
-  before any terminal. A send only enqueues: it MUST NOT run the receiver
-  on this turn. `send after` only arms a timer. An async send argument
-  starts host work this turn and delivers later; `goto` after it is this
-  turn.
+- Assign, expression statements, `send`, constructing a child, and releasing
+  a child run on this turn, in order, before any terminal. A send only
+  enqueues: it MUST NOT run the receiver on this turn. Constructing a child
+  only records it: it MUST NOT run that child on this turn. `send after`
+  only arms a timer. An async send argument starts host work this turn and
+  delivers later; `goto` after it is this turn.
 - The terminal, if present, MUST be the last statement. It is either
   `goto Name` or `complete V`. A handler MUST NOT contain both. A handler
   MUST NOT contain more than one `goto` or more than one `complete`.
@@ -306,16 +361,161 @@ A handler body is a synchronous prefix followed by at most one terminal.
 ### Identity and lifetime
 
 - Each instance MUST have an identity unique among instances of its kind in the
-  running program.
+  running program. The program MUST NOT read that identity. A
+  [key](./glossary.spec.md#components-and-trees) is not an identity.
 - Scene-constructed children MUST be created when the parent instance is
   created, one instance per construction, in declaration order. They live as
-  long as the parent. Completing a child does not destroy it; it only marks
-  it done so it will not run another transition.
+  long as the parent. A dynamic child lives until that parent releases it or
+  the parent is destroyed. Construction is specified in
+  [dynamic children](#dynamic-children).
+- Completing a child does not destroy it and does not release it. It only
+  marks the child done so it will not run another transition. `complete` is
+  not destruction.
+- An instance is reachable when it is the root, or its parent is reachable and
+  still holds it. The parent holds each scene-constructed child, port or
+  unnamed, for the parent's whole life. It holds a dynamically constructed
+  child until a transition of that parent releases it, or the parent is
+  destroyed. An unreachable instance MUST be destroyed, and its descendants
+  with it. This is unreachability only. Failure, restart, and poison messages
+  belong to the planned supervision chapter.
+- Destruction runs between turns. It cancels that instance's in-flight
+  transition actors, drops messages that instance has not taken, and later
+  routes to it are dropped
+  ([dispatch routing](./dispatch.spec.md#routing),
+  [transition actors](./dispatch.spec.md#transition-actors)). It runs no
+  transition, sends nothing, and offers no init. It is not a handler the
+  instance matches. A `send up` already delivered into the parent's mailbox
+  stays. Destruction does not pull a message back out of a mailbox that
+  already has it.
+- A release is a prefix statement. It records that the parent no longer holds
+  a dynamically constructed direct child. It MUST NOT drop a scene-constructed
+  child. A release that would do so MUST fail with a diagnostic, and the turn
+  MUST NOT commit. The source spelling, including how the statement designates
+  the child, is open ([open questions](#open-questions)).
+- Creating an instance MUST match the start state's entry pattern, then its
+  post-condition, against the initial fields before init is offered
+  ([state conditions](#state-conditions)).
 - After the scene tree is constructed, the runtime MUST offer each
-  component instance init in its start state, before any injected message.
-  Init has no payload. Only `on init` matches it. Unmatched init MUST be
+  scene-constructed component instance init in its start state, before any
+  injected message. A dynamic instance gets the same offer once, before any
+  other message to it. Init is the first message in that mailbox. Sends from
+  the spawning turn that route to it append after that init. Release before
+  that instance runs drops the mailbox, init included.
+- Init has no payload. Only `on init` matches it. Unmatched init MUST be
   dropped with no error, including at the root.
-- The first slice MUST NOT spawn extra children of a constructed kind.
+
+### Dynamic children
+
+A transition MAY construct additional direct children. Construction is a
+statement in the handler prefix, with assign and `send`. It records the
+construction. The parent's turn does not run the new instance. Expressions
+MUST NOT construct a child. The source spelling is open
+([open questions](#open-questions)).
+
+Each new instance is the same component actor as a scene-constructed one:
+one parent, its own identity, its own mailbox, the start state, and init
+once before any other message to it. Init is the first message in the new
+mailbox. Sends from the spawning turn that route to the new instance append
+after it. Release before that instance runs drops the mailbox, init included.
+`on init` is still the only match for init.
+
+The new child is unnamed in the parent's collection. It does not fill or
+replace a port on the parent. Ports on the spawning parent stay the fills
+the scene built. `send to` cannot address the new child. `send down` of its
+kind selects it with the other direct children of that kind.
+
+If the new kind declares ports, the construction fills them under the scene
+rules in [scenes](./scenes.spec.md#constraints): known kind, declared kind,
+no missing port, no duplicate port name. Nested unnamed children in that
+construction follow the same rules. Check MUST fail in those cases, as it
+does for a scene. Those nested children are created with the new instance
+and held for that instance's life. They are not further dynamic children the
+spawning parent releases one by one.
+
+A key, when the transition supplies one, is a value that transition already
+computed. It is the key a filtered `send down` matches. The program MUST NOT
+read a runtime-minted identity. Omitting the key means null. Scene-constructed
+children are still created with the parent, in declaration order, and their
+keys stay null.
+
+A new child is not a transition actor and not a fan-out of a message. Several
+constructions in one handler are several children, recorded in statement
+order. Constructions commit with the turn's machine state, and only when the
+turn commits ([state conditions](#state-conditions)). The new mailboxes are
+not run on the parent's turn.
+
+### State conditions
+
+A state MAY declare an entry pattern and a post-condition over the fields in
+scope in that state. Each is an extra pattern, checked on the state change,
+in addition to each field's own write pattern. Neither pattern selects the
+handler. Handler choice stays the route list and the message pattern, first
+match, as [matching](#matching) specifies. A transition is enabled only by
+the message pattern in the current state. The patterns are pure: they MUST
+NOT send, construct, release, or read a clock. Their source spellings are
+open ([open questions](#open-questions)).
+
+The check uses the order in [state-scoped fields](#state-scoped-fields). For
+the proposed result of a transition (assigns applied, `goto` chosen, or the
+same state if there is no `goto`), match the destination state's entry
+pattern, then its post-condition, against the fields that would be in scope.
+A state that does not declare a pattern passes that check. Both declared
+patterns MUST match. Only then does the turn commit machine state and route
+the sends and constructions it recorded, and apply the releases it recorded.
+
+A miss MUST fail the transition with a diagnostic. Machine state stays as it
+was at the start of the turn. Nothing recorded is routed. Constructions and
+releases do not take effect. `complete` does not change state. The entry
+pattern and the post-condition of the state that remains are still checked.
+The patterns are not an exit action and not a `succeed` or `fail`.
+
+Creating an instance checks the start state's entry pattern, then its
+post-condition, against the initial fields before init is offered. A miss
+MUST fail creation with a diagnostic and MUST NOT offer init.
+
+### State-scoped fields
+
+A field declared on the component, with `states` omitted on the field node,
+stays in scope in every state. That is the field
+[declaration](#declaration) specifies, including init and `name -> E`.
+
+A field MAY instead name the states it belongs to. It is one field. Its
+value persists across `goto` among those states. A transition that lands
+outside the set drops it from machine state. The value that left is gone. It
+is not stored beside the machine. Entering the set again initializes it with
+the component-field rules: the init expression, or null when init is omitted,
+then the field pattern. A miss MUST fail that initialization the way a missed
+field write fails, and the transition MUST NOT commit.
+
+A handler in a state outside the set cannot read or write the field. Check
+MUST fail. A component-scoped field and a state-scoped field MUST NOT share
+a name. One name is one field, not a copy per state. Entry and post-condition
+patterns name only fields in scope in that state. Check MUST fail if they
+name a field that is not. `complete` does not leave the state, so scoped
+fields stay until a later `goto` leaves the set or the instance is destroyed.
+Entering and leaving initialize or drop fields as part of the transition's
+proposed machine state. They do not run another handler and do not send.
+Scoped fields are not step-local data and not entry or exit actions. At
+creation, fields in scope in the start state initialize with the
+component-field rules, and state-scoped fields outside that set are absent,
+before the creation check in [state conditions](#state-conditions).
+
+Proposed order inside one transition:
+
+1. The message match selects the handler. State conditions do not.
+2. Assigns update component-scoped fields and any state-scoped field that
+   stays in scope. Each assign MUST match that field's own pattern first.
+   An assign names a field in scope in the handler's state. Check MUST fail
+   otherwise. A write to a field that then leaves the set is dropped with
+   that field.
+3. State-scoped fields that are newly in scope initialize.
+4. Fields that leave the set are absent.
+5. The destination state's entry pattern is matched against the fields that
+   would be in scope. Then its post-condition is matched against those same
+   fields.
+6. The turn commits, routes sends and constructions, and applies releases
+   only if both match. A miss fails as
+   [state conditions](#state-conditions) specifies.
 
 ## Syntax tree
 
@@ -329,16 +529,17 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
 - `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
-- `{ kind: "field", name: string, pattern: Pattern, init: Expression }`
+- `{ kind: "field", name: string, pattern: Pattern, init: Expression, states: [string] }`
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
-- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler] }`
+- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], entry: Pattern, post: Pattern }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendTo", port: string, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendDown", component: string | null, message: Expression | Sequence, after: Expression | null }`
+- `{ kind: "construct", component: string, key: Expression | null, children: [Instance] }`
 - `{ kind: "send", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "complete", message: Expression | Sequence }`
 - `{ kind: "expr", expression: Expression }`
@@ -349,9 +550,29 @@ Exactly one state in a component MUST have `start: true`. Unnamed `start { }`
 MUST project `name: "Start"` and `named: false`. `start Name` and
 `state Name` MUST project `named: true`. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
-`init` is `undefined` until a transition assigns it. The root instance's `key`
-MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
-MUST be `null` when the send is `send down any`. `handler.item` MAY be omitted
+`init` is `undefined` until a transition assigns it. Field `states` MAY be
+omitted. Omitted means the field is in scope in every state, so a tree that
+exists today stays valid. A present `states` lists the state names it belongs
+to, including the implicit `Start` of an unnamed start. The list MUST name
+at least one state of this component. An unknown name or an empty list MUST
+fail check. State `entry` and `post` MAY be omitted. Omitted means that state
+does not declare the pattern. They are tree properties, not a source spelling.
+The root instance's `key` MUST be `null`. A port fill's `key` MUST be the
+port name. A scene unnamed child's key MUST be null. A dynamic child's key
+MUST be the value the transition supplied, or null. The instance node's
+`key` field records a port name or null. It is not the glossary Key: every
+scene-constructed child's glossary Key is null, including a port child, and
+a dynamic child's glossary Key is that supplied value or null.
+`construct.key` is the expression for that glossary Key, not a port name.
+Omitted or null means a null key. `construct.children` MAY be omitted.
+When present they are instance nodes for the new child's own port fills and
+nested unnamed children. `sendDown.component`
+MUST be `null` when the send is `send down any`. A filtered `send down`
+records `filter: Pattern` on `sendDown` and MUST set `component` to `null`.
+Kind-only and `send down any` omit `filter` and keep the shape above.
+A release statement has no decided tree tag or child-designation fields.
+It MUST NOT be projected as `assign`, `send`, `goto`, or `complete`.
+`handler.item` MAY be omitted
 when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
 Unqualified `on` and `else` MUST project `["up", "down", "self"]`. `on init`
@@ -385,19 +606,33 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
-  a kind. `to` names the port; `down` names the kind; `up` is the ancestor
-  chain; `self` is this instance on a later turn. A missing route would look
+  a kind. `to` names the port; `down` names the kind, every child, or a
+  filter; `up` is the ancestor chain; `self` is this instance on a later
+  turn. A missing route would look
   like a parent sending down.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
   `goto` is the only order that needs to exist.
+- **The filter sees the parent's record.** Matching a child's fields would
+  read another instance. The parent already holds kind, port name, and key.
+- **Destruction is not a message.** A handler on destroy would be supervision.
+  Unreachability drops the instance between turns and does not run it.
+- **State conditions do not select the handler.** The message pattern stays
+  the only enablement. The entry pattern and the post-condition check the
+  fields the turn would commit.
 
 ## Open questions
 
 - **Entity-like parts.** Whether a component MAY have unnamed owned parts that
-  are not independently dispatched actors.
+  are not independently dispatched actors. Dynamic children are actors. This
+  question stays open for parts that are not.
 - **How higher languages specialize a component** (restriction of messages,
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.
+  The filtered `send down` does not decide it.
+- **Spelling.** Filter, construct, release, entry pattern, and post-condition
+  need source spellings. They are new forms beside [declaration](#declaration),
+  not silent edits to `field`, `on`, or `send down Kind`. How a release
+  designates the child is part of that open spelling.

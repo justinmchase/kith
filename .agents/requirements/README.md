@@ -26,6 +26,13 @@ verify it cite it with `req:{id}`.
 - [Message sequences](./components/017-message-sequence.requirement.md)
 - [Field pattern match](./components/018-field-match.requirement.md)
 - [Handler expression returns](./components/019-expr-stmt.requirement.md)
+- [Unnamed send up and send down](./components/020-unnamed-send.requirement.md)
+- [Filtered send down](./components/021-filtered-send-down.requirement.md)
+- [Unreachable instances are destroyed](./components/022-unreachable-destroyed.requirement.md)
+- [Dynamic children](./components/023-dynamic-children.requirement.md)
+- [State post-condition](./components/024-state-postcondition.requirement.md)
+- [State entry pattern](./components/025-state-entry-pattern.requirement.md)
+- [State-scoped fields](./components/026-state-scoped-fields.requirement.md)
 
 ## Scenes
 

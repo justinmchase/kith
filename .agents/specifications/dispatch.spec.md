@@ -19,8 +19,8 @@ capitals.
   not yet complete, such as a join waiting on an async send.
 - **Schedule**: the dispatcher's choice of which ready actor runs next.
 - **Turn**: one actor taking one message (or one transition-actor step),
-  running at most one transition of a component actor, and enqueuing the sends
-  and spawns that transition produced.
+  running at most one transition of a component actor, and enqueuing the
+  sends, spawns, and child constructions or releases that transition produced.
 
 ## Axioms
 
@@ -58,7 +58,8 @@ capitals.
 - The only inputs to a component turn are the instance's machine state and the
   message being taken.
 - The only outputs of a component turn are the next machine state, messages
-  sent, host stream writes, and actors spawned or joined.
+  sent, host stream writes, actors spawned or joined, and children
+  constructed or released.
 
 ### Fairness and variation
 
@@ -75,22 +76,31 @@ capitals.
 - Parallel execution of independent actors remains allowed by this chapter; it
   MUST NOT be required of the first slice. The queue is the extension point.
 - Transition actors MUST NOT be required of the first slice. Turns are
-  synchronous: match, evaluate, apply field changes, enqueue sends.
+  synchronous: match, evaluate, apply field changes, enqueue sends, and
+  record child constructions and releases.
 
 ### Component actors
 
 - Creating an instance creates its component actor and an empty mailbox, and
-  puts the machine in its start state.
-- After the scene tree is constructed, the dispatcher offers each component
-  instance init. Only `on init` matches. Unmatched init is dropped. This
-  MUST happen before any injected message.
+  puts the machine in its start state. An instance a parent's transition
+  constructs after the scene tree exists is that same kind of actor.
+- After the scene tree is constructed, the dispatcher offers each
+  scene-constructed component instance init. Only `on init` matches.
+  Unmatched init is dropped. This MUST happen before any injected message.
+- A dynamically constructed instance is offered init once, as the first
+  message in its mailbox, before any other message to it. Sends the spawning
+  turn routes to it append after that init. The parent's turn does not run
+  the new instance. Releasing it before it runs drops the mailbox, init
+  included.
 - A send that routes to an instance appends the message to that instance's
   mailbox and marks the actor ready.
 - A turn dequeues one message, matches it in the current state, and if a
   transition matches, runs that transition to completion of its synchronous
-  work (expressions, field changes, state change, recording sends and spawns).
+  work (expressions, field changes, state change, recording sends, spawns,
+  and child constructions or releases).
 - Sends recorded in a turn MUST be routed after the turn's state change is
-  visible, so a message to self (`send self V`) is taken on a later turn
+  visible, including children constructed or released on that turn, so a
+  message to self (`send self V`) is taken on a later turn
   and matched in the state after that turn's terminal `goto`, if any.
 
 ### Transition actors
@@ -103,15 +113,20 @@ capitals.
   message on the spawning component actor. The component matches that message
   in the state it is in when the outcome arrives, which MAY be a different
   state than the one that spawned the work.
-- Destroying an instance MUST cancel its in-flight transition actors. Cancelled
-  work MUST NOT enqueue a successful outcome after cancellation.
+- The reachability rule in
+  [components](./components.spec.md#identity-and-lifetime) is what destroys an
+  instance. Destroying an instance MUST cancel its in-flight transition
+  actors. Cancelled work MUST NOT enqueue a successful outcome after
+  cancellation.
 
 ### Routing
 
 - The dispatcher performs send to, send down, send up, and send self as
   [components](./components.spec.md#routing) specifies. Routing chooses a
   mailbox; it does not run a transition.
-- Routing to a destroyed instance MUST drop the message.
+- The reachability rule in
+  [components](./components.spec.md#identity-and-lifetime) is what destroys an
+  instance. Routing to a destroyed instance MUST drop the message.
 
 ## Why this design
 
@@ -136,4 +151,4 @@ capitals.
 - **How much of a transition is synchronous.** Whether `send after` is the
   only way to wait, or a transition body MAY pause and resume.
 - **Supervision.** Failure, restart, and poison messages belong to the planned
-  `supervision` chapter.
+  `supervision` chapter. Collection is unreachability only.

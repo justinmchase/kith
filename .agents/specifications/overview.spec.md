@@ -42,7 +42,7 @@ primitives rather than defining their own.
   subtype another component's machine.
 - **Messages are the only communication.** Components MUST NOT
   call one another as functions to cause behavior. They send messages. A
-  message is routed to a named port (`send to`), down to children of a kind
+  message is routed to a named port (`send to`), down to direct children
   (`send down`), up toward the root (`send up`), or to this instance
   (`send self`), then matched as a Uffda pattern.
 - **Machines.** Component behavior is a state machine: a matched
@@ -59,7 +59,8 @@ primitives rather than defining their own.
   expressions in assign, field init, and nested arguments are pure. Host
   stdlib invocations (`(writeLine stdout x)`, `(http_get url)`) have effects;
   they are still expressions, not keywords. Actor effects remain statements:
-  sending a message and changing machine state.
+  sending a message, changing machine state, and constructing or releasing a
+  child.
 - **One tree per exported scene.** A running program is the instance tree of
   its unique exported scene. The root is that scene's top component
   instance. Each instance has at most one parent. The tree is
@@ -104,7 +105,7 @@ everything outside a machine's control. The language MUST stay checkable.
 - Every source of variation MUST be explicit at an actor's edges: the messages
   that arrive and their order, and the dispatcher's choice among ready actors.
 - A machine given the same state and the same enabling message MUST take the
-  same transition and send the same messages.
+  same transition, send the same messages, and construct the same children.
 - A feature that would hide a source of variation inside a machine, such as
   reading a wall clock or generating an identity other than through a declared
   service of a higher language, MUST NOT be added here. A wall read that is a
@@ -121,4 +122,6 @@ everything outside a machine's control. The language MUST stay checkable.
 - **Syntax spelling.** The first-slice declaration form is frozen in
   [components](./components.spec.md#declaration) and
   [scenes](./scenes.spec.md#declaration). Later keywords MUST NOT
-  silently change that form.
+  silently change that form. Filter, construct, release, entry pattern, and
+  post-condition are new forms beside that declaration. Their spellings are
+  open in [components](./components.spec.md#open-questions).

@@ -18,8 +18,7 @@ primitives rather than redefining them.
 - [Glossary](./glossary.spec.md): the vocabulary every other chapter, and the
   language's keywords, use.
 - [Components](./components.spec.md): kinds, fields, ports, state machines,
-  `send to` / `send down` / `send up`, the declaration syntax, and the syntax
-  tree.
+  `send to` / `send down` / `send up`, lifetime, and the syntax tree.
 - [Scenes](./scenes.spec.md): the instance tree, port fills, unnamed children,
   and Uffda-shaped import/export.
 - [Dispatch](./dispatch.spec.md): the runtime that treats components and

@@ -64,10 +64,25 @@ capitals.
 
 - **Component**: a named, composable kind with a state machine, optional
   fields, and optional ports. Instances of a component are constructed by a
-  scene. A component is not a subtype of another component.
+  scene, or by a parent's transition. The instance is the same either way.
+  A component is not a subtype of another component.
 - **Instance**: one running component, with its own identity, state,
   children, and mailbox.
-- **Child**: an instance owned by another instance. Ownership is has-a.
+- **Destroyed**: an instance reachability has dropped
+  ([components](./components.spec.md#identity-and-lifetime)). Destruction is
+  not a state and not a message. The instance runs no transition, sends
+  nothing, and is offered no init. Its descendants are destroyed with it.
+- **Child**: an instance owned by another instance. Ownership is has-a. A
+  dynamic child is one a parent's transition constructs. It is unnamed, and
+  it is the same kind of instance as a scene-constructed child. It lives
+  until that parent releases it or the parent is destroyed.
+- **Key**: a value the parent holds for a direct child, separate from the
+  child's kind and from its port name. A filtered `send down` may match it.
+  A scene-constructed child's key is null, whether or not it fills a port.
+  The scene instance node's `key` field is that port name, or null; it is
+  not this value. A dynamic child's key is the value the constructing
+  transition already computed, or null when that transition supplies none.
+  It is not a runtime-minted identity, and the program MUST NOT read one.
 - **Parent**: the instance that owns a child. An instance other than the root
   has exactly one parent.
 - **Tree**: the has-a ownership graph of a running program. It is a tree: no
@@ -84,16 +99,18 @@ capitals.
 - **To**: a route to a named port (`send to`).
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`). `on up` matches only that route at the receiver.
-- **Down**: a route toward direct children of a kind (`send down`). `on down`
-  matches a `send to` / `send down` to this instance, and an inject. It
-  does not match `send self` or init.
+- **Down**: a route toward direct children (`send down`): one kind, every
+  direct child (`any`), or a filter over the record the parent holds for
+  each child. `on down` matches a `send to` / `send down` to this instance,
+  and an inject. It does not match `send self` or init.
 - **Self**: a route to this instance (`send self`). Taken on a later turn.
   A handler matches it when its route list includes `self`. Unqualified
   `on` is `up or down or self`. `on down` does not include `self`.
 - **Or**: joins route names on a handler (`on up or down`). It is not
   Uffda pattern `|`.
 - **Init**: a one-time offer to each scene-constructed component instance
-  after the tree is built. It has no payload. Only `on init` matches.
+  after the tree is built. A dynamic instance gets the same offer once,
+  before any other message to it. It has no payload. Only `on init` matches.
   Unmatched init is dropped.
 - **After**: a delay on a send (`send after Delay`). Delay is seconds. The
   send is delivered when the dispatcher clock reaches the due time. It is
@@ -110,9 +127,11 @@ capitals.
 - **Start state**: the state a machine begins in. Unnamed `start { }` is
   not a `goto` target; `start Name` is.
 - **Transition**: the handling of one enabling message in one state: matching
-  a pattern, computing with expressions, changing machine state, and sending
-  messages or spawning work. A transition is the only behavior.
-- **Machine state**: the state the machine is in, plus the values of its fields.
+  a pattern, computing with expressions, changing machine state, sending
+  messages, constructing or releasing a child, or spawning work. A transition
+  is the only behavior.
+- **Machine state**: the state name, plus the values of the fields in scope
+  in that state.
 - **Goto**: a component statement (`goto Name`) that enters another declared
   state of this instance. It is a terminal: at most one per handler, last
   if present, exclusive with `complete`.
