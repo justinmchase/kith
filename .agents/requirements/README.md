@@ -27,6 +27,7 @@ verify it cite it with `req:{id}`.
 - [Field pattern match](./components/018-field-match.requirement.md)
 - [Handler expression returns](./components/019-expr-stmt.requirement.md)
 - [Unnamed send up and send down](./components/020-unnamed-send.requirement.md)
+- [Filtered send down](./components/021-filtered-send-down.requirement.md)
 
 ## Scenes
 

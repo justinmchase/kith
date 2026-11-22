@@ -72,6 +72,10 @@ capitals.
   has exactly one parent.
 - **Tree**: the has-a ownership graph of a running program. It is a tree: no
   instance has two parents, and no instance is its own ancestor.
+- **Key**: a value the parent holds for a direct child. A filtered `send down`
+  may match it. A scene-constructed child's key is null. It is not the
+  instance node's `key` field: that field is the port name, or null when the
+  child is unnamed.
 
 ## Messages and routing
 
@@ -87,7 +91,9 @@ capitals.
 - **Down**: a route toward direct children a pattern selects (`send down
   Pattern V` or `send down any V`). A component name in that pattern is a
   looks-like match, not declared-kind equality. `any` matches every direct
-  child. The message is the value after the selector. `on down`
+  child. A filtered `send down` matches the record the parent holds for each
+  direct child: the port name if any, the key, and kind as that looks-like
+  match. The message is the value after the selector. `on down`
   matches a `send to` / `send down` to this instance, and an inject. It
   does not match `send self` or init.
 - **Self**: a route to this instance (`send self`). Taken on a later turn.

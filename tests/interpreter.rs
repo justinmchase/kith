@@ -97,6 +97,18 @@ fn scene_program(components: Vec<Component>, root: Instance) -> Program {
     }
 }
 
+fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
+    json!({
+        "kind": "over",
+        "keys": {
+            key: {
+                "kind": "equal",
+                "value": {"kind": "value.literal", "value": value}
+            }
+        }
+    })
+}
+
 fn kind_eq(kind: &str) -> serde_json::Value {
     json!({
         "kind": "over",
@@ -341,6 +353,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: Some("Child".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -352,6 +365,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: Some("Other".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -363,6 +377,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                     component: None,
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
         ],
@@ -496,6 +511,7 @@ fn unnamed_send_down_is_looks_like_and_send_up_is_one_route() {
                     component: Some("Child".into()),
                     message: object_kind("Tick"),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -507,6 +523,7 @@ fn unnamed_send_down_is_looks_like_and_send_up_is_one_route() {
                     component: None,
                     message: object_kind("Tick"),
                     after: None,
+                    filter: None,
                 }],
             },
         ],
@@ -597,6 +614,7 @@ fn unnamed_send_down_is_looks_like_and_send_up_is_one_route() {
                     component: Some("Reply".into()),
                     message: object_kind("Ping"),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {
@@ -645,6 +663,214 @@ fn unnamed_send_down_is_looks_like_and_send_up_is_one_route() {
         world.field(world.child(world.root_id(), "child").unwrap(), "seen"),
         Some(&json!(0.0))
     );
+}
+
+#[test]
+// req:components-021
+fn filtered_send_down_matches_the_parent_record_and_fails_when_empty() {
+    let mock = Component {
+        kind: "component".into(),
+        name: "Mock".into(),
+        fields: vec![Field {
+            kind: "field".into(),
+            name: "n".into(),
+            pattern: None,
+            init: Some(json!({"kind": "number", "value": 0})),
+        }],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            named: true,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: json!({"kind": "any"}),
+                body: vec![Statement::Assign {
+                    field: "n".into(),
+                    expression: json!({"kind": "number", "value": 1}),
+                }],
+            }],
+        }],
+    };
+    let stranger = Component {
+        kind: "component".into(),
+        name: "Stranger".into(),
+        fields: vec![Field {
+            kind: "field".into(),
+            name: "seen".into(),
+            pattern: None,
+            init: Some(json!({"kind": "number", "value": 0})),
+        }],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            named: true,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Tick"),
+                body: vec![Statement::Assign {
+                    field: "seen".into(),
+                    expression: json!({"kind": "number", "value": 1}),
+                }],
+            }],
+        }],
+    };
+    let send = |pattern, filter, component| Handler {
+        kind: "handler".into(),
+        route: vec![],
+        item: None,
+        pattern,
+        body: vec![Statement::SendDown {
+            component,
+            message: object_kind("Tick"),
+            after: None,
+            filter,
+        }],
+    };
+    let parent = idle(
+        "Parent",
+        vec![port("Child", "child")],
+        vec![
+            send(kind_eq("Port"), Some(over_equal("port", json!("child"))), None),
+            send(kind_eq("Kind"), Some(over_equal("kind", json!("Child"))), None),
+            send(kind_eq("Field"), Some(over_equal("seen", json!(0))), None),
+            send(kind_eq("State"), Some(over_equal("state", json!("Idle"))), None),
+            send(kind_eq("None"), Some(over_equal("port", json!("missing"))), None),
+            send(kind_eq("Key"), Some(over_equal("key", json!("ticket"))), None),
+            send(kind_eq("NullKey"), Some(over_equal("key", json!(null))), None),
+            send(kind_eq("All"), None, None),
+            send(
+                kind_eq("Both"),
+                Some(over_equal("port", json!("child"))),
+                Some("Child".into()),
+            ),
+        ],
+    );
+    let program = scene_program(
+        vec![parent, counting("Child"), mock, stranger],
+        instance(
+            "Parent",
+            None,
+            vec![
+                instance("Child", Some("child"), vec![]),
+                instance("Mock", None, vec![]),
+                instance("Stranger", None, vec![]),
+            ],
+        ),
+    );
+
+    let seen = |world: &World| {
+        let root = world.root_id();
+        (
+            world
+                .field(world.child(root, "child").unwrap(), "seen")
+                .cloned(),
+            world
+                .field(world.children_of_kind(root, "Mock")[0], "n")
+                .cloned(),
+            world
+                .field(world.children_of_kind(root, "Stranger")[0], "seen")
+                .cloned(),
+        )
+    };
+    let run = |kind: &str| {
+        let mut world = World::start(program.clone()).expect("start");
+        world.inject(json!({"kind": kind})).unwrap();
+        world.run_until_idle().unwrap();
+        seen(&world)
+    };
+
+    assert_eq!(
+        run("Port"),
+        (Some(json!(1.0)), Some(json!(0.0)), Some(json!(0.0)))
+    );
+    assert_eq!(
+        run("Kind"),
+        (Some(json!(1.0)), Some(json!(1.0)), Some(json!(0.0)))
+    );
+    assert_eq!(
+        run("NullKey"),
+        (Some(json!(1.0)), Some(json!(1.0)), Some(json!(1.0)))
+    );
+    assert_eq!(
+        run("All"),
+        (Some(json!(1.0)), Some(json!(1.0)), Some(json!(1.0)))
+    );
+
+    for kind in ["Field", "State", "None", "Key"] {
+        let mut world = World::start(program.clone()).expect("start");
+        world.inject(json!({"kind": kind})).unwrap();
+        let err = world.run_until_idle().expect_err(kind);
+        assert!(
+            err.message.contains("no child matched"),
+            "{kind}: {}",
+            err.message
+        );
+    }
+
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "Both"})).unwrap();
+    let err = world.run_until_idle().expect_err("both");
+    assert!(
+        err.message.contains("must not set a component selector"),
+        "{}",
+        err.message
+    );
+
+    let grand = counting("Grand");
+    let quiet = idle(
+        "Quiet",
+        vec![port("Grand", "inner")],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec![],
+            item: None,
+            pattern: kind_eq("Yes"),
+            body: vec![],
+        }],
+    );
+    let parent = idle(
+        "Parent",
+        vec![port("Quiet", "child")],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec![],
+            item: None,
+            pattern: kind_eq("Miss"),
+            body: vec![Statement::SendDown {
+                component: None,
+                message: object_kind("Nope"),
+                after: None,
+                filter: Some(over_equal("port", json!("child"))),
+            }],
+        }],
+    );
+    let mut world = World::start(scene_program(
+        vec![parent, quiet, grand],
+        instance(
+            "Parent",
+            None,
+            vec![instance(
+                "Quiet",
+                Some("child"),
+                vec![instance("Grand", Some("inner"), vec![])],
+            )],
+        ),
+    ))
+    .expect("start");
+    world.inject(json!({"kind": "Miss"})).unwrap();
+    let err = world.run_until_idle().expect_err("unmatched down");
+    assert!(err.message.contains("unmatched down"), "{}", err.message);
+    let quiet_id = world.child(world.root_id(), "child").unwrap();
+    let grand_id = world.child(quiet_id, "inner").unwrap();
+    assert_eq!(world.field(grand_id, "seen"), Some(&json!(0.0)));
 }
 
 #[test]
@@ -699,6 +925,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                     component: Some("Ghost".into()),
                     message: string_msg(),
                     after: None,
+                    filter: None,
                 }],
             },
             Handler {

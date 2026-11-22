@@ -134,6 +134,9 @@ pub enum Statement {
         message: Json,
         #[serde(default)]
         after: Option<Json>,
+        /// Set on a filtered send, which also sets `component` to null.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Json>,
     },
     #[serde(rename = "send")]
     Send {

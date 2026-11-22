@@ -36,7 +36,9 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down` a pattern.
+  reached only through their parent: `send to` a port, or `send down` a
+  pattern (`send down Pattern V`, `send down any V`, or a filter). The parent
+  does not receive its children as a value.
 
 ### Behavior
 
@@ -76,9 +78,22 @@ capitals.
   that shape is its own. It MUST NOT skip a generation. Zero matching
   children MUST fail that send with a diagnostic.
 - `send down any V` is that send where the pattern is `any`. `any` matches
-  every direct child. Zero children MUST fail.
+  every direct child. Zero children MUST fail. These failure rules are the
+  selector's rules. They are not a declared-kind check.
+- A filtered `send down` matches a Uffda pattern the parent holds for each
+  direct child. Finding a child is this send. The parent does not receive
+  the children as a value. Its source spelling is open
+  ([open questions](#open-questions)). The record the parent holds for a
+  child is the port name, if the child fills a port, the key, and the
+  child's kind as a looks-like match. A component name in the pattern is
+  that looks-like match. It MUST NOT require the child's declared kind to
+  equal a named component. The pattern MUST NOT see the child's fields,
+  machine state, or mailbox. Each match MUST get one send. Zero matches
+  MUST fail the send with a diagnostic. `send down Pattern V` and
+  `send down any V` are not this form.
 - An unmatched handler at a selected child MUST fail that send with a
-  diagnostic; it MUST NOT be forwarded to the child's children.
+  diagnostic; it MUST NOT be forwarded to the child's children. The same
+  rule applies to a child a filter selected.
 - Several matching children MUST each receive one send, independently.
 - A component MUST NOT send a message by calling another instance as a
   function.
@@ -181,6 +196,10 @@ export scene Main {
   selects. A component name in `Pattern` is a looks-like match, as
   [routing](#routing) defines. The message is the value after the selector.
 - `send down any V…` sends the message to every direct child.
+- A filtered `send down` sends the message to each direct child its pattern
+  selects, one send each. The message is the value after the selector. The
+  parent does not receive those children as a value. A component name in
+  the pattern is a looks-like match, as [routing](#routing) defines.
 - `send up V…` sends the message toward the parent. An unnamed child's
   `send up` is this same ancestor walk. The parent matches it with `on up`.
   There is one `send up` route. It is not delivered to siblings. `send to`
@@ -370,8 +389,15 @@ MUST project `name: "Start"` and `named: false`. `start Name` and
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`,
 when set, is the component name used as a looks-like selector, not a
 declared-kind equality. It MUST be `null` when the selector is `any`.
-`message` is required. `handler.item` MAY be omitted
-when the transition matches one message. `handler.route` is a list. `on down`
+`message` is required. A filtered `send down` records `filter: Pattern` on
+`sendDown` and MUST set `component` to `null`. A component name in that
+pattern is a looks-like match, not declared-kind equality. The instance
+node's `key` stays the port name, or null when the child is unnamed. The
+record the filter matches uses that name as `port`, and uses `key` for the
+[key](./glossary.spec.md#components-and-trees) the parent holds. That key is
+null for a scene-constructed child. `send down Pattern V` and
+`send down any V` omit `filter` and keep the shape above. `handler.item` MAY
+be omitted when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
 Unqualified `on` and `else` MUST project `["up", "down", "self"]`. `on init`
 MUST project `["init"]` and pattern `any`. An omitted `route` on a
@@ -408,6 +434,10 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   there is a looks-like match rather than declared-kind equality; `up` is
   the ancestor chain; `self` is this instance on a later turn. A missing
   route would look like a parent sending down.
+- **The filter sees what the parent holds.** Matching a child's fields,
+  machine state, or mailbox would read another instance. The parent holds
+  the port name, the key, and the selector pattern. A component name in
+  that pattern is looks-like, not an is-a check on the declared kind.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -421,3 +451,7 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.
+  The filtered `send down` does not decide it.
+- **Filtered send down spelling.** The source spelling of a filtered
+  `send down` stays open. It is a new form beside `send down Pattern V` and
+  `send down any V`, not a silent edit to either.

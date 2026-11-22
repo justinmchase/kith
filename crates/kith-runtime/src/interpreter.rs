@@ -884,8 +884,15 @@ impl World {
                     component,
                     message,
                     after,
+                    filter,
                 } => {
-                    let selected = self.select_children(id, component.as_deref());
+                    if filter.is_some() && component.is_some() {
+                        return Err(Error::new(
+                            "filtered send down must not set a component selector",
+                        ));
+                    }
+                    let selected =
+                        self.select_children(id, component.as_deref(), filter.as_ref())?;
                     if selected.is_empty() {
                         return Err(Error::new("no child matched send down"));
                     }
@@ -943,20 +950,60 @@ impl World {
         Ok(sends)
     }
 
-    fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
-        self.instances
-            .get(&id)
-            .map(|instance| {
-                instance
-                    .children
-                    .iter()
-                    .filter(|child| {
-                        kind.is_none_or(|name| looks_like(&self.program, &child.component, name))
-                    })
-                    .map(|child| child.id)
-                    .collect()
-            })
-            .unwrap_or_default()
+    fn select_children(
+        &self,
+        id: ActorId,
+        kind: Option<&str>,
+        filter: Option<&Json>,
+    ) -> Result<Vec<ActorId>, Error> {
+        let Some(instance) = self.instances.get(&id) else {
+            return Ok(Vec::new());
+        };
+        let mut selected = Vec::new();
+        for child in &instance.children {
+            if self.down_match(&child.component, child.key.as_deref(), kind, filter)? {
+                selected.push(child.id);
+            }
+        }
+        Ok(selected)
+    }
+
+    fn down_match(
+        &self,
+        component: &str,
+        port: Option<&str>,
+        selector: Option<&str>,
+        filter: Option<&Json>,
+    ) -> Result<bool, Error> {
+        if let Some(filter) = filter {
+            return self.holds_match(component, port, filter);
+        }
+        match selector {
+            None => Ok(true),
+            Some(name) => Ok(looks_like(&self.program, component, name)),
+        }
+    }
+
+    fn holds_match(
+        &self,
+        component: &str,
+        port: Option<&str>,
+        filter: &Json,
+    ) -> Result<bool, Error> {
+        let (pattern, names) = split_looks_like(filter);
+        for name in &names {
+            if !looks_like(&self.program, component, name) {
+                return Ok(false);
+            }
+        }
+        if over_without_keys(&pattern) {
+            return Ok(true);
+        }
+        let record = doc::object([
+            ("port", port.map(doc::string).unwrap_or_else(doc::null)),
+            ("key", doc::null()),
+        ]);
+        Ok(match_program(&pattern, &record, &self.program.rules)?.is_some())
     }
 
     fn enqueue_send(
@@ -1562,6 +1609,56 @@ fn port_protocol(component: &Component) -> Vec<(String, String)> {
         .collect();
     ports.sort();
     ports
+}
+
+fn split_looks_like(pattern: &Json) -> (Json, Vec<String>) {
+    let Some(map) = pattern.as_object() else {
+        return (pattern.clone(), Vec::new());
+    };
+    if map.get("kind").and_then(Json::as_str) != Some("over") {
+        return (pattern.clone(), Vec::new());
+    }
+    let Some(keys) = map.get("keys").and_then(Json::as_object) else {
+        return (pattern.clone(), Vec::new());
+    };
+    let mut names = Vec::new();
+    let mut rest = serde_json::Map::new();
+    for (key, value) in keys {
+        if key == "kind" || key == "component" {
+            if let Some(name) = equal_literal_string(value) {
+                names.push(name);
+                continue;
+            }
+        }
+        rest.insert(key.clone(), value.clone());
+    }
+    let mut cleaned = map.clone();
+    cleaned.insert("keys".to_string(), Json::Object(rest));
+    (Json::Object(cleaned), names)
+}
+
+fn equal_literal_string(pattern: &Json) -> Option<String> {
+    let map = pattern.as_object()?;
+    if map.get("kind").and_then(Json::as_str) != Some("equal") {
+        return None;
+    }
+    let value = map.get("value")?.as_object()?;
+    if value.get("kind").and_then(Json::as_str) != Some("value.literal") {
+        return None;
+    }
+    value.get("value")?.as_str().map(str::to_string)
+}
+
+fn over_without_keys(pattern: &Json) -> bool {
+    let Some(map) = pattern.as_object() else {
+        return false;
+    };
+    if map.get("kind").and_then(Json::as_str) != Some("over") {
+        return false;
+    }
+    map.get("keys")
+        .and_then(Json::as_object)
+        .is_none_or(|keys| keys.is_empty())
 }
 
 fn route_matches(expected: &[String], route: Route) -> bool {
