@@ -599,6 +599,213 @@ fn unreachable_children_are_destroyed_between_turns() {
     assert_eq!(world.output(root), Some(&json!(1.0)));
 }
 
+#[test]
+// req:components-023
+fn a_transition_constructs_an_unnamed_child_that_inits_once() {
+    let number = |value: i64| json!({"kind": "number", "value": value});
+    let text = |value: &str| json!({"kind": "string", "values": [value]});
+    let field = |name: &str| Field {
+        kind: "field".into(),
+        name: name.into(),
+        pattern: None,
+        init: Some(number(0)),
+    };
+    let phase = json!({"kind": "reference", "name": "phase"});
+    let item = idle(
+        "Item",
+        vec![port("Leaf", "inner")],
+        vec![
+            Handler {
+                kind: "handler".into(),
+                route: vec!["init".into()],
+                item: None,
+                pattern: json!({"kind": "any"}),
+                body: vec![
+                    Statement::Assign {
+                        field: "phase".into(),
+                        expression: number(1),
+                    },
+                    Statement::SendUp {
+                        message: object_kind("Hi"),
+                        after: None,
+                    },
+                ],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Tick"),
+                body: vec![Statement::Assign {
+                    field: "saw".into(),
+                    expression: phase,
+                }],
+            },
+        ],
+    );
+    let item = Component {
+        kind: item.kind,
+        name: item.name,
+        fields: vec![field("phase"), field("saw")],
+        ports: item.ports,
+        states: item.states,
+    };
+    let child = idle(
+        "Child",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec![],
+            item: None,
+            pattern: kind_eq("Tick"),
+            body: vec![],
+        }],
+    );
+    let parent = idle(
+        "Parent",
+        vec![port("Child", "child")],
+        vec![
+            Handler {
+                kind: "handler".into(),
+                route: vec!["up".into()],
+                item: None,
+                pattern: kind_eq("Hi"),
+                body: vec![Statement::Assign {
+                    field: "heard".into(),
+                    expression: number(1),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Make"),
+                body: vec![
+                    Statement::Construct {
+                        component: "Item".into(),
+                        key: Some(text("one")),
+                        children: vec![instance("Leaf", Some("inner"), vec![])],
+                    },
+                    Statement::Construct {
+                        component: "Item".into(),
+                        key: Some(text("two")),
+                        children: vec![instance("Leaf", Some("inner"), vec![])],
+                    },
+                    Statement::SendDown {
+                        component: None,
+                        message: object_kind("Tick"),
+                        after: None,
+                    },
+                ],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("DropOne"),
+                body: vec![Statement::Release {
+                    filter: over_equal("key", json!("one")),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("DropEarly"),
+                body: vec![
+                    Statement::Construct {
+                        component: "Item".into(),
+                        key: None,
+                        children: vec![instance("Leaf", Some("inner"), vec![])],
+                    },
+                    Statement::Release {
+                        filter: over_equal("port", json!(null)),
+                    },
+                ],
+            },
+        ],
+    );
+    let parent = Component {
+        kind: parent.kind,
+        name: parent.name,
+        fields: vec![field("heard")],
+        ports: parent.ports,
+        states: parent.states,
+    };
+    let program = scene_program(
+        vec![
+            parent.clone(),
+            child,
+            item.clone(),
+            idle("Leaf", vec![], vec![]),
+        ],
+        instance(
+            "Parent",
+            None,
+            vec![instance("Child", Some("child"), vec![])],
+        ),
+    );
+    let mut world = World::start(program.clone()).expect("start");
+    world.inject(json!({"kind": "Make"})).unwrap();
+    world.run_until_idle().unwrap();
+    let root = world.root_id();
+    let items = world.children_of_kind(root, "Item");
+    assert_eq!(items.len(), 2);
+    let port_child = world.child(root, "child").unwrap();
+    assert!(items.iter().all(|id| *id != port_child));
+    assert!(world.child(root, "item").is_none());
+    assert!(items
+        .iter()
+        .all(|id| world.field(*id, "phase") == Some(&json!(1.0))));
+    assert!(items
+        .iter()
+        .all(|id| world.field(*id, "saw") == Some(&json!(1.0))));
+    assert_eq!(world.field(root, "heard"), Some(&json!(1.0)));
+    let keys: Vec<_> = items
+        .iter()
+        .map(|id| world.held_key(*id).unwrap())
+        .collect();
+    assert!(keys.contains(&json!("one")));
+    assert!(keys.contains(&json!("two")));
+    assert!(items.iter().all(|id| world.child(*id, "inner").is_some()));
+
+    world.inject(json!({"kind": "DropOne"})).unwrap();
+    world.run_until_idle().unwrap();
+    let left = world.children_of_kind(root, "Item");
+    assert_eq!(left.len(), 1);
+    assert_eq!(world.held_key(left[0]), Some(json!("two")));
+    assert!(world.child(root, "child").is_some());
+
+    let mut world = World::start(program).expect("start");
+    world.inject(json!({"kind": "DropEarly"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert!(world.children_of_kind(world.root_id(), "Item").is_empty());
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(0.0)));
+    assert!(world.child(world.root_id(), "child").is_some());
+
+    let mut bad = scene_program(
+        vec![
+            parent,
+            idle("Child", vec![], vec![]),
+            item,
+            idle("Leaf", vec![], vec![]),
+            idle("Stranger", vec![], vec![]),
+        ],
+        instance(
+            "Parent",
+            None,
+            vec![instance("Child", Some("child"), vec![])],
+        ),
+    );
+    if let Statement::Construct { children, .. } =
+        &mut bad.components[0].states[0].handlers[1].body[0]
+    {
+        children[0].component = "Stranger".into();
+    }
+    let err = World::check(&bad).expect_err("stranger is not Leaf");
+    assert!(err.message.contains("expects Leaf"), "{}", err.message);
+}
+
 fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
     json!({
         "kind": "over",

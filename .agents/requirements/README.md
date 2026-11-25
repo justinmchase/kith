@@ -27,6 +27,7 @@ verify it cite it with `req:{id}`.
 - [Field pattern match](./components/018-field-match.requirement.md)
 - [Handler expression returns](./components/019-expr-stmt.requirement.md)
 - [Unreachable instances are destroyed](./components/022-unreachable-destroyed.requirement.md)
+- [Dynamic children](./components/023-dynamic-children.requirement.md)
 
 ## Scenes
 
