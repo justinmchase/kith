@@ -24,6 +24,7 @@ struct ChildRef {
     key: Option<String>,
     component: String,
     scene: bool,
+    held_key: Doc,
 }
 
 #[derive(Clone)]
@@ -90,6 +91,8 @@ pub struct World {
     suppress_result: bool,
     hub: IoHub,
     pending_release: Vec<ActorId>,
+    pending_init: Vec<ActorId>,
+    pending_dynamic: Vec<ActorId>,
 }
 
 struct IoHub {
@@ -140,6 +143,7 @@ impl World {
             check_terminals(component)?;
             check_routes(component)?;
             check_effects(component)?;
+            check_constructs(program, component)?;
         }
         check_instance(program, &scene.root)?;
         Ok(())
@@ -171,6 +175,8 @@ impl World {
             suppress_result: false,
             hub: IoHub::new(),
             pending_release: Vec::new(),
+            pending_init: Vec::new(),
+            pending_dynamic: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -210,6 +216,17 @@ impl World {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The key the parent holds for this child. Null when the parent did not
+    /// supply one. This is not a runtime-minted identity.
+    pub fn held_key(&self, id: ActorId) -> Option<Json> {
+        for instance in self.instances.values() {
+            if let Some(child) = instance.children.iter().find(|child| child.id == id) {
+                return project(&child.held_key).ok();
+            }
+        }
+        None
     }
 
     pub fn kind(&self, id: ActorId) -> Option<&str> {
@@ -387,9 +404,16 @@ impl World {
                 return Ok(());
             };
             let route = self.take_route(turn.actor);
-            let sends = self.handle(turn.actor, &turn.message.value, route)?;
+            let sends = match self.handle(turn.actor, &turn.message.value, route) {
+                Ok(sends) => sends,
+                Err(err) => {
+                    self.discard_pending_constructs();
+                    return Err(err);
+                }
+            };
             self.apply_releases();
             self.collect_unreachable();
+            self.deliver_pending_inits()?;
             for (to, message, route) in sends {
                 self.deliver(to, message, route)?;
             }
@@ -661,6 +685,8 @@ impl World {
             .unwrap_or(false),
             hub: IoHub::new(),
             pending_release: Vec::new(),
+            pending_init: Vec::new(),
+            pending_dynamic: Vec::new(),
         })
     }
 
@@ -678,6 +704,7 @@ impl World {
                 key: child.key.clone(),
                 component: child.component.clone(),
                 scene: true,
+                held_key: doc::null(),
             });
         }
         self.instances.get_mut(&id).expect("parent").children = children;
@@ -701,6 +728,7 @@ impl World {
                 key: child.key.clone(),
                 component: child.component.clone(),
                 scene: true,
+                held_key: doc::null(),
             });
         }
         self.instances.get_mut(&id).expect("dynamic").children = children;
@@ -713,8 +741,79 @@ impl World {
                 key: node.key.clone(),
                 component: node.component.clone(),
                 scene: false,
+                held_key: doc::null(),
             });
         Ok(id)
+    }
+
+    fn spawn_constructed(
+        &mut self,
+        parent: ActorId,
+        component: &str,
+        held_key: Doc,
+        children: &[Instance],
+    ) -> Result<Vec<ActorId>, Error> {
+        check_construct_children(&self.program, component, children)?;
+        let id = self.spawn_kind(component, Some(parent))?;
+        let mut nested = Vec::new();
+        for child in children {
+            let child_id = self.spawn_instance(child, Some(id))?;
+            nested.push(ChildRef {
+                id: child_id,
+                key: child.key.clone(),
+                component: child.component.clone(),
+                scene: true,
+                held_key: doc::null(),
+            });
+        }
+        self.instances.get_mut(&id).expect("constructed").children = nested;
+        self.instances
+            .get_mut(&parent)
+            .ok_or_else(|| Error::new("unknown parent"))?
+            .children
+            .push(ChildRef {
+                id,
+                key: None,
+                component: component.to_string(),
+                scene: false,
+                held_key,
+            });
+        let mut ids = vec![id];
+        let mut stack = vec![id];
+        while let Some(current) = stack.pop() {
+            let Some(instance) = self.instances.get(&current) else {
+                continue;
+            };
+            for child in &instance.children {
+                ids.push(child.id);
+                stack.push(child.id);
+            }
+        }
+        Ok(ids)
+    }
+
+    fn discard_pending_constructs(&mut self) {
+        let roots: HashSet<ActorId> = self.pending_dynamic.drain(..).collect();
+        self.pending_init.clear();
+        self.pending_release.clear();
+        if roots.is_empty() {
+            return;
+        }
+        for instance in self.instances.values_mut() {
+            instance.children.retain(|child| !roots.contains(&child.id));
+        }
+        self.collect_unreachable();
+    }
+
+    fn deliver_pending_inits(&mut self) -> Result<(), Error> {
+        let ids = std::mem::take(&mut self.pending_init);
+        self.pending_dynamic.clear();
+        for id in ids {
+            if self.instances.contains_key(&id) {
+                self.deliver(id, doc::null(), Route::Init)?;
+            }
+        }
+        Ok(())
     }
 
     fn enqueue_inits(&mut self) -> Result<(), Error> {
@@ -830,6 +929,8 @@ impl World {
         route: Route,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         self.pending_release.clear();
+        self.pending_init.clear();
+        self.pending_dynamic.clear();
         if self.instances[&id].driver.is_some() {
             if route == Route::Init {
                 return Ok(vec![]);
@@ -946,6 +1047,19 @@ impl World {
                 Statement::Release { filter } => {
                     self.record_release(id, filter)?;
                 }
+                Statement::Construct {
+                    component,
+                    key,
+                    children,
+                } => {
+                    let held_key = match key {
+                        Some(key) => self.eval(key, &bindings)?,
+                        None => doc::null(),
+                    };
+                    let created = self.spawn_constructed(id, component, held_key, children)?;
+                    self.pending_dynamic.push(created[0]);
+                    self.pending_init.extend(created);
+                }
                 Statement::Send { message, after } => {
                     self.enqueue_send(
                         id,
@@ -996,10 +1110,10 @@ impl World {
             .unwrap_or_default()
     }
 
-    fn holds_match(&self, port: Option<&str>, filter: &Json) -> Result<bool, Error> {
+    fn holds_match(&self, port: Option<&str>, key: &Doc, filter: &Json) -> Result<bool, Error> {
         let record = doc::object([
             ("port", port.map(doc::string).unwrap_or_else(doc::null)),
-            ("key", doc::null()),
+            ("key", key.clone()),
         ]);
         Ok(match_program(filter, &record, &self.program.rules)?.is_some())
     }
@@ -1008,7 +1122,7 @@ impl World {
         let children = self.instances[&id].children.clone();
         let mut hits = Vec::new();
         for child in &children {
-            if !self.holds_match(child.key.as_deref(), filter)? {
+            if !self.holds_match(child.key.as_deref(), &child.held_key, filter)? {
                 continue;
             }
             if child.scene {
@@ -1856,7 +1970,9 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
                             check_send_arg(item, delayed, &component.name)?;
                         }
                     }
-                    Statement::Goto { .. } | Statement::Release { .. } => {}
+                    Statement::Goto { .. }
+                    | Statement::Release { .. }
+                    | Statement::Construct { .. } => {}
                 }
             }
         }
@@ -2014,6 +2130,73 @@ fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Erro
     Ok(())
 }
 
+fn check_constructs(program: &Program, component: &crate::ast::Component) -> Result<(), Error> {
+    for state in &component.states {
+        for handler in &state.handlers {
+            for statement in &handler.body {
+                if let Statement::Construct {
+                    component: kind,
+                    children,
+                    key,
+                } = statement
+                {
+                    if let Some(key) = key {
+                        check_sync(key, &component.name)?;
+                    }
+                    check_construct_children(program, kind, children)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_construct_children(
+    program: &Program,
+    component: &str,
+    children: &[Instance],
+) -> Result<(), Error> {
+    let kind = program
+        .component(component)
+        .ok_or_else(|| Error::new(format!("unknown kind {component}")))?;
+    let ports: Vec<(String, String)> = kind
+        .ports
+        .iter()
+        .map(|port| (port.name.clone(), port.component.clone()))
+        .collect();
+    if !ports.is_empty() {
+        let mut filled = HashSet::new();
+        for child in children {
+            if let Some(key) = child.key.as_deref() {
+                if !filled.insert(key.to_string()) {
+                    return Err(Error::new(format!("duplicate port fill {key}")));
+                }
+                match ports.iter().find(|(name, _)| name == key) {
+                    None => return Err(Error::new(format!("unknown port {key}"))),
+                    Some((_, expected)) if expected != &child.component => {
+                        return Err(Error::new(format!(
+                            "port {key} expects {expected} but was filled with {}",
+                            child.component
+                        )));
+                    }
+                    Some(_) => {}
+                }
+            }
+            check_construct_children(program, &child.component, &child.children)?;
+        }
+        for (name, _) in &ports {
+            if !filled.contains(name) {
+                return Err(Error::new(format!("missing port fill {name}")));
+            }
+        }
+    } else {
+        for child in children {
+            check_construct_children(program, &child.component, &child.children)?;
+        }
+    }
+    Ok(())
+}
+
 fn check_instance(program: &Program, node: &Instance) -> Result<(), Error> {
     let ports: Vec<(String, String)> = {
         let kind = program
@@ -2067,6 +2250,7 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
             ),
             ("component", doc::string(&child.component)),
             ("scene", doc::boolean(child.scene)),
+            ("heldKey", child.held_key.clone()),
         ])
     }));
     Ok(doc::object([
@@ -2195,6 +2379,7 @@ fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
                     .unwrap_or_default(),
                 scene: doc::as_bool(&doc::get(&child, "scene").unwrap_or_else(doc::null))
                     .unwrap_or(true),
+                held_key: doc::get(&child, "heldKey").unwrap_or_else(doc::null),
             });
         }
     }

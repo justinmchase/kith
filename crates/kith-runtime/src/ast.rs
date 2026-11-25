@@ -136,6 +136,14 @@ pub enum Statement {
         #[serde(default)]
         after: Option<Json>,
     },
+    #[serde(rename = "construct")]
+    Construct {
+        component: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<Json>,
+        #[serde(default)]
+        children: Vec<Instance>,
+    },
     #[serde(rename = "release")]
     Release { filter: Json },
     #[serde(rename = "send")]

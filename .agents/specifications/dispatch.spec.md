@@ -86,6 +86,10 @@ capitals.
   MUST happen before any injected message.
 - A send that routes to an instance appends the message to that instance's
   mailbox and marks the actor ready.
+- A child constructed during a turn is not run on that turn. After the turn
+  commits, init is the first message in the new mailbox. Sends from the
+  spawning turn append after that init. A same-turn release drops the child
+  before init.
 - A turn dequeues one message, matches it in the current state, and if a
   transition matches, runs that transition to completion of its synchronous
   work (expressions, field changes, state change, recording sends and spawns).

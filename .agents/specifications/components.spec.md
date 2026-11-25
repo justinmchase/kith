@@ -337,7 +337,10 @@ A handler body is a synchronous prefix followed by at most one terminal.
   NOT pull a message back out of a mailbox that already has it.
 - A release records that the parent no longer holds each dynamic child its
   pattern matches. The pattern matches the record the parent holds: `port`
-  is the port name, or null when the child is unnamed, and `key` is null.
+  is the port name, or null when the child is unnamed, and `key` is the
+  value the parent holds for that child. A scene-constructed child holds
+  null. A dynamic child holds the key its constructing transition computed,
+  or null when that transition omitted one.
   It MUST NOT see the child's fields, machine state, or mailbox, and it
   MUST NOT compare the child to a named component. A release MUST NOT drop
   a scene-constructed child. A release that would do so MUST fail with a
@@ -348,7 +351,33 @@ A handler body is a synchronous prefix followed by at most one terminal.
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
   dropped with no error, including at the root.
-- The first slice MUST NOT spawn extra children of a constructed kind.
+- The first slice MUST NOT run a child it constructs. Construction is
+  recorded on the turn and the new instance runs afterward.
+
+### Dynamic children
+
+A transition MAY construct an unnamed child. The source spelling is open
+([open questions](#open-questions)). The tree is
+`{ kind: "construct", component: string, key: Expression | null, children: [Instance] }`.
+
+- The statement records the construction. The parent's turn MUST NOT run the
+  new instance.
+- The new instance is a component actor with one parent, its own mailbox,
+  and the start state. Init is offered once, and it is the first message in
+  that mailbox. Sends from the spawning turn append after that init. `on
+  init` is the only match for init.
+- The new child is unnamed. It does not fill or replace a parent port.
+  `send to` MUST NOT address it. `send down V` still offers `V` to it with
+  every other direct child.
+- A key, when the transition supplies one, is a value that transition
+  already computed. Omitting it means null. A release MAY match that key.
+  The program MUST NOT read a runtime-minted identity.
+- If the new component declares ports, the construction MUST fill each one
+  with an instance of the declared component. A missing port, a duplicate
+  port name, or a different component MUST fail. Nested children are created
+  with the new instance.
+- A release in the same turn, before the new instance runs, MUST drop it,
+  init included, so it does not run. Expressions MUST NOT construct.
 
 ## Syntax tree
 
@@ -372,6 +401,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendTo", port: string, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendDown", component: string | null, message: Expression | Sequence, after: Expression | null }`
+- `{ kind: "construct", component: string, key: Expression | null, children: [Instance] }`
 - `{ kind: "release", filter: Pattern }`
 - `{ kind: "send", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "complete", message: Expression | Sequence }`
@@ -449,3 +479,5 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.
 - **Release spelling.** The source spelling of a release, including how it
   designates the child, stays open. The tree is `{ kind: "release", filter }`.
+- **Construct spelling.** The source spelling of constructing a child stays
+  open. The tree is `{ kind: "construct", component, key, children }`.
