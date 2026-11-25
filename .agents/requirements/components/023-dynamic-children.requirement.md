@@ -27,8 +27,8 @@ Expected behavior:
   the first message in that mailbox. Sends from the spawning turn MUST
   append after that init. `on init` is the only match for init.
 - The new child MUST be unnamed. `send to` MUST NOT address it. `send down
-  V` offers `V` to it together with every other direct child. Each of those
-  children matches `V` with `on down`, or that send fails.
+  V` offers `V` to it together with every other direct child. A child with
+  no matching `on down` ignores that offer. That is not a failed send.
 - A key, when the transition supplies one, MUST be a value that transition
   already computed. Omitting it MUST mean null. A release MAY match that
   key. The program MUST NOT read a runtime-minted identity.

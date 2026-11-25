@@ -368,7 +368,8 @@ A transition MAY construct an unnamed child. The source spelling is open
   init` is the only match for init.
 - The new child is unnamed. It does not fill or replace a parent port.
   `send to` MUST NOT address it. `send down V` still offers `V` to it with
-  every other direct child.
+  every other direct child. A child with no matching `on down` ignores that
+  offer.
 - A key, when the transition supplies one, is a value that transition
   already computed. Omitting it means null. A release MAY match that key.
   The program MUST NOT read a runtime-minted identity.
