@@ -225,6 +225,7 @@ fn host_component(name: &str) -> Component {
             name: "Start".into(),
             start: true,
             named: false,
+            post: None,
             handlers: Vec::new(),
         }],
     }
