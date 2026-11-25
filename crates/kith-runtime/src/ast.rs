@@ -130,11 +130,14 @@ pub enum Statement {
     },
     #[serde(rename = "sendDown")]
     SendDown {
+        /// Always null. `send down` does not name a component.
         component: Option<String>,
         message: Json,
         #[serde(default)]
         after: Option<Json>,
     },
+    #[serde(rename = "release")]
+    Release { filter: Json },
     #[serde(rename = "send")]
     Send {
         message: Json,

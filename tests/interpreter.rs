@@ -336,29 +336,7 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
                 kind: "handler".into(),
                 route: vec![],
                 item: None,
-                pattern: kind_eq("Kind"),
-                body: vec![Statement::SendDown {
-                    component: Some("Child".into()),
-                    message: string_msg(),
-                    after: None,
-                }],
-            },
-            Handler {
-                kind: "handler".into(),
-                route: vec![],
-                item: None,
-                pattern: kind_eq("OtherKind"),
-                body: vec![Statement::SendDown {
-                    component: Some("Other".into()),
-                    message: string_msg(),
-                    after: None,
-                }],
-            },
-            Handler {
-                kind: "handler".into(),
-                route: vec![],
-                item: None,
-                pattern: kind_eq("All"),
+                pattern: kind_eq("Down"),
                 body: vec![Statement::SendDown {
                     component: None,
                     message: string_msg(),
@@ -388,32 +366,249 @@ fn send_to_and_send_down_kind_select_named_and_unnamed() {
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
     assert_eq!(world.field(sibling, "seen"), Some(&json!(0.0)));
 
-    let mut world = World::start(program.clone()).expect("start");
-    world.inject(json!({"kind": "Kind"})).unwrap();
-    world.run_until_idle().unwrap();
-    let parent_id = world.root_id();
-    let child = world.child(parent_id, "child").unwrap();
-    let sibling = world.children_of_kind(parent_id, "Other")[0];
-    assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
-    assert_eq!(world.field(sibling, "seen"), Some(&json!(0.0)));
-
-    let mut world = World::start(program.clone()).expect("start");
-    world.inject(json!({"kind": "OtherKind"})).unwrap();
-    world.run_until_idle().unwrap();
-    let parent_id = world.root_id();
-    let child = world.child(parent_id, "child").unwrap();
-    let sibling = world.children_of_kind(parent_id, "Other")[0];
-    assert_eq!(world.field(child, "seen"), Some(&json!(0.0)));
-    assert_eq!(world.field(sibling, "seen"), Some(&json!(1.0)));
-
     let mut world = World::start(program).expect("start");
-    world.inject(json!({"kind": "All"})).unwrap();
+    world.inject(json!({"kind": "Down"})).unwrap();
     world.run_until_idle().unwrap();
     let parent_id = world.root_id();
     let child = world.child(parent_id, "child").unwrap();
     let sibling = world.children_of_kind(parent_id, "Other")[0];
     assert_eq!(world.field(child, "seen"), Some(&json!(1.0)));
     assert_eq!(world.field(sibling, "seen"), Some(&json!(1.0)));
+}
+
+#[test]
+// req:components-022
+fn unreachable_children_are_destroyed_between_turns() {
+    let child = idle(
+        "Child",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec![],
+            item: None,
+            pattern: kind_eq("Ping"),
+            body: vec![Statement::SendUp {
+                message: object_kind("Heard"),
+                after: None,
+            }],
+        }],
+    );
+    let item = idle(
+        "Item",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec![],
+            item: None,
+            pattern: kind_eq("Tick"),
+            body: vec![Statement::SendUp {
+                message: object_kind("Pong"),
+                after: None,
+            }],
+        }],
+    );
+    let parent = idle(
+        "Parent",
+        vec![port("Child", "child")],
+        vec![
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Ping"),
+                body: vec![Statement::SendTo {
+                    port: "child".into(),
+                    message: object_kind("Ping"),
+                    after: None,
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec!["up".into()],
+                item: None,
+                pattern: kind_eq("Heard"),
+                body: vec![Statement::Assign {
+                    field: "heard".into(),
+                    expression: json!({"kind": "number", "value": 1}),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec!["up".into()],
+                item: None,
+                pattern: kind_eq("Pong"),
+                body: vec![Statement::Assign {
+                    field: "reply".into(),
+                    expression: json!({"kind": "number", "value": 1}),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Later"),
+                body: vec![Statement::SendTo {
+                    port: "item".into(),
+                    message: object_kind("Tick"),
+                    after: Some(json!({"kind": "number", "value": 1})),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Drop"),
+                body: vec![
+                    Statement::SendTo {
+                        port: "item".into(),
+                        message: object_kind("Tick"),
+                        after: None,
+                    },
+                    Statement::Release {
+                        filter: over_equal("port", json!("item")),
+                    },
+                ],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Scene"),
+                body: vec![Statement::Release {
+                    filter: over_equal("port", json!("child")),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Kind"),
+                body: vec![Statement::Release {
+                    filter: over_equal("kind", json!("Item")),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Field"),
+                body: vec![Statement::Release {
+                    filter: over_equal("seen", json!(0)),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Missing"),
+                body: vec![Statement::Release {
+                    filter: over_equal("port", json!("missing")),
+                }],
+            },
+            Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("Done"),
+                body: vec![Statement::Complete {
+                    message: json!({"kind": "number", "value": 1}),
+                }],
+            },
+        ],
+    );
+    let parent = Component {
+        kind: parent.kind,
+        name: parent.name,
+        fields: vec![
+            Field {
+                kind: "field".into(),
+                name: "heard".into(),
+                pattern: None,
+                init: Some(json!({"kind": "number", "value": 0})),
+            },
+            Field {
+                kind: "field".into(),
+                name: "reply".into(),
+                pattern: None,
+                init: Some(json!({"kind": "number", "value": 0})),
+            },
+        ],
+        ports: parent.ports,
+        states: parent.states,
+    };
+    let program = scene_program(
+        vec![parent, child, item, idle("Grand", vec![], vec![])],
+        instance(
+            "Parent",
+            None,
+            vec![instance("Child", Some("child"), vec![])],
+        ),
+    );
+    let mut world = World::start(program).expect("start");
+    let root = world.root_id();
+    let item_id = world
+        .hold_dynamic_child(
+            root,
+            &instance(
+                "Item",
+                Some("item"),
+                vec![instance("Grand", Some("inner"), vec![])],
+            ),
+        )
+        .expect("hold");
+    let grand_id = world.children_of_kind(item_id, "Grand")[0];
+
+    world.inject(json!({"kind": "Ping"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(world.field(root, "heard"), Some(&json!(1.0)));
+
+    for kind in ["Missing", "Kind", "Field"] {
+        world.inject(json!({"kind": kind})).unwrap();
+        let err = world.run_until_idle().expect_err(kind);
+        assert!(
+            err.message.contains("no child matched"),
+            "{kind}: {}",
+            err.message
+        );
+        assert!(world.kind(item_id).is_some());
+        assert!(world.child(root, "child").is_some());
+    }
+
+    world.inject(json!({"kind": "Scene"})).unwrap();
+    let err = world.run_until_idle().expect_err("scene child stays");
+    assert!(err.message.contains("scene-constructed"), "{}", err.message);
+    assert!(world.kind(item_id).is_some());
+    assert!(world.kind(grand_id).is_some());
+    assert!(world.child(root, "child").is_some());
+
+    world.inject(json!({"kind": "Later"})).unwrap();
+    world.run_until_idle().unwrap();
+    world.inject(json!({"kind": "Drop"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert!(world.kind(item_id).is_none());
+    assert!(world.kind(grand_id).is_none());
+    assert!(world.child(root, "child").is_some());
+    assert_eq!(world.field(root, "heard"), Some(&json!(1.0)));
+    assert_eq!(world.field(root, "reply"), Some(&json!(0.0)));
+    assert!(!world.fire_next_timer().unwrap());
+    assert_eq!(world.field(root, "reply"), Some(&json!(0.0)));
+
+    world.inject(json!({"kind": "Done"})).unwrap();
+    world.run_until_idle().unwrap();
+    assert!(world.child(root, "child").is_some());
+    assert_eq!(world.output(root), Some(&json!(1.0)));
+}
+
+fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
+    json!({
+        "kind": "over",
+        "keys": {
+            key: {
+                "kind": "equal",
+                "value": {"kind": "value.literal", "value": value}
+            }
+        }
+    })
 }
 
 #[test]
@@ -465,8 +660,8 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
                 item: None,
                 pattern: kind_eq("None"),
                 body: vec![Statement::SendDown {
-                    component: Some("Ghost".into()),
-                    message: string_msg(),
+                    component: None,
+                    message: object_kind("Nope"),
                     after: None,
                 }],
             },
@@ -484,7 +679,7 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
         ],
     );
     let program = scene_program(
-        vec![parent, child],
+        vec![parent, child.clone()],
         instance(
             "Parent",
             None,
@@ -504,8 +699,64 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
 
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "None"})).unwrap();
-    let err = world.run_until_idle().expect_err("zero matches fail");
+    let err = world.run_until_idle().expect_err("unmatched down fails");
+    assert!(err.message.contains("unmatched down"), "{}", err.message);
+    assert!(err.message.contains("Child"));
+
+    let empty = scene_program(
+        vec![idle(
+            "Parent",
+            vec![],
+            vec![Handler {
+                kind: "handler".into(),
+                route: vec![],
+                item: None,
+                pattern: kind_eq("None"),
+                body: vec![Statement::SendDown {
+                    component: None,
+                    message: string_msg(),
+                    after: None,
+                }],
+            }],
+        )],
+        instance("Parent", None, vec![]),
+    );
+    let mut world = World::start(empty).expect("start");
+    world.inject(json!({"kind": "None"})).unwrap();
+    let err = world.run_until_idle().expect_err("zero children fail");
     assert!(err.message.contains("no child matched send down"));
+
+    let named = scene_program(
+        vec![
+            idle(
+                "Parent",
+                vec![port("Child", "child")],
+                vec![Handler {
+                    kind: "handler".into(),
+                    route: vec![],
+                    item: None,
+                    pattern: kind_eq("Down"),
+                    body: vec![Statement::SendDown {
+                        component: Some("Child".into()),
+                        message: string_msg(),
+                        after: None,
+                    }],
+                }],
+            ),
+            child.clone(),
+        ],
+        instance(
+            "Parent",
+            None,
+            vec![instance("Child", Some("child"), vec![])],
+        ),
+    );
+    let err = World::check(&named).expect_err("selector is rejected");
+    assert!(
+        err.message.contains("must not name a component"),
+        "{}",
+        err.message
+    );
 
     let mut world = World::start(program).expect("start");
     world.inject(json!({"kind": "Missing"})).unwrap();

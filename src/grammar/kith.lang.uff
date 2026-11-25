@@ -79,22 +79,24 @@ rule SendTo =
   )
 ;
 
+# `send down V` offers V to every direct child. A name before another value
+# is the rejected selector form `send down P V`; check fails that tree.
 rule SendDown =
-  | (
-    "send" "after" d:Expression "down" "any" e:MessageSeq ";"
-    -> { kind: "sendDown", after: d, component: null, message: e }
-  )
   | (
     "send" "after" d:Expression "down" n:Identifier e:MessageSeq ";"
     -> { kind: "sendDown", after: d, component: n, message: e }
   )
   | (
-    "send" "down" "any" e:MessageSeq ";"
-    -> { kind: "sendDown", component: null, message: e }
+    "send" "after" d:Expression "down" e:MessageSeq ";"
+    -> { kind: "sendDown", after: d, component: null, message: e }
   )
   | (
     "send" "down" n:Identifier e:MessageSeq ";"
     -> { kind: "sendDown", component: n, message: e }
+  )
+  | (
+    "send" "down" e:MessageSeq ";"
+    -> { kind: "sendDown", component: null, message: e }
   )
 ;
 

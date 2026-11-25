@@ -20,7 +20,8 @@ capitals.
 - **Port fill**: `name = Kind()` under a parent, assigning that instance to the
   parent's declared port `name`.
 - **Unnamed child**: `Kind()` under a parent with no port name. It belongs to
-  the parent's child collection and is reached only by kind.
+  the parent's child collection. `send to` cannot address it. `send down`
+  offers its message to that child along with every other direct child.
 
 ## Axioms
 

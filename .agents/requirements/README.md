@@ -26,6 +26,7 @@ verify it cite it with `req:{id}`.
 - [Message sequences](./components/017-message-sequence.requirement.md)
 - [Field pattern match](./components/018-field-match.requirement.md)
 - [Handler expression returns](./components/019-expr-stmt.requirement.md)
+- [Unreachable instances are destroyed](./components/022-unreachable-destroyed.requirement.md)
 
 ## Scenes
 

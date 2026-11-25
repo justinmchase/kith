@@ -11,8 +11,8 @@ spec_ref: .agents/specifications/components.spec.md#matching; .agents/specificat
 Preconditions:
 
 - A child sends up a message the parent does not handle, a parent sends to
-  or down a message a selected child does not handle, `send to` names a
-  missing port, or `send down Kind` matches no child.
+  or down a message a child does not handle, `send to` names a missing
+  port, or `send down V` has no direct child.
 
 Expected behavior:
 
@@ -21,7 +21,8 @@ Expected behavior:
 - An unmatched send to or send down MUST fail the send with a diagnostic
   naming the child and MUST NOT be forwarded to the child's children.
 - `send to` a port the instance does not have MUST fail with a diagnostic.
-- `send down Kind V` with zero matching children MUST fail with a diagnostic.
+- `send down V` with zero direct children MUST fail with a diagnostic.
+- A `send down` that names a component MUST fail check.
 
 Postconditions:
 

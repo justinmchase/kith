@@ -36,7 +36,7 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down` a kind.
+  reached only through their parent: `send to` a port, or `send down`.
 
 ### Behavior
 
@@ -48,12 +48,14 @@ capitals.
 - A transition MAY send zero or more messages, change fields, evaluate
   expression statements, complete, and change the machine's state. It MUST
   NOT wait by blocking the dispatcher. The
-  first executable slice MUST NOT spawn or destroy children; scene-constructed
-  children exist for the parent's lifetime. A component MAY `complete V`.
+  first executable slice MUST NOT spawn or destroy children during the turn.
+  Scene-constructed children exist for the parent's lifetime. A transition MAY
+  record a release of a dynamic child. Destruction of an unreachable instance
+  runs between turns. A component MAY `complete V`.
 
 ### Routing
 
-- A send MUST name a direction: `send to` a port, `send down` a kind,
+- A send MUST name a direction: `send to` a port, `send down`,
   `send up`, or `send self`. Routing is explicit only: there is no capture
   phase, and an unhandled message MUST NOT travel up unless the send was
   `send up`. A send with no route is invalid; self is not implied.
@@ -62,12 +64,13 @@ capitals.
   the root MUST be dropped with no error.
 - `send to name V` offers `V` to the child that fills port `name`. An unknown
   port MUST fail that send with a diagnostic.
-- `send down Kind V` offers `V` to each direct child of kind `Kind`, including
-  a named port whose kind is `Kind`. It MUST NOT skip a generation. Zero
-  matching children MUST fail that send with a diagnostic.
-- `send down any V` offers `V` to every direct child. Zero children MUST fail.
-- An unmatched handler at a selected child MUST fail that send with a
-  diagnostic; it MUST NOT be forwarded to the child's children.
+- `send down V` offers `V` to every direct child, a port child and an unnamed
+  child together. `send down P V` is not a form. The parent does not filter
+  children and does not compare component names. It MUST NOT skip a
+  generation. Zero children MUST fail that send with a diagnostic.
+- Each child matches `V` with `on down` in its current state, or that send
+  fails with a diagnostic. The failure MUST NOT be forwarded to that child's
+  children.
 - Several matching children MUST each receive one send, independently.
 - A component MUST NOT send a message by calling another instance as a
   function.
@@ -166,8 +169,8 @@ export scene Main {
 ### Sending
 
 - `send to name V…` sends the message to the named port.
-- `send down Kind V…` sends the message to each direct child of that kind.
-- `send down any V…` sends the message to every direct child.
+- `send down V…` sends the message to every direct child. A component name
+  before the message is not a selector.
 - `send up V…` sends the message toward the parent.
 - `send self V…` sends the message to this instance. It is taken on a later
   turn and matches a handler whose route list includes `self` (`on self`,
@@ -309,8 +312,29 @@ A handler body is a synchronous prefix followed by at most one terminal.
   running program.
 - Scene-constructed children MUST be created when the parent instance is
   created, one instance per construction, in declaration order. They live as
-  long as the parent. Completing a child does not destroy it; it only marks
-  it done so it will not run another transition.
+  long as the parent. Completing a child does not destroy it and does not
+  release it; it only marks it done so it will not run another transition.
+- A dynamic child lives until a transition of that parent releases it, or
+  the parent is destroyed. The parent holds it in the same child collection
+  as a scene-constructed child.
+- An instance is reachable when it is the root, or its parent is reachable
+  and still holds it. An unreachable instance MUST be destroyed, and its
+  descendants with it. Destruction runs between turns. It MUST cancel that
+  instance's in-flight transition actors, drop messages that instance has
+  not taken, and drop later routes to it. Cancelled work MUST NOT enqueue a
+  successful outcome. It MUST run no transition, send nothing, and offer no
+  init. It is not a handler the instance matches.
+- A `send up` already delivered into a mailbox MUST stay. Destruction MUST
+  NOT pull a message back out of a mailbox that already has it.
+- A release records that the parent no longer holds each dynamic child its
+  pattern matches. The pattern matches the record the parent holds: `port`
+  is the port name, or null when the child is unnamed, and `key` is null.
+  It MUST NOT see the child's fields, machine state, or mailbox, and it
+  MUST NOT compare the child to a named component. A release MUST NOT drop
+  a scene-constructed child. A release that would do so MUST fail with a
+  diagnostic and MUST NOT drop a child. Zero matches MUST fail that
+  release. The source spelling is open
+  ([open questions](#open-questions)). Collection is unreachability only.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
@@ -339,6 +363,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendTo", port: string, message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "sendDown", component: string | null, message: Expression | Sequence, after: Expression | null }`
+- `{ kind: "release", filter: Pattern }`
 - `{ kind: "send", message: Expression | Sequence, after: Expression | null }`
 - `{ kind: "complete", message: Expression | Sequence }`
 - `{ kind: "expr", expression: Expression }`
@@ -351,7 +376,10 @@ MUST project `name: "Start"` and `named: false`. `start Name` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
-MUST be `null` when the send is `send down any`. `handler.item` MAY be omitted
+MUST be `null`. `send down` does not name a component and does not carry a
+filter. A release statement's tree is `{ kind: "release", filter: Pattern }`.
+The pattern matches `port` and `key` as
+[identity and lifetime](#identity-and-lifetime) defines. `handler.item` MAY be omitted
 when the transition matches one message. `handler.route` is a list. `on down`
 MUST project `["down"]`. `on up or self` MUST project `["up", "self"]`.
 Unqualified `on` and `else` MUST project `["up", "down", "self"]`. `on init`
@@ -385,9 +413,17 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
-  a kind. `to` names the port; `down` names the kind; `up` is the ancestor
+  a kind. `to` names the port; `down` offers the message to every direct
+  child, and each child matches it with `on down`; `up` is the ancestor
   chain; `self` is this instance on a later turn. A missing route would look
   like a parent sending down.
+- **Unreachability, not a destructor.** A handler on destroy would send and
+  change state while the instance is already going away. Dropping the
+  instance between turns cancels work and leaves mail that was already
+  taken where it was delivered.
+- **A release sees what the parent holds.** Matching a child's fields,
+  machine state, or mailbox would read another instance. The parent holds
+  the port name and the key.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -401,3 +437,5 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   durable identity, a single mailbox as a consistency boundary) without
   introducing is-a. Deferred until a language such as Coleslaw maps onto Kith.
 - **`send up P V`.** Filtering ancestors with a pattern is not in this slice.
+- **Release spelling.** The source spelling of a release, including how it
+  designates the child, stays open. The tree is `{ kind: "release", filter }`.

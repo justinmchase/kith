@@ -16,10 +16,12 @@ enum Route {
     SelfSend,
 }
 
+#[derive(Clone)]
 struct ChildRef {
     id: ActorId,
     key: Option<String>,
     component: String,
+    scene: bool,
 }
 
 #[derive(Clone)]
@@ -85,6 +87,7 @@ pub struct World {
     exit_code: Option<u8>,
     suppress_result: bool,
     hub: IoHub,
+    pending_release: Vec<ActorId>,
 }
 
 struct IoHub {
@@ -165,6 +168,7 @@ impl World {
             exit_code: None,
             suppress_result: false,
             hub: IoHub::new(),
+            pending_release: Vec::new(),
         };
         world.spawn_instance(&scene.root, None)?;
         world.enqueue_inits()?;
@@ -382,6 +386,8 @@ impl World {
             };
             let route = self.take_route(turn.actor);
             let sends = self.handle(turn.actor, &turn.message.value, route)?;
+            self.apply_releases();
+            self.collect_unreachable();
             for (to, message, route) in sends {
                 self.deliver(to, message, route)?;
             }
@@ -652,6 +658,7 @@ impl World {
             )
             .unwrap_or(false),
             hub: IoHub::new(),
+            pending_release: Vec::new(),
         })
     }
 
@@ -668,9 +675,43 @@ impl World {
                 id: child_id,
                 key: child.key.clone(),
                 component: child.component.clone(),
+                scene: true,
             });
         }
         self.instances.get_mut(&id).expect("parent").children = children;
+        Ok(id)
+    }
+
+    /// The parent holds `node` as a dynamic child. Nested children are
+    /// scene-constructed for that child's life. This is not a transition.
+    #[doc(hidden)]
+    pub fn hold_dynamic_child(
+        &mut self,
+        parent: ActorId,
+        node: &Instance,
+    ) -> Result<ActorId, Error> {
+        let id = self.spawn_kind(&node.component, Some(parent))?;
+        let mut children = Vec::new();
+        for child in &node.children {
+            let child_id = self.spawn_instance(child, Some(id))?;
+            children.push(ChildRef {
+                id: child_id,
+                key: child.key.clone(),
+                component: child.component.clone(),
+                scene: true,
+            });
+        }
+        self.instances.get_mut(&id).expect("dynamic").children = children;
+        self.instances
+            .get_mut(&parent)
+            .ok_or_else(|| Error::new("unknown parent"))?
+            .children
+            .push(ChildRef {
+                id,
+                key: node.key.clone(),
+                component: node.component.clone(),
+                scene: false,
+            });
         Ok(id)
     }
 
@@ -786,6 +827,7 @@ impl World {
         message: &Doc,
         route: Route,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        self.pending_release.clear();
         if self.instances[&id].driver.is_some() {
             if route == Route::Init {
                 return Ok(vec![]);
@@ -885,7 +927,10 @@ impl World {
                     message,
                     after,
                 } => {
-                    let selected = self.select_children(id, component.as_deref());
+                    if component.is_some() {
+                        return Err(Error::new("send down must not name a component"));
+                    }
+                    let selected = self.select_children(id);
                     if selected.is_empty() {
                         return Err(Error::new("no child matched send down"));
                     }
@@ -899,6 +944,9 @@ impl World {
                             &mut sends,
                         )?;
                     }
+                }
+                Statement::Release { filter } => {
+                    self.record_release(id, filter)?;
                 }
                 Statement::Send { message, after } => {
                     self.enqueue_send(
@@ -943,18 +991,91 @@ impl World {
         Ok(sends)
     }
 
-    fn select_children(&self, id: ActorId, kind: Option<&str>) -> Vec<ActorId> {
+    fn select_children(&self, id: ActorId) -> Vec<ActorId> {
         self.instances
             .get(&id)
-            .map(|instance| {
-                instance
-                    .children
-                    .iter()
-                    .filter(|child| kind.is_none_or(|kind| child.component == kind))
-                    .map(|child| child.id)
-                    .collect()
-            })
+            .map(|instance| instance.children.iter().map(|child| child.id).collect())
             .unwrap_or_default()
+    }
+
+    fn holds_match(&self, port: Option<&str>, filter: &Json) -> Result<bool, Error> {
+        let record = doc::object([
+            ("port", port.map(doc::string).unwrap_or_else(doc::null)),
+            ("key", doc::null()),
+        ]);
+        Ok(match_program(filter, &record, &self.program.rules)?.is_some())
+    }
+
+    fn record_release(&mut self, id: ActorId, filter: &Json) -> Result<(), Error> {
+        let children = self.instances[&id].children.clone();
+        let mut hits = Vec::new();
+        for child in &children {
+            if !self.holds_match(child.key.as_deref(), filter)? {
+                continue;
+            }
+            if child.scene {
+                return Err(Error::new("release cannot drop a scene-constructed child"));
+            }
+            hits.push(child.id);
+        }
+        if hits.is_empty() {
+            return Err(Error::new("no child matched release"));
+        }
+        self.pending_release.extend(hits);
+        Ok(())
+    }
+
+    fn apply_releases(&mut self) {
+        let released: HashSet<ActorId> = self.pending_release.drain(..).collect();
+        if released.is_empty() {
+            return;
+        }
+        for instance in self.instances.values_mut() {
+            instance
+                .children
+                .retain(|child| !released.contains(&child.id));
+        }
+    }
+
+    fn collect_unreachable(&mut self) {
+        let mut reachable = HashSet::new();
+        let mut stack: Vec<ActorId> = self
+            .instances
+            .iter()
+            .filter(|(_, instance)| instance.parent.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        while let Some(id) = stack.pop() {
+            if !reachable.insert(id) {
+                continue;
+            }
+            if let Some(instance) = self.instances.get(&id) {
+                for child in &instance.children {
+                    stack.push(child.id);
+                }
+            }
+        }
+        let dead: Vec<ActorId> = self
+            .instances
+            .keys()
+            .copied()
+            .filter(|id| !reachable.contains(id))
+            .collect();
+        if dead.is_empty() {
+            return;
+        }
+        let dead_set: HashSet<ActorId> = dead.into_iter().collect();
+        self.timers.retain(|timer| !dead_set.contains(&timer.to));
+        self.joins.retain(|_, join| !dead_set.contains(&join.to));
+        let join_ids: HashSet<u64> = self.joins.keys().copied().collect();
+        self.timers
+            .retain(|timer| timer.join.is_none_or(|id| join_ids.contains(&id)));
+        self.routes
+            .retain(|(actor, _), _| !dead_set.contains(actor));
+        for id in &dead_set {
+            self.dispatcher.drop_actor(*id);
+            self.instances.remove(id);
+        }
     }
 
     fn enqueue_send(
@@ -1476,6 +1597,9 @@ impl World {
     }
 
     fn deliver(&mut self, to: ActorId, value: Doc, route: Route) -> Result<(), Error> {
+        if !self.instances.contains_key(&to) {
+            return Ok(());
+        }
         self.route_seq += 1;
         self.routes.insert((to, self.route_seq), route);
         self.dispatcher.send(to, Message { value });
@@ -1712,14 +1836,29 @@ fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
                     }
                     Statement::Send { message, after }
                     | Statement::SendUp { message, after }
-                    | Statement::SendTo { message, after, .. }
-                    | Statement::SendDown { message, after, .. } => {
+                    | Statement::SendTo { message, after, .. } => {
                         let delayed = after.is_some();
                         for item in send_items(message) {
                             check_send_arg(item, delayed, &component.name)?;
                         }
                     }
-                    Statement::Goto { .. } => {}
+                    Statement::SendDown {
+                        component: selector,
+                        message,
+                        after,
+                    } => {
+                        if selector.is_some() {
+                            return Err(Error::new(format!(
+                                "send down must not name a component in {}",
+                                component.name
+                            )));
+                        }
+                        let delayed = after.is_some();
+                        for item in send_items(message) {
+                            check_send_arg(item, delayed, &component.name)?;
+                        }
+                    }
+                    Statement::Goto { .. } | Statement::Release { .. } => {}
                 }
             }
         }
@@ -1928,6 +2067,7 @@ fn instance_document(id: u64, instance: &InstanceState) -> Result<Doc, Error> {
                 child.key.clone().map(doc::string).unwrap_or_else(doc::null),
             ),
             ("component", doc::string(&child.component)),
+            ("scene", doc::boolean(child.scene)),
         ])
     }));
     Ok(doc::object([
@@ -2052,6 +2192,8 @@ fn restore_instance(entry: &Doc) -> Result<InstanceState, Error> {
                 key: doc::as_str(&doc::get(&child, "key").unwrap_or_else(doc::null)),
                 component: doc::as_str(&doc::get(&child, "component").unwrap_or_else(doc::null))
                     .unwrap_or_default(),
+                scene: doc::as_bool(&doc::get(&child, "scene").unwrap_or_else(doc::null))
+                    .unwrap_or(true),
             });
         }
     }
