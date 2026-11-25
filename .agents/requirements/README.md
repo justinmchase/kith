@@ -30,6 +30,7 @@ verify it cite it with `req:{id}`.
 - [Dynamic children](./components/023-dynamic-children.requirement.md)
 - [A post-condition must match before leaving the state](./components/024-post-conditions.requirement.md)
 - [An entry pattern is matched before the post-condition](./components/025-entry-patterns.requirement.md)
+- [A field may name the states it belongs to](./components/026-state-scoped-fields.requirement.md)
 
 ## Scenes
 

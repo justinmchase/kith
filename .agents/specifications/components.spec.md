@@ -17,6 +17,9 @@ capitals.
 - **Component declaration**: the source that names a component, its fields, its
   ports, and its state machine.
 - **Field**: named state a component instance holds, matched by a pattern.
+  A field declared without a state list is in scope in every state. A field
+  MAY name the states it belongs to
+  ([state-scoped fields](#state-scoped-fields)).
 - **Port**: a typed named slot for one child instance, filled by a scene.
 
 ## Axioms
@@ -130,7 +133,9 @@ export scene Main {
   `= expression` MAY be omitted; a missing init is **null**. `number?`
   matches null or a number and MUST NOT match a string: Uffda Maybe that
   skips a present non-null value is not a match for a stored field.
-  The value used is the value that matched.
+  The value used is the value that matched. That field is in scope in every
+  state. A field MAY instead name the states it belongs to
+  ([state-scoped fields](#state-scoped-fields)).
 - `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
   `Kind` is a component.
 - `start { ... }` is the start state with implicit name `Start`. That name
@@ -404,13 +409,17 @@ post-condition is the check before leaving the current state. It is not a
 check of the state being entered.
 
 On every turn, match the destination state's entry pattern against the
-fields after the handler's assignments, before the turn commits. A state
-that does not declare an entry pattern passes that check. On a turn that
-would leave the state, after that entry pattern matches, the post-condition
-of the state being left runs on those same fields, before `goto` commits.
-A state that does not declare a post-condition passes that check. Only then
-does the turn commit machine state and route the sends and constructions it
-recorded, and apply the releases it recorded.
+fields that would be in scope in that state
+([state-scoped fields](#state-scoped-fields)), after the handler's
+assignments and after this transition initializes fields that enter and
+drops fields that leave. A state that does not declare an entry pattern
+passes that check. On a turn that would leave the state, after that entry
+pattern matches, the post-condition of the state being left runs on the
+fields in scope in that state after the leaving handler's assignments and
+before `goto` commits. Those are not the destination's fields. A state that
+does not declare a post-condition passes that check. Only then does the turn
+commit machine state and route the sends and constructions it recorded, and
+apply the releases it recorded.
 
 A miss MUST fail the transition with a diagnostic. Machine state stays as it
 was at the start of the turn, including every field the handler assigned.
@@ -549,6 +558,56 @@ Open's `entry { n: 1 }` matches before commit, so the turn commits: Latch is
 stays `Shut`, `n` stays `0`, and `@Tick` is not routed. The later `@Stuck`
 handler does not run.
 
+### State-scoped fields
+
+A field declared on the component, with `states` omitted on the field node,
+stays in scope in every state. That is the field
+[declaration](#declaration) specifies, including init and `name -> E`.
+
+A field MAY instead name the states it belongs to. It is one field. Its
+value persists across `goto` among those states. A transition that lands
+outside the set drops it from machine state. The value that left is gone. It
+is not stored beside the machine. Entering the set again initializes it with
+the component-field rules: the init expression, or null when init is omitted,
+then the field pattern. A miss MUST fail that initialization the way a missed
+field write fails, and the transition MUST NOT commit.
+
+A handler in a state outside the set cannot read or write the field. Check
+MUST fail. A component-scoped field and a state-scoped field MUST NOT share
+a name. One name is one field, not a copy per state. Entry and post-condition
+patterns name only fields in scope in that state. Check MUST fail if they
+name a field that is not. `complete` does not leave the state, so scoped
+fields stay until a later `goto` leaves the set or the instance is destroyed.
+Entering and leaving initialize or drop fields as part of the transition's
+proposed machine state. They do not run another handler and do not send.
+Scoped fields are not step-local data and not entry or exit actions. At
+creation, fields in scope in the start state initialize with the
+component-field rules, and state-scoped fields outside that set are absent,
+before the creation check in [state conditions](#state-conditions).
+
+Proposed order inside one transition:
+
+1. The message match selects the handler. State conditions do not.
+2. Assigns update component-scoped fields and any state-scoped field that
+   stays in scope. Each assign MUST match that field's own pattern first.
+   An assign names a field in scope in the handler's state. Check MUST fail
+   otherwise. A write to a field that then leaves the set is dropped with
+   that field.
+3. State-scoped fields that are newly in scope initialize.
+4. Fields that leave the set are absent.
+5. The destination state's entry pattern is matched against the fields that
+   would be in scope in that state. On a turn that would leave, the
+   post-condition of the state being left is then matched against the fields
+   in scope in that state after the handler's assignments, before `goto`
+   commits. A post-condition on a state the turn only enters does not run.
+   `complete` does not leave, so it does not run `post`.
+6. The turn commits, routes sends and constructions, and applies releases
+   only if those checks pass. A miss fails as
+   [state conditions](#state-conditions) specifies.
+
+The source spelling stays open ([open questions](#open-questions)). The tree
+property is `states`. Omitted means every state.
+
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
@@ -561,7 +620,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
 - `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
-- `{ kind: "field", name: string, pattern: Pattern, init: Expression }`
+- `{ kind: "field", name: string, pattern: Pattern, init: Expression, states: [string] | null }`
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
@@ -583,7 +642,12 @@ Exactly one state in a component MUST have `start: true`. Unnamed `start { }`
 MUST project `name: "Start"` and `named: false`. `start Name` and
 `state Name` MUST project `named: true`. State `entry` and `post` MAY be omitted.
 Omitted means that state does not declare that pattern. They are tree
-properties, not a source spelling. Field `pattern` and
+properties, not a source spelling. Field `states` MAY be omitted. Omitted means
+the field is in scope in every state. A present list names the states it
+belongs to, including the implicit `Start` of an unnamed start. The list
+MUST name at least one state of this component. An unknown name or an empty
+list MUST fail check. `states` is a tree property, not a source spelling.
+Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
@@ -641,6 +705,9 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   commit. The post-condition checks the fields of the state the turn would
   leave, after that handler's assignments and before `goto` commits. The
   entry pattern is a condition on the state change, not a guard on `on`.
+- **One field, scoped by where it lives.** A second copy per state would
+  fork the value. Dropping it on the way out and initializing it on the way
+  back keeps one field. That is not an entry action and not a handler.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -666,3 +733,7 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   The form the tree names is `entry` on the state
   ([state conditions](#state-conditions)). It is not a silent edit to
   `field`, `on`, or `post`.
+- **Field scope spelling.** The source spelling of a state-scoped field
+  stays open. The form the tree names is `states` on the field
+  ([state-scoped fields](#state-scoped-fields)). Omitted means every state.
+  It is not a silent edit to `field` or to a state.

@@ -114,7 +114,8 @@ capitals.
 - **Transition**: the handling of one enabling message in one state: matching
   a pattern, computing with expressions, changing machine state, and sending
   messages or spawning work. A transition is the only behavior.
-- **Machine state**: the state the machine is in, plus the values of its fields.
+- **Machine state**: the state the machine is in, plus the values of the
+  fields in scope in that state.
 - **Goto**: a component statement (`goto Name`) that enters another declared
   state of this instance. It is a terminal: at most one per handler, last
   if present, exclusive with `complete`.

@@ -56,6 +56,9 @@ pub struct Field {
     pub pattern: Option<Json>,
     #[serde(default)]
     pub init: Option<Json>,
+    /// Omitted means the field is in scope in every state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub states: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

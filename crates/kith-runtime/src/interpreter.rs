@@ -153,6 +153,8 @@ impl World {
             check_routes(component)?;
             check_effects(component)?;
             check_constructs(program, component)?;
+            check_fields(component)?;
+            check_handler_scope(component)?;
             check_state_conditions(component)?;
         }
         check_instance(program, &scene.root)?;
@@ -848,6 +850,9 @@ impl World {
             .clone();
         let mut fields = HashMap::new();
         for field in &component.fields {
+            if !field_in_state(field, &start) {
+                continue;
+            }
             let value = if let Some(init) = &field.init {
                 self.eval(init, &HashMap::new())?
             } else {
@@ -914,6 +919,16 @@ impl World {
             .ok_or_else(|| Error::new("unknown kind"))?
             .fields
             .clone();
+        let state = self.instances[&id].state.clone();
+        let field = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| Error::new(format!("unknown field {name}")))?;
+        if !field_in_state(field, &state) {
+            return Err(Error::new(format!(
+                "field {name} is not in scope in {state}"
+            )));
+        }
         self.match_declared_field(&fields, name, &value)?;
         let projected = project(&value)?;
         let instance = self.instances.get_mut(&id).expect("actor");
@@ -1074,6 +1089,34 @@ impl World {
         Ok(())
     }
 
+    fn propose_scope(
+        &mut self,
+        component: &Component,
+        from: &str,
+        to: &str,
+        current: &HashMap<String, Doc>,
+    ) -> Result<HashMap<String, Doc>, Error> {
+        let mut proposed = HashMap::new();
+        for field in &component.fields {
+            if !field_in_state(field, to) {
+                continue;
+            }
+            if field_in_state(field, from) {
+                let value = current.get(&field.name).cloned().unwrap_or_else(doc::null);
+                proposed.insert(field.name.clone(), value);
+            } else {
+                let value = if let Some(init) = &field.init {
+                    self.eval(init, &HashMap::new())?
+                } else {
+                    doc::null()
+                };
+                self.match_declared_field(&component.fields, &field.name, &value)?;
+                proposed.insert(field.name.clone(), value);
+            }
+        }
+        Ok(proposed)
+    }
+
     fn run_statements(
         &mut self,
         id: ActorId,
@@ -1089,7 +1132,7 @@ impl World {
                 return Err(err);
             }
         };
-        let (kind_name, state_name, fields) = {
+        let (kind_name, state_name, current) = {
             let instance = &self.instances[&id];
             (
                 instance.kind.clone(),
@@ -1102,16 +1145,28 @@ impl World {
             .component(&kind_name)
             .ok_or_else(|| Error::new("unknown kind"))?
             .clone();
-        if let Err(err) = self.match_entry(&component, &state_name, &fields) {
+        let leaving = fields_in_scope(&component, &from, &current);
+        let proposed = match self.propose_scope(&component, &from, &state_name, &current) {
+            Ok(fields) => fields,
+            Err(err) => {
+                self.restore_machine(id, snap);
+                return Err(err);
+            }
+        };
+        if let Err(err) = self.match_entry(&component, &state_name, &proposed) {
             self.restore_machine(id, snap);
             return Err(err);
         }
         if state_name != from {
-            if let Err(err) = self.match_post(&component, &from, &fields) {
+            if let Err(err) = self.match_post(&component, &from, &leaving) {
                 self.restore_machine(id, snap);
                 return Err(err);
             }
         }
+        let field_json = project_map(&proposed)?;
+        let instance = self.instances.get_mut(&id).expect("actor");
+        instance.fields = proposed;
+        instance.field_json = field_json;
         Ok(sends)
     }
 
@@ -2267,13 +2322,152 @@ fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Erro
     Ok(())
 }
 
-fn check_state_conditions(component: &Component) -> Result<(), Error> {
-    let names: HashSet<&str> = component
+fn fields_in_scope(
+    component: &Component,
+    state: &str,
+    current: &HashMap<String, Doc>,
+) -> HashMap<String, Doc> {
+    let mut fields = HashMap::new();
+    for field in &component.fields {
+        if !field_in_state(field, state) {
+            continue;
+        }
+        if let Some(value) = current.get(&field.name) {
+            fields.insert(field.name.clone(), value.clone());
+        }
+    }
+    fields
+}
+
+fn field_in_state(field: &Field, state: &str) -> bool {
+    match &field.states {
+        None => true,
+        Some(states) => states.iter().any(|name| name == state),
+    }
+}
+
+fn fields_in_state<'a>(component: &'a Component, state: &str) -> HashSet<&'a str> {
+    component
         .fields
         .iter()
+        .filter(|field| field_in_state(field, state))
         .map(|field| field.name.as_str())
+        .collect()
+}
+
+fn check_fields(component: &Component) -> Result<(), Error> {
+    let state_names: HashSet<&str> = component
+        .states
+        .iter()
+        .map(|state| state.name.as_str())
         .collect();
+    let mut seen = HashSet::new();
+    for field in &component.fields {
+        if !seen.insert(field.name.as_str()) {
+            return Err(Error::new(format!(
+                "duplicate field {} on {}",
+                field.name, component.name
+            )));
+        }
+        let Some(states) = &field.states else {
+            continue;
+        };
+        if states.is_empty() {
+            return Err(Error::new(format!(
+                "field {} on {} names no states",
+                field.name, component.name
+            )));
+        }
+        for state in states {
+            if !state_names.contains(state.as_str()) {
+                return Err(Error::new(format!(
+                    "field {} on {} names unknown state {state}",
+                    field.name, component.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_handler_scope(component: &Component) -> Result<(), Error> {
     for state in &component.states {
+        for handler in &state.handlers {
+            let mut names = Vec::new();
+            for statement in &handler.body {
+                collect_statement_names(statement, &mut names);
+            }
+            check_names_in_scope(component, &state.name, &names)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_names_in_scope(component: &Component, state: &str, names: &[String]) -> Result<(), Error> {
+    for name in names {
+        let Some(field) = component.fields.iter().find(|field| field.name == *name) else {
+            continue;
+        };
+        if !field_in_state(field, state) {
+            return Err(Error::new(format!(
+                "field {name} is not in scope in {state} on {}",
+                component.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn collect_statement_names(statement: &Statement, names: &mut Vec<String>) {
+    match statement {
+        Statement::Assign { field, expression } => {
+            names.push(field.clone());
+            collect_json_names(expression, names);
+        }
+        Statement::Expr { expression } => collect_json_names(expression, names),
+        Statement::SendUp { message, after }
+        | Statement::Send { message, after }
+        | Statement::SendTo { message, after, .. }
+        | Statement::SendDown { message, after, .. } => {
+            collect_json_names(message, names);
+            if let Some(after) = after {
+                collect_json_names(after, names);
+            }
+        }
+        Statement::Construct { key, .. } => {
+            if let Some(key) = key {
+                collect_json_names(key, names);
+            }
+        }
+        Statement::Complete { message } => collect_json_names(message, names),
+        Statement::Release { .. } | Statement::Goto { .. } => {}
+    }
+}
+
+fn collect_json_names(value: &Json, names: &mut Vec<String>) {
+    match value {
+        Json::Array(items) => {
+            for item in items {
+                collect_json_names(item, names);
+            }
+        }
+        Json::Object(map) => {
+            if map.get("kind").and_then(Json::as_str) == Some("reference") {
+                if let Some(name) = map.get("name").and_then(Json::as_str) {
+                    names.push(name.to_string());
+                }
+            }
+            for child in map.values() {
+                collect_json_names(child, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_state_conditions(component: &Component) -> Result<(), Error> {
+    for state in &component.states {
+        let names = fields_in_state(component, &state.name);
         check_condition_scope(
             component,
             state,
