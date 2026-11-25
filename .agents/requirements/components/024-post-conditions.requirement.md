@@ -20,8 +20,8 @@ Preconditions:
   run on the entering turn.
 - Idle's `post { n: 0 }` runs because the turn would leave Idle. It sees the
   fields after the leaving handler's assignments and before `goto` commits.
-- `Parent` is the root. Nothing sends down to a root. Parent `send down`s
-  `@Open` and `@Stuck`. Gate keeps `on down` for those messages.
+- The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate
+  keeps `on down` for those messages.
 
 ```kith
 component Counter {
@@ -55,24 +55,9 @@ component Gate {
   }
 }
 
-component Parent {
-  gate: Gate;
-
-  start {
-    on down @Open {
-      send down @Open;
-    }
-    on down @Stuck {
-      send down @Stuck;
-    }
-  }
-}
-
 export scene Main {
-  Parent() {
-    gate = Gate() {
-      tick = Counter();
-    }
+  Gate() {
+    tick = Counter();
   }
 }
 ```
@@ -102,9 +87,9 @@ Expected behavior:
 Postconditions:
 
 - Tests: `tests/interpreter.rs` (`req:components-024`). In the Gate example,
-  the parent's `@Open` path leaves Idle with `n` still `0`, commits `Open`,
-  and routes `@Tick`. The parent's `@Stuck` path assigns `n` to `1` and then
-  would leave Idle. Idle's `post { n: 0 }` misses, so Gate stays `Idle`,
-  `n` stays `0`, and `@Tick` is not routed. A leave whose assignments still
-  match the current post commits the goto. A turn that stays, a
-  `complete`, and a creation do not run `post`.
+  `@Open` delivered as `down` leaves Idle with `n` still `0`, commits
+  `Open`, and routes `@Tick`. `@Stuck` delivered as `down` assigns `n` to
+  `1` and then would leave Idle. Idle's `post { n: 0 }` misses, so Gate
+  stays `Idle`, `n` stays `0`, and `@Tick` is not routed. A leave whose
+  assignments still match the current post commits the goto. A turn that
+  stays, a `complete`, and a creation do not run `post`.

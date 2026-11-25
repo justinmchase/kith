@@ -1099,28 +1099,6 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         message: symbol("Tick"),
         after: None,
     };
-    let send_down = |name: &str| Statement::SendDown {
-        component: None,
-        message: symbol(name),
-        after: None,
-    };
-    let parent = Component {
-        kind: "component".into(),
-        name: "Parent".into(),
-        fields: vec![],
-        ports: vec![port("Gate", "gate")],
-        states: vec![State {
-            kind: "state".into(),
-            name: "Start".into(),
-            start: true,
-            named: false,
-            post: None,
-            handlers: vec![
-                on("Open", vec![send_down("Open")]),
-                on("Stuck", vec![send_down("Stuck")]),
-            ],
-        }],
-    };
     let gate = Component {
         kind: "component".into(),
         name: "Gate".into(),
@@ -1189,37 +1167,35 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         }],
     };
     let program = scene_program(
-        vec![parent, gate, counter],
+        vec![gate, counter],
         instance(
-            "Parent",
+            "Gate",
             None,
-            vec![instance(
-                "Gate",
-                Some("gate"),
-                vec![instance("Counter", Some("tick"), vec![])],
-            )],
+            vec![instance("Counter", Some("tick"), vec![])],
         ),
     );
 
     let mut world = World::start(program.clone()).expect("start");
-    world.inject_document(kith::doc::symbol("Open")).unwrap();
+    world
+        .send_document(world.root_id(), kith::doc::symbol("Open"))
+        .unwrap();
     world.run_until_idle().expect("matching post commits");
-    let root = world.root_id();
-    let gate_id = world.child(root, "gate").unwrap();
+    let gate_id = world.root_id();
     let tick_id = world.child(gate_id, "tick").unwrap();
     assert_eq!(world.state(gate_id), Some("Open"));
     assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));
     assert_eq!(world.field(tick_id, "seen"), Some(&json!(1.0)));
 
     let mut world = World::start(program).expect("start");
-    world.inject_document(kith::doc::symbol("Stuck")).unwrap();
+    world
+        .send_document(world.root_id(), kith::doc::symbol("Stuck"))
+        .unwrap();
     let err = world
         .run_until_idle()
         .expect_err("assigned away from the post drops the send");
     assert!(err.message.contains("post-condition"), "{}", err.message);
     assert!(err.message.contains("Idle"), "{}", err.message);
-    let root = world.root_id();
-    let gate_id = world.child(root, "gate").unwrap();
+    let gate_id = world.root_id();
     let tick_id = world.child(gate_id, "tick").unwrap();
     assert_eq!(world.state(gate_id), Some("Idle"));
     assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));

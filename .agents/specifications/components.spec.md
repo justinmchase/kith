@@ -423,9 +423,9 @@ property is `post`.
 chosen source spelling. The example does not leave Open. Open's post does
 not run on the turn that only enters Open.
 
-`Parent` is the root. Nothing sends down to a root. Parent `send down`s
-`@Open` and `@Stuck`. Gate keeps `on down` for those messages. Idle's post
-runs because those turns would leave Idle.
+The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate keeps
+`on down` for those messages. Idle's post runs because those turns would
+leave Idle.
 
 ```kith
 component Counter {
@@ -459,36 +459,21 @@ component Gate {
   }
 }
 
-component Parent {
-  gate: Gate;
-
-  start {
-    on down @Open {
-      send down @Open;
-    }
-    on down @Stuck {
-      send down @Stuck;
-    }
-  }
-}
-
 export scene Main {
-  Parent() {
-    gate = Gate() {
-      tick = Counter();
-    }
+  Gate() {
+    tick = Counter();
   }
 }
 ```
 
-The parent's `@Open` path would leave Idle. After the handler's assignments
-`n` is still `0`, so Idle's `post { n: 0 }` matches before `goto` commits.
-The turn commits: Gate is `Open`, and `@Tick` is routed, so `seen` is `1`.
-Open's `post { n: 1 }` does not run on that entering turn.
+`@Open`, delivered to Gate as `down`, would leave Idle. After the handler's
+assignments `n` is still `0`, so Idle's `post { n: 0 }` matches before
+`goto` commits. The turn commits: Gate is `Open`, and `@Tick` is routed, so
+`seen` is `1`. Open's `post { n: 1 }` does not run on that entering turn.
 
-The parent's `@Stuck` path assigns `n` to `1` and then would leave Idle.
-Idle's `post { n: 0 }` sees `n` as `1` and misses, so the turn does not
-commit: Gate stays `Idle`, `n` stays `0`, and `@Tick` is not routed.
+`@Stuck`, delivered the same way, assigns `n` to `1` and then would leave
+Idle. Idle's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
+not commit: Gate stays `Idle`, `n` stays `0`, and `@Tick` is not routed.
 
 ## Syntax tree
 
