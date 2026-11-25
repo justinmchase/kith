@@ -418,14 +418,14 @@ handler.
 The source spelling stays open ([open questions](#open-questions)). The tree
 property is `post`.
 
-`Gate` keeps `n` in scope. Idle's `post` is `{ n: 0 }`. Open's `post` is
+`Gate` keeps `n` in scope. Closed's `post` is `{ n: 0 }`. Open's `post` is
 `{ n: 1 }`. The `post` line in this program is that tree property, not a
 chosen source spelling. The example does not leave Open. Open's post does
 not run on the turn that only enters Open.
 
 The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate keeps
-`on down` for those messages. Idle's post runs because those turns would
-leave Idle.
+`on down` for those messages. Closed's post runs because those turns would
+leave Closed.
 
 ```kith
 component Counter {
@@ -441,7 +441,7 @@ component Gate {
   field n: number = 0;
   tick: Counter;
 
-  start Idle {
+  start Closed {
     post { n: 0 }
     on down @Open {
       send to tick @Tick;
@@ -466,14 +466,14 @@ export scene Main {
 }
 ```
 
-`@Open`, delivered to Gate as `down`, would leave Idle. After the handler's
-assignments `n` is still `0`, so Idle's `post { n: 0 }` matches before
+`@Open`, delivered to Gate as `down`, would leave Closed. After the handler's
+assignments `n` is still `0`, so Closed's `post { n: 0 }` matches before
 `goto` commits. The turn commits: Gate is `Open`, and `@Tick` is routed, so
 `seen` is `1`. Open's `post { n: 1 }` does not run on that entering turn.
 
 `@Stuck`, delivered the same way, assigns `n` to `1` and then would leave
-Idle. Idle's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
-not commit: Gate stays `Idle`, `n` stays `0`, and `@Tick` is not routed.
+Closed. Closed's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
+not commit: Gate stays `Closed`, `n` stays `0`, and `@Tick` is not routed.
 
 ## Syntax tree
 

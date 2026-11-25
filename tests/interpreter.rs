@@ -1107,7 +1107,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         states: vec![
             State {
                 kind: "state".into(),
-                name: "Idle".into(),
+                name: "Closed".into(),
                 start: true,
                 named: true,
                 post: Some(over_equal("n", json!(0))),
@@ -1194,10 +1194,10 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         .run_until_idle()
         .expect_err("assigned away from the post drops the send");
     assert!(err.message.contains("post-condition"), "{}", err.message);
-    assert!(err.message.contains("Idle"), "{}", err.message);
+    assert!(err.message.contains("Closed"), "{}", err.message);
     let gate_id = world.root_id();
     let tick_id = world.child(gate_id, "tick").unwrap();
-    assert_eq!(world.state(gate_id), Some("Idle"));
+    assert_eq!(world.state(gate_id), Some("Closed"));
     assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));
     assert_eq!(world.field(tick_id, "seen"), Some(&json!(0.0)));
 }

@@ -14,11 +14,11 @@ Preconditions:
   spelling stays open. Omitting `post` means the state declares none.
 - Handler choice is the route list and the message pattern. The
   post-condition does not select a handler.
-- `Gate` keeps `n` in scope. Idle's `post` is `{ n: 0 }`. Open's `post` is
+- `Gate` keeps `n` in scope. Closed's `post` is `{ n: 0 }`. Open's `post` is
   `{ n: 1 }`. The `post` line below is that tree property, not a chosen
   source spelling. The example does not leave Open, so Open's post does not
   run on the entering turn.
-- Idle's `post { n: 0 }` runs because the turn would leave Idle. It sees the
+- Closed's `post { n: 0 }` runs because the turn would leave Closed. It sees the
   fields after the leaving handler's assignments and before `goto` commits.
 - The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate
   keeps `on down` for those messages.
@@ -37,7 +37,7 @@ component Gate {
   field n: number = 0;
   tick: Counter;
 
-  start Idle {
+  start Closed {
     post { n: 0 }
     on down @Open {
       send to tick @Tick;
@@ -87,9 +87,9 @@ Expected behavior:
 Postconditions:
 
 - Tests: `tests/interpreter.rs` (`req:components-024`). In the Gate example,
-  `@Open` delivered as `down` leaves Idle with `n` still `0`, commits
+  `@Open` delivered as `down` leaves Closed with `n` still `0`, commits
   `Open`, and routes `@Tick`. `@Stuck` delivered as `down` assigns `n` to
-  `1` and then would leave Idle. Idle's `post { n: 0 }` misses, so Gate
-  stays `Idle`, `n` stays `0`, and `@Tick` is not routed. A leave whose
+  `1` and then would leave Closed. Closed's `post { n: 0 }` misses, so Gate
+  stays `Closed`, `n` stays `0`, and `@Tick` is not routed. A leave whose
   assignments still match the current post commits the goto. A turn that
   stays, a `complete`, and a creation do not run `post`.
