@@ -44,7 +44,8 @@ primitives rather than defining their own.
   call one another as functions to cause behavior. They send messages. A
   message is routed to a named port (`send to`), down to every direct child
   (`send down`), up toward the root (`send up`), or to this instance
-  (`send self`), then matched as a Uffda pattern.
+  (`send self`), then matched as a Uffda pattern. A child that does not
+  handle a `send down` ignores it.
 - **Machines.** Component behavior is a state machine: a matched
   message may send, assign, and `complete`. Actor `send` / `goto` /
   `complete` are statements. Host I/O is Uffda invocation syntax, not a

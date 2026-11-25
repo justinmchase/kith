@@ -17,11 +17,13 @@ Expected behavior:
 
 - `send to child V` MUST deliver only to the instance that fills port
   `child`.
-- `send down V` MUST deliver `V` to every direct child, a port child and an
+- `send down V` MUST offer `V` to every direct child, a port child and an
   unnamed child together. `send down P V` is not a form. The parent does
-  not filter children and does not compare component names.
-- Each child MUST match `V` with `on down` in its current state, or that
-  send fails.
+  not filter children, does not compare component names, and does not
+  select or care which children take the message.
+- A child whose current state has no `on down` that matches `V` MUST ignore
+  that offer. That is not a failed send. If no child handles `V`, that is
+  not an error.
 - `send up V` MUST deliver to the parent, not to siblings.
 - An unhandled injected message MUST NOT be offered to children.
 - In a mixed scene (`child: Child` plus unnamed `Other()`), `send to child V`

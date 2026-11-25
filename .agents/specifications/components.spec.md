@@ -66,12 +66,17 @@ capitals.
   port MUST fail that send with a diagnostic.
 - `send down V` offers `V` to every direct child, a port child and an unnamed
   child together. `send down P V` is not a form. The parent does not filter
-  children and does not compare component names. It MUST NOT skip a
-  generation. Zero children MUST fail that send with a diagnostic.
-- Each child matches `V` with `on down` in its current state, or that send
-  fails with a diagnostic. The failure MUST NOT be forwarded to that child's
+  children, does not compare component names, and does not select or care
+  which children take the message. It MUST NOT skip a generation.
+- A child whose current state has a matching `on down` handles `V`. A child
+  with no matching `on down` ignores that offer. That is not a failed send,
+  and it MUST NOT be forwarded to that child's children. If no child handles
+  `V`, including when the parent has no direct children, that is not an error.
+- `send to name V` that the addressed child does not handle MUST fail that
+  send with a diagnostic. The failure MUST NOT be forwarded to that child's
   children.
-- Several matching children MUST each receive one send, independently.
+- Several children that handle one `send down` MUST each receive one send,
+  independently.
 - A component MUST NOT send a message by calling another instance as a
   function.
 
@@ -148,8 +153,9 @@ export scene Main {
   appear twice. `on pattern` with no list is the same as
   `on up or down or self pattern`. `on init { ... }` is not in that list:
   no pattern, construction only. It MUST NOT be combined with `or`. A
-  parent sending a child's reply shape is unmatched down; a child sending
-  a parent's request shape continues up.
+  `send to` of a shape the child does not handle fails that send. A
+  `send down` of a shape a child does not handle is ignored by that child.
+  A child sending a parent's request shape continues up.
 - `on item: any { ... }` is a capture: the whole message is bound as `item`.
   `on @Ping n:number` is Then of the symbol `Ping` and a payload. It matches
   that symbol and `n`, and MUST NOT match the string `"Ping"`.
@@ -169,8 +175,9 @@ export scene Main {
 ### Sending
 
 - `send to name V…` sends the message to the named port.
-- `send down V…` sends the message to every direct child. A component name
-  before the message is not a selector.
+- `send down V…` offers the message to every direct child. A child with no
+  matching `on down` ignores it. A component name before the message is not
+  a selector.
 - `send up V…` sends the message toward the parent.
 - `send self V…` sends the message to this instance. It is taken on a later
   turn and matches a handler whose route list includes `self` (`on self`,
@@ -300,11 +307,13 @@ A handler body is a synchronous prefix followed by at most one terminal.
   listed name matches. `on init` MUST match only construction init.
   Inject matches `down`, not `self`.
 - A matching transition consumes the message: send up MUST NOT continue.
-  Several children selected by one `send down` are independent sends.
+  Several children offered one `send down` are independent offers.
 - An unmatched message that was travelling up MUST continue to the next
   ancestor, and MUST be dropped with no error if the root does not consume it.
-- An unmatched message that was sent to or down to this instance MUST fail that
-  send with a diagnostic. It MUST NOT be forwarded to this instance's children.
+- An unmatched message that was sent to this instance MUST fail that send
+  with a diagnostic. It MUST NOT be forwarded to this instance's children.
+- An unmatched `send down` is ignored by that child. It MUST NOT fail the
+  send and MUST NOT be forwarded to that child's children.
 
 ### Identity and lifetime
 
@@ -414,8 +423,9 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
   a kind. `to` names the port; `down` offers the message to every direct
-  child, and each child matches it with `on down`; `up` is the ancestor
-  chain; `self` is this instance on a later turn. A missing route would look
+  child, and a child that does not match `on down` ignores the offer; `up`
+  is the ancestor chain; `self` is this instance on a later turn. A missing
+  route would look
   like a parent sending down.
 - **Unreachability, not a destructor.** A handler on destroy would send and
   change state while the instance is already going away. Dropping the

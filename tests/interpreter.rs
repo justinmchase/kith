@@ -613,7 +613,7 @@ fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
 
 #[test]
 // req:components-004
-fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
+fn unmatched_send_up_drops_and_unmatched_send_to_fails() {
     let child = idle(
         "Child",
         vec![],
@@ -699,9 +699,9 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
 
     let mut world = World::start(program.clone()).expect("start");
     world.inject(json!({"kind": "None"})).unwrap();
-    let err = world.run_until_idle().expect_err("unmatched down fails");
-    assert!(err.message.contains("unmatched down"), "{}", err.message);
-    assert!(err.message.contains("Child"));
+    world
+        .run_until_idle()
+        .expect("unmatched send down is ignored");
 
     let empty = scene_program(
         vec![idle(
@@ -723,8 +723,9 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
     );
     let mut world = World::start(empty).expect("start");
     world.inject(json!({"kind": "None"})).unwrap();
-    let err = world.run_until_idle().expect_err("zero children fail");
-    assert!(err.message.contains("no child matched send down"));
+    world
+        .run_until_idle()
+        .expect("send down with no children is not an error");
 
     let named = scene_program(
         vec![
@@ -762,6 +763,95 @@ fn unmatched_send_up_drops_and_unmatched_to_or_down_fails() {
     world.inject(json!({"kind": "Missing"})).unwrap();
     let err = world.run_until_idle().expect_err("missing port fails");
     assert!(err.message.contains("unknown port missing"));
+}
+
+#[test]
+// req:components-003 req:components-004
+fn a_send_down_is_ignored_when_a_child_does_not_handle_it() {
+    let mixed = kith::parse::parse_source(
+        r#"
+export Forest;
+export Main;
+component Deciduous {
+  field kept: number = 0;
+  start {
+    on down @Season @Winter {
+      kept -> 1;
+    }
+  }
+}
+component Evergreen {
+  field kept: number = 0;
+  start {
+    on down @Drought {
+      kept -> 1;
+    }
+  }
+}
+component Forest {
+  start {
+    on down @Go {
+      send down @Season @Winter;
+    }
+  }
+}
+export scene Main {
+  Forest() {
+    Deciduous();
+    Evergreen();
+  }
+}
+"#,
+    )
+    .expect("parse mixed forest");
+    let mut world = World::start(mixed).expect("start mixed");
+    world.inject_document(kith::doc::symbol("Go")).unwrap();
+    world.run_until_idle().expect("mixed forest succeeds");
+    let root = world.root_id();
+    let deciduous = world.children_of_kind(root, "Deciduous")[0];
+    let evergreen = world.children_of_kind(root, "Evergreen")[0];
+    assert_eq!(world.field(deciduous, "kept"), Some(&json!(1.0)));
+    assert_eq!(world.field(evergreen, "kept"), Some(&json!(0.0)));
+
+    let evergreens = kith::parse::parse_source(
+        r#"
+export Forest;
+export Main;
+component Evergreen {
+  field kept: number = 0;
+  start {
+    on down @Drought {
+      kept -> 1;
+    }
+  }
+}
+component Forest {
+  start {
+    on down @Go {
+      send down @Season @Winter;
+    }
+  }
+}
+export scene Main {
+  Forest() {
+    Evergreen();
+    Evergreen();
+  }
+}
+"#,
+    )
+    .expect("parse evergreen forest");
+    let mut world = World::start(evergreens).expect("start evergreens");
+    world.inject_document(kith::doc::symbol("Go")).unwrap();
+    world
+        .run_until_idle()
+        .expect("a forest of only evergreens succeeds");
+    let root = world.root_id();
+    let trees = world.children_of_kind(root, "Evergreen");
+    assert_eq!(trees.len(), 2);
+    assert!(trees
+        .iter()
+        .all(|id| world.field(*id, "kept") == Some(&json!(0.0))));
 }
 
 #[test]

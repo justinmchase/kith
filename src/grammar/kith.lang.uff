@@ -79,8 +79,9 @@ rule SendTo =
   )
 ;
 
-# `send down V` offers V to every direct child. A name before another value
-# is the rejected selector form `send down P V`; check fails that tree.
+# `send down V` offers V to every direct child. A child that does not match
+# ignores the offer. A name before another value is the rejected selector
+# form `send down P V`; check fails that tree.
 rule SendDown =
   | (
     "send" "after" d:Expression "down" n:Identifier e:MessageSeq ";"

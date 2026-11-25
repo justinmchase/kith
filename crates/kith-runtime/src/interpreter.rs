@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 enum Route {
     Inject,
     Down,
+    /// `send down`: offered to a child. A miss is ignored.
+    Offer,
     Up,
     Init,
     SelfSend,
@@ -930,16 +932,12 @@ impl World {
                     if component.is_some() {
                         return Err(Error::new("send down must not name a component"));
                     }
-                    let selected = self.select_children(id);
-                    if selected.is_empty() {
-                        return Err(Error::new("no child matched send down"));
-                    }
-                    for child_id in selected {
+                    for child_id in self.select_children(id) {
                         self.enqueue_send(
                             child_id,
                             message,
                             after.as_ref(),
-                            Route::Down,
+                            Route::Offer,
                             &bindings,
                             &mut sends,
                         )?;
@@ -1633,7 +1631,7 @@ fn route_matches_one(name: &str, route: Route) -> bool {
         "init" => route == Route::Init,
         "self" => route == Route::SelfSend,
         "up" => route == Route::Up,
-        "down" => matches!(route, Route::Down | Route::Inject),
+        "down" => matches!(route, Route::Down | Route::Offer | Route::Inject),
         _ => false,
     }
 }
@@ -1917,6 +1915,7 @@ fn unmatched(
             }
         }
         Route::Down => Err(Error::new(format!("unmatched down to {kind}"))),
+        Route::Offer => Ok(vec![]),
         Route::Inject => Err(Error::new("unmatched injected message")),
         Route::Init => Ok(vec![]),
         Route::SelfSend => Err(Error::new(format!("unmatched self on {kind}"))),
@@ -2111,6 +2110,7 @@ fn snapshot_route(route: Route) -> &'static str {
     match route {
         Route::Inject => "inject",
         Route::Down => "down",
+        Route::Offer => "offer",
         Route::Up => "up",
         Route::Init => "init",
         Route::SelfSend => "self",
@@ -2120,6 +2120,7 @@ fn snapshot_route(route: Route) -> &'static str {
 fn restore_route(value: Option<&str>) -> Route {
     match value {
         Some("down") => Route::Down,
+        Some("offer") => Route::Offer,
         Some("up") => Route::Up,
         Some("init") => Route::Init,
         Some("self") => Route::SelfSend,

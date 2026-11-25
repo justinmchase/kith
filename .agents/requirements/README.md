@@ -10,7 +10,7 @@ verify it cite it with `req:{id}`.
 - [Has-a children](./components/001-has-a-children.requirement.md)
 - [One start state](./components/002-start-state.requirement.md)
 - [Explicit routing](./components/003-explicit-routing.requirement.md)
-- [Unmatched send up and send down](./components/004-unmatched-routing.requirement.md)
+- [Unmatched send up and send to](./components/004-unmatched-routing.requirement.md)
 - [First matching handler](./components/005-first-match.requirement.md)
 - [Ping example](./components/006-ping-example.requirement.md)
 - [writeLine diagnostic](./components/007-print.requirement.md)

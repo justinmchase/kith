@@ -22,6 +22,7 @@ capitals.
 - **Unnamed child**: `Kind()` under a parent with no port name. It belongs to
   the parent's child collection. `send to` cannot address it. `send down`
   offers its message to that child along with every other direct child.
+  A child that does not handle the offer ignores it.
 
 ## Axioms
 

@@ -1,27 +1,29 @@
 ---
 id: components-004
-title: Unmatched send up drops at the root; unmatched to and down fail
+title: Unmatched send up drops at the root; unmatched send to fails
 spec_ref: .agents/specifications/components.spec.md#matching; .agents/specifications/components.spec.md#routing
 ---
 
-# Unmatched send up and send down
+# Unmatched send up and send to
 
 ## Requirement
 
 Preconditions:
 
 - A child sends up a message the parent does not handle, a parent sends to
-  or down a message a child does not handle, `send to` names a missing
-  port, or `send down V` has no direct child.
+  a message a child does not handle, a parent `send down V` reaches a child
+  whose current state does not handle `V`, `send to` names a missing port,
+  or `send down V` has no direct child.
 
 Expected behavior:
 
 - An unmatched send up MUST continue to the next ancestor and MUST drop at the
   root with no error.
-- An unmatched send to or send down MUST fail the send with a diagnostic
-  naming the child and MUST NOT be forwarded to the child's children.
+- An unmatched `send to` MUST fail the send with a diagnostic naming the
+  child and MUST NOT be forwarded to the child's children.
+- An unmatched `send down` MUST NOT fail the send. The child ignores the
+  offer. Zero direct children is not an error.
 - `send to` a port the instance does not have MUST fail with a diagnostic.
-- `send down V` with zero direct children MUST fail with a diagnostic.
 - A `send down` that names a component MUST fail check.
 
 Postconditions:
