@@ -350,10 +350,9 @@ A handler body is a synchronous prefix followed by at most one terminal.
   diagnostic and MUST NOT drop a child. Zero matches MUST fail that
   release. The source spelling is open
   ([open questions](#open-questions)). Collection is unreachability only.
-- Creating an instance MUST match the start state's post-condition against
-  the initial fields before init is offered
-  ([state conditions](#state-conditions)). A miss MUST fail creation and
-  MUST NOT offer init.
+- Creating an instance does not leave a state, so it does not run the start
+  state's post-condition ([state conditions](#state-conditions)). Init is
+  still offered.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
@@ -390,37 +389,43 @@ A transition MAY construct an unnamed child. The source spelling is open
 ### State conditions
 
 A state MAY declare a post-condition pattern over the fields in scope in
-that state. It is an extra pattern, checked on the state change, in addition
-to each field's own write pattern. It does not select the handler. Handler
-choice stays the route list and the message pattern, first match, as
+that state. It is the check before leaving that state. It is not a check of
+the state being entered. It does not select the handler. Handler choice
+stays the route list and the message pattern, first match, as
 [matching](#matching) specifies.
 
-For the proposed result of a transition (assigns applied, `goto` chosen, or
-the same state if there is no `goto`), match the entry pattern when that
-state declares one, then this post-condition, against the fields that would
-be in scope. A state that does not declare an entry pattern passes that
-check. Both MUST match. Only then does the turn commit machine state and
-route the sends and constructions it recorded, and apply the releases it
-recorded. A state that does not declare a post-condition passes that check.
+On a turn that would leave the state, that state's post-condition runs on
+the fields of the state being left, after the leaving handler's assignments
+and before `goto` commits. A state that does not declare a post-condition
+passes that check. Only then does the turn commit machine state and route
+the sends and constructions it recorded, and apply the releases it recorded.
 
 A miss MUST fail the transition with a diagnostic. Machine state stays as it
-was at the start of the turn. Nothing recorded is routed. Constructions and
-releases do not take effect. `complete` does not change state. The
-post-condition of the state that remains is still checked. The pattern is
-not an exit action and not a `succeed` or `fail`.
+was at the start of the turn, including every field the handler assigned.
+Nothing recorded is routed. Constructions and releases do not take effect.
+A post-condition on a state the turn only enters does not run on that
+entering turn. A turn that does not leave its state does not run that
+state's post-condition. `complete` does not leave the state, so it does not
+run the post-condition. The pattern is not an exit action and not a
+`succeed` or `fail`.
 
 The pattern is pure. It does not send, construct, or read a clock.
 
-Creating an instance checks the start state's post-condition against the
-initial fields before init is offered. A miss MUST fail creation with a
-diagnostic and MUST NOT offer init. This check does not select a handler.
+Creating an instance does not leave a state, so it does not run the start
+state's post-condition. Init is still offered. This check does not select a
+handler.
 
 The source spelling stays open ([open questions](#open-questions)). The tree
 property is `post`.
 
 `Gate` keeps `n` in scope. Idle's `post` is `{ n: 0 }`. Open's `post` is
 `{ n: 1 }`. The `post` line in this program is that tree property, not a
-chosen source spelling.
+chosen source spelling. The example does not leave Open. Open's post does
+not run on the turn that only enters Open.
+
+`Parent` is the root. Nothing sends down to a root. Parent `send down`s
+`@Open` and `@Stuck`. Gate keeps `on down` for those messages. Idle's post
+runs because those turns would leave Idle.
 
 ```kith
 component Counter {
@@ -439,11 +444,11 @@ component Gate {
   start Idle {
     post { n: 0 }
     on down @Open {
-      n -> 1;
       send to tick @Tick;
       goto Open;
     }
     on down @Stuck {
+      n -> 1;
       send to tick @Tick;
       goto Open;
     }
@@ -454,17 +459,36 @@ component Gate {
   }
 }
 
+component Parent {
+  gate: Gate;
+
+  start {
+    on down @Open {
+      send down @Open;
+    }
+    on down @Stuck {
+      send down @Stuck;
+    }
+  }
+}
+
 export scene Main {
-  Gate() {
-    tick = Counter();
+  Parent() {
+    gate = Gate() {
+      tick = Counter();
+    }
   }
 }
 ```
 
-Injecting the symbol `Open` sets `n` to `1`. Open's post matches, so the
-turn commits: Gate is `Open`, and `@Tick` is routed, so `seen` is `1`.
-Injecting the symbol `Stuck` leaves `n` at `0`. Open's post misses, so Gate
-stays `Idle` and `@Tick` is not routed.
+The parent's `@Open` path would leave Idle. After the handler's assignments
+`n` is still `0`, so Idle's `post { n: 0 }` matches before `goto` commits.
+The turn commits: Gate is `Open`, and `@Tick` is routed, so `seen` is `1`.
+Open's `post { n: 1 }` does not run on that entering turn.
+
+The parent's `@Stuck` path assigns `n` to `1` and then would leave Idle.
+Idle's `post { n: 0 }` sees `n` as `1` and misses, so the turn does not
+commit: Gate stays `Idle`, `n` stays `0`, and `@Tick` is not routed.
 
 ## Syntax tree
 
@@ -554,8 +578,9 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   machine state, or mailbox would read another instance. The parent holds
   the port name and the key.
 - **State conditions do not select the handler.** The message pattern stays
-  the only enablement. The post-condition checks the fields the turn would
-  commit.
+  the only enablement. The post-condition checks the fields of the state the
+  turn would leave, after that handler's assignments and before `goto`
+  commits.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then

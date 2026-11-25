@@ -856,7 +856,6 @@ impl World {
             self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
-        self.match_post(&component, &start, &fields)?;
         let id = ActorId(self.next_id);
         self.next_id += 1;
         self.dispatcher.register(id);
@@ -1013,8 +1012,9 @@ impl World {
         instance.completion_json = snap.completion_json;
     }
 
-    /// Entry pattern first, when a state declares one, then the post-condition.
-    /// This slice records only the post-condition. No declared entry passes.
+    /// Post-condition of the state being left. The fields are the ones after
+    /// the leaving handler's assignments and before `goto` commits. A missing
+    /// pattern passes. A state the turn only enters is not checked here.
     fn match_post(
         &self,
         component: &Component,
@@ -1050,6 +1050,7 @@ impl World {
         bindings: &HashMap<String, Doc>,
     ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let snap = self.machine_snap(id);
+        let from = snap.state.clone();
         let sends = match self.propose_turn(id, statements, bindings) {
             Ok(sends) => sends,
             Err(err) => {
@@ -1065,14 +1066,16 @@ impl World {
                 instance.fields.clone(),
             )
         };
-        let component = self
-            .program
-            .component(&kind_name)
-            .ok_or_else(|| Error::new("unknown kind"))?
-            .clone();
-        if let Err(err) = self.match_post(&component, &state_name, &fields) {
-            self.restore_machine(id, snap);
-            return Err(err);
+        if state_name != from {
+            let component = self
+                .program
+                .component(&kind_name)
+                .ok_or_else(|| Error::new("unknown kind"))?
+                .clone();
+            if let Err(err) = self.match_post(&component, &from, &fields) {
+                self.restore_machine(id, snap);
+                return Err(err);
+            }
         }
         Ok(sends)
     }

@@ -987,14 +987,13 @@ fn a_post_condition_must_match_before_the_turn_commits() {
     let root_of = |world: &World| world.root_id();
 
     let mut world = start(json!({"kind": "Break"}));
-    let err = world.run_until_idle().expect_err("post misses");
-    assert!(err.message.contains("post-condition"), "{}", err.message);
+    world.run_until_idle().unwrap();
     let root = root_of(&world);
     let tick = world.child(root, "tick").unwrap();
-    assert_eq!(world.field(root, "n"), Some(&json!(0.0)));
+    assert_eq!(world.field(root, "n"), Some(&json!(1.0)));
     assert_eq!(world.field(root, "heard"), Some(&json!(1.0)));
     assert_eq!(world.state(root), Some("Idle"));
-    assert_eq!(world.field(tick, "seen"), Some(&json!(0.0)));
+    assert_eq!(world.field(tick, "seen"), Some(&json!(1.0)));
     assert!(world.children_of_kind(root, "Item").is_empty());
 
     let mut world = start(json!({"kind": "Ping"}));
@@ -1005,26 +1004,23 @@ fn a_post_condition_must_match_before_the_turn_commits() {
     assert_eq!(world.field(root, "n"), Some(&json!(0.0)));
 
     let mut world = start(json!({"kind": "Leave"}));
-    world.run_until_idle().unwrap();
-    assert_eq!(world.state(world.root_id()), Some("Open"));
-    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+    let err = world.run_until_idle().expect_err("leave post misses");
+    assert!(err.message.contains("post-condition"), "{}", err.message);
+    assert!(err.message.contains("Idle"), "{}", err.message);
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(0.0)));
 
     let mut world = start(json!({"kind": "LeaveBad"}));
-    let err = world.run_until_idle().expect_err("destination post misses");
-    assert!(err.message.contains("post-condition"), "{}", err.message);
-    assert!(err.message.contains("Open"), "{}", err.message);
-    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Open"));
     assert_eq!(world.field(world.root_id(), "n"), Some(&json!(0.0)));
 
     let mut world = start(json!({"kind": "Finish"}));
-    let err = world
-        .run_until_idle()
-        .expect_err("complete still checks post");
-    assert!(err.message.contains("post-condition"), "{}", err.message);
-    assert!(!world.completed(world.root_id()));
-    assert_eq!(world.output(world.root_id()), None);
+    world.run_until_idle().unwrap();
+    assert!(world.completed(world.root_id()));
+    assert_eq!(world.output(world.root_id()), Some(&json!(7.0)));
     assert_eq!(world.state(world.root_id()), Some("Idle"));
-    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(0.0)));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
 
     let mut world = start(json!({"kind": "FinishOk"}));
     world.run_until_idle().unwrap();
@@ -1033,11 +1029,13 @@ fn a_post_condition_must_match_before_the_turn_commits() {
     assert_eq!(world.state(world.root_id()), Some("Idle"));
 
     let mut world = start(json!({"kind": "Spawn"}));
-    let err = world.run_until_idle().expect_err("construct is not routed");
-    assert!(err.message.contains("post-condition"), "{}", err.message);
-    assert!(world.children_of_kind(world.root_id(), "Item").is_empty());
-    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(1.0)));
-    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(0.0)));
+    world.run_until_idle().unwrap();
+    let root = world.root_id();
+    let items = world.children_of_kind(root, "Item");
+    assert_eq!(items.len(), 1);
+    assert_eq!(world.field(items[0], "phase"), Some(&json!(1.0)));
+    assert_eq!(world.field(root, "heard"), Some(&json!(2.0)));
+    assert_eq!(world.field(root, "n"), Some(&json!(1.0)));
 
     let mut world = start(json!({"kind": "SpawnOk"}));
     world.run_until_idle().unwrap();
@@ -1067,12 +1065,15 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             }],
         }],
     };
-    let created = World::start(scene_program(
+    let mut world = World::start(scene_program(
         vec![closed],
         instance("Closed", None, vec![]),
-    ));
-    let err = created.err().expect("start post misses");
-    assert!(err.message.contains("post-condition"), "{}", err.message);
+    ))
+    .expect("creation does not run post");
+    world.run_until_idle().unwrap();
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(1.0)));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(0.0)));
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
 }
 
 #[test]
@@ -1098,6 +1099,28 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         message: symbol("Tick"),
         after: None,
     };
+    let send_down = |name: &str| Statement::SendDown {
+        component: None,
+        message: symbol(name),
+        after: None,
+    };
+    let parent = Component {
+        kind: "component".into(),
+        name: "Parent".into(),
+        fields: vec![],
+        ports: vec![port("Gate", "gate")],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Start".into(),
+            start: true,
+            named: false,
+            post: None,
+            handlers: vec![
+                on("Open", vec![send_down("Open")]),
+                on("Stuck", vec![send_down("Stuck")]),
+            ],
+        }],
+    };
     let gate = Component {
         kind: "component".into(),
         name: "Gate".into(),
@@ -1114,10 +1137,6 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                     on(
                         "Open",
                         vec![
-                            Statement::Assign {
-                                field: "n".into(),
-                                expression: number(1),
-                            },
                             tick.clone(),
                             Statement::Goto {
                                 state: "Open".into(),
@@ -1127,6 +1146,10 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                     on(
                         "Stuck",
                         vec![
+                            Statement::Assign {
+                                field: "n".into(),
+                                expression: number(1),
+                            },
                             tick,
                             Statement::Goto {
                                 state: "Open".into(),
@@ -1166,11 +1189,15 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
         }],
     };
     let program = scene_program(
-        vec![gate, counter],
+        vec![parent, gate, counter],
         instance(
-            "Gate",
+            "Parent",
             None,
-            vec![instance("Counter", Some("tick"), vec![])],
+            vec![instance(
+                "Gate",
+                Some("gate"),
+                vec![instance("Counter", Some("tick"), vec![])],
+            )],
         ),
     );
 
@@ -1178,21 +1205,24 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
     world.inject_document(kith::doc::symbol("Open")).unwrap();
     world.run_until_idle().expect("matching post commits");
     let root = world.root_id();
-    let tick_id = world.child(root, "tick").unwrap();
-    assert_eq!(world.state(root), Some("Open"));
-    assert_eq!(world.field(root, "n"), Some(&json!(1.0)));
+    let gate_id = world.child(root, "gate").unwrap();
+    let tick_id = world.child(gate_id, "tick").unwrap();
+    assert_eq!(world.state(gate_id), Some("Open"));
+    assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));
     assert_eq!(world.field(tick_id, "seen"), Some(&json!(1.0)));
 
     let mut world = World::start(program).expect("start");
     world.inject_document(kith::doc::symbol("Stuck")).unwrap();
     let err = world
         .run_until_idle()
-        .expect_err("missed post drops the send");
+        .expect_err("assigned away from the post drops the send");
     assert!(err.message.contains("post-condition"), "{}", err.message);
+    assert!(err.message.contains("Idle"), "{}", err.message);
     let root = world.root_id();
-    let tick_id = world.child(root, "tick").unwrap();
-    assert_eq!(world.state(root), Some("Idle"));
-    assert_eq!(world.field(root, "n"), Some(&json!(0.0)));
+    let gate_id = world.child(root, "gate").unwrap();
+    let tick_id = world.child(gate_id, "tick").unwrap();
+    assert_eq!(world.state(gate_id), Some("Idle"));
+    assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));
     assert_eq!(world.field(tick_id, "seen"), Some(&json!(0.0)));
 }
 
