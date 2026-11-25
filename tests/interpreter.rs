@@ -1075,6 +1075,127 @@ fn a_post_condition_must_match_before_the_turn_commits() {
     assert!(err.message.contains("post-condition"), "{}", err.message);
 }
 
+#[test]
+// req:components-024
+fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
+    let number = |value: i64| json!({"kind": "number", "value": value});
+    let field = |name: &str, value: i64| Field {
+        kind: "field".into(),
+        name: name.into(),
+        pattern: None,
+        init: Some(number(value)),
+    };
+    let symbol = |name: &str| json!({"kind": "symbol", "name": name});
+    let on = |name: &str, body: Vec<Statement>| Handler {
+        kind: "handler".into(),
+        route: vec!["down".into()],
+        item: None,
+        pattern: symbol(name),
+        body,
+    };
+    let tick = Statement::SendTo {
+        port: "tick".into(),
+        message: symbol("Tick"),
+        after: None,
+    };
+    let gate = Component {
+        kind: "component".into(),
+        name: "Gate".into(),
+        fields: vec![field("n", 0)],
+        ports: vec![port("Counter", "tick")],
+        states: vec![
+            State {
+                kind: "state".into(),
+                name: "Idle".into(),
+                start: true,
+                named: true,
+                post: Some(over_equal("n", json!(0))),
+                handlers: vec![
+                    on(
+                        "Open",
+                        vec![
+                            Statement::Assign {
+                                field: "n".into(),
+                                expression: number(1),
+                            },
+                            tick.clone(),
+                            Statement::Goto {
+                                state: "Open".into(),
+                            },
+                        ],
+                    ),
+                    on(
+                        "Stuck",
+                        vec![
+                            tick,
+                            Statement::Goto {
+                                state: "Open".into(),
+                            },
+                        ],
+                    ),
+                ],
+            },
+            State {
+                kind: "state".into(),
+                name: "Open".into(),
+                start: false,
+                named: true,
+                post: Some(over_equal("n", json!(1))),
+                handlers: vec![],
+            },
+        ],
+    };
+    let counter = Component {
+        kind: "component".into(),
+        name: "Counter".into(),
+        fields: vec![field("seen", 0)],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Start".into(),
+            start: true,
+            named: false,
+            post: None,
+            handlers: vec![on(
+                "Tick",
+                vec![Statement::Assign {
+                    field: "seen".into(),
+                    expression: number(1),
+                }],
+            )],
+        }],
+    };
+    let program = scene_program(
+        vec![gate, counter],
+        instance(
+            "Gate",
+            None,
+            vec![instance("Counter", Some("tick"), vec![])],
+        ),
+    );
+
+    let mut world = World::start(program.clone()).expect("start");
+    world.inject_document(kith::doc::symbol("Open")).unwrap();
+    world.run_until_idle().expect("matching post commits");
+    let root = world.root_id();
+    let tick_id = world.child(root, "tick").unwrap();
+    assert_eq!(world.state(root), Some("Open"));
+    assert_eq!(world.field(root, "n"), Some(&json!(1.0)));
+    assert_eq!(world.field(tick_id, "seen"), Some(&json!(1.0)));
+
+    let mut world = World::start(program).expect("start");
+    world.inject_document(kith::doc::symbol("Stuck")).unwrap();
+    let err = world
+        .run_until_idle()
+        .expect_err("missed post drops the send");
+    assert!(err.message.contains("post-condition"), "{}", err.message);
+    let root = world.root_id();
+    let tick_id = world.child(root, "tick").unwrap();
+    assert_eq!(world.state(root), Some("Idle"));
+    assert_eq!(world.field(root, "n"), Some(&json!(0.0)));
+    assert_eq!(world.field(tick_id, "seen"), Some(&json!(0.0)));
+}
+
 fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
     json!({
         "kind": "over",

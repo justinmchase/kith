@@ -14,6 +14,48 @@ Preconditions:
   spelling stays open. Omitting `post` means the state declares none.
 - Handler choice is the route list and the message pattern. The
   post-condition does not select a handler.
+- `Gate` keeps `n` in scope. Idle's `post` is `{ n: 0 }`. Open's `post` is
+  `{ n: 1 }`. The `post` line below is that tree property, not a chosen
+  source spelling.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Gate {
+  field n: number = 0;
+  tick: Counter;
+
+  start Idle {
+    post { n: 0 }
+    on down @Open {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      send to tick @Tick;
+      goto Open;
+    }
+  }
+
+  state Open {
+    post { n: 1 }
+  }
+}
+
+export scene Main {
+  Gate() {
+    tick = Counter();
+  }
+}
+```
 
 Expected behavior:
 
@@ -37,8 +79,9 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:components-024`). A miss leaves fields,
-  machine state, completion, and recorded sends and constructions uncommitted.
-  A match commits the goto, the completion, and the constructed child's init.
-  Creation fails before init when the initial fields miss the start state's
-  post-condition.
+- Tests: `tests/interpreter.rs` (`req:components-024`). In the Gate example,
+  `@Open` commits `Open` and routes `@Tick`. `@Stuck` stays in `Idle` and
+  does not route `@Tick`. A miss leaves fields, machine state, completion,
+  and recorded sends and constructions uncommitted. A match commits the
+  goto, the completion, and the constructed child's init. Creation fails
+  before init when the initial fields miss the start state's post-condition.

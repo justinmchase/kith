@@ -418,6 +418,54 @@ diagnostic and MUST NOT offer init. This check does not select a handler.
 The source spelling stays open ([open questions](#open-questions)). The tree
 property is `post`.
 
+`Gate` keeps `n` in scope. Idle's `post` is `{ n: 0 }`. Open's `post` is
+`{ n: 1 }`. The `post` line in this program is that tree property, not a
+chosen source spelling.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Gate {
+  field n: number = 0;
+  tick: Counter;
+
+  start Idle {
+    post { n: 0 }
+    on down @Open {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      send to tick @Tick;
+      goto Open;
+    }
+  }
+
+  state Open {
+    post { n: 1 }
+  }
+}
+
+export scene Main {
+  Gate() {
+    tick = Counter();
+  }
+}
+```
+
+Injecting the symbol `Open` sets `n` to `1`. Open's post matches, so the
+turn commits: Gate is `Open`, and `@Tick` is routed, so `seen` is `1`.
+Injecting the symbol `Stuck` leaves `n` at `0`. Open's post misses, so Gate
+stays `Idle` and `@Tick` is not routed.
+
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
