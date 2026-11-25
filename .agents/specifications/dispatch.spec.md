@@ -105,6 +105,9 @@ capitals.
   state than the one that spawned the work.
 - Destroying an instance MUST cancel its in-flight transition actors. Cancelled
   work MUST NOT enqueue a successful outcome after cancellation.
+- An unreachable instance is destroyed between turns, with its descendants.
+  Messages that instance has not taken are dropped. A message already in
+  another mailbox stays there.
 
 ### Routing
 

@@ -32,6 +32,11 @@ impl Dispatcher {
         self.mailboxes.entry(actor).or_default();
     }
 
+    pub fn drop_actor(&mut self, actor: ActorId) {
+        self.mailboxes.remove(&actor);
+        self.ready.retain(|id| *id != actor);
+    }
+
     pub fn send(&mut self, to: ActorId, message: Message) {
         let mailbox = self.mailboxes.entry(to).or_default();
         let was_empty = mailbox.is_empty();

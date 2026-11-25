@@ -84,7 +84,9 @@ capitals.
 - **To**: a route to a named port (`send to`).
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`). `on up` matches only that route at the receiver.
-- **Down**: a route toward direct children of a kind (`send down`). `on down`
+- **Down**: a route toward every direct child (`send down V`). The parent
+  does not filter children and does not care which children take the
+  message. A child with no matching `on down` ignores the offer. `on down`
   matches a `send to` / `send down` to this instance, and an inject. It
   does not match `send self` or init.
 - **Self**: a route to this instance (`send self`). Taken on a later turn.

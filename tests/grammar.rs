@@ -88,11 +88,11 @@ component Parent {
     on { kind: "To" } {
       send to child { kind: "X" };
     }
-    on { kind: "Kind" } {
-      send down Child { kind: "X" };
+    on { kind: "Down" } {
+      send down { kind: "X" };
     }
-    on { kind: "All" } {
-      send down any { kind: "X" };
+    on { kind: "Later" } {
+      send after 1 down { kind: "X" };
     }
   }
 }
@@ -111,10 +111,41 @@ export scene Main {
         other => panic!("expected sendTo, got {other:?}"),
     }
     match &parent.states[0].handlers[1].body[0] {
-        kith::ast::Statement::SendDown { component, .. } => {
-            assert_eq!(component.as_deref(), Some("Child"))
+        kith::ast::Statement::SendDown {
+            component, after, ..
+        } => {
+            assert_eq!(component, &None);
+            assert!(after.is_none());
         }
-        other => panic!("expected sendDown Child, got {other:?}"),
+        other => panic!("expected sendDown, got {other:?}"),
+    }
+    match &parent.states[0].handlers[2].body[0] {
+        kith::ast::Statement::SendDown {
+            component, after, ..
+        } => {
+            assert_eq!(component, &None);
+            assert!(after.is_some());
+        }
+        other => panic!("expected delayed sendDown, got {other:?}"),
+    }
+    let selected = parse_source(
+        r#"
+export Parent;
+component Parent {
+  start {
+    on any {
+      send down Child { kind: "X" };
+    }
+  }
+}
+"#,
+    )
+    .expect("selector still parses so check can reject it");
+    match &selected.component("Parent").unwrap().states[0].handlers[0].body[0] {
+        kith::ast::Statement::SendDown { component, .. } => {
+            assert_eq!(component.as_deref(), Some("Child"));
+        }
+        other => panic!("expected named sendDown, got {other:?}"),
     }
     let children = &program.scene("Main").expect("Main").root.children;
     assert_eq!(children[0].key.as_deref(), Some("child"));
