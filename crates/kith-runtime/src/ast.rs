@@ -94,6 +94,9 @@ pub struct State {
     /// `false` for unnamed `start { }`: the implicit name `Start` is not a `goto` target.
     #[serde(default = "default_true")]
     pub named: bool,
+    /// Entry pattern over the fields in scope. Omitted means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<Json>,
     /// Post-condition over the fields in scope. Omitted means none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post: Option<Json>,

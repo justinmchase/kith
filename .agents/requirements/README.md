@@ -29,6 +29,7 @@ verify it cite it with `req:{id}`.
 - [Unreachable instances are destroyed](./components/022-unreachable-destroyed.requirement.md)
 - [Dynamic children](./components/023-dynamic-children.requirement.md)
 - [A post-condition must match before leaving the state](./components/024-post-conditions.requirement.md)
+- [An entry pattern is matched before the post-condition](./components/025-entry-patterns.requirement.md)
 
 ## Scenes
 

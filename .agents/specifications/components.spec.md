@@ -45,7 +45,8 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes, the same sends, the
-  same children constructed or released, and the same post-condition match.
+  same children constructed or released, and the same entry-pattern and
+  post-condition matches.
 - A transition MAY send zero or more messages, change fields, evaluate
   expression statements, complete, and change the machine's state. It MUST
   NOT wait by blocking the dispatcher. The
@@ -315,8 +316,8 @@ A handler body is a synchronous prefix followed by at most one terminal.
   with a diagnostic. It MUST NOT be forwarded to this instance's children.
 - An unmatched `send down` is ignored by that child. It MUST NOT fail the
   send and MUST NOT be forwarded to that child's children.
-- This match selects the handler. A post-condition does not
-  ([state conditions](#state-conditions)).
+- This match selects the handler. An entry pattern and a post-condition do
+  not ([state conditions](#state-conditions)).
 
 ### Identity and lifetime
 
@@ -350,9 +351,11 @@ A handler body is a synchronous prefix followed by at most one terminal.
   diagnostic and MUST NOT drop a child. Zero matches MUST fail that
   release. The source spelling is open
   ([open questions](#open-questions)). Collection is unreachability only.
-- Creating an instance does not leave a state, so it does not run the start
-  state's post-condition ([state conditions](#state-conditions)). Init is
-  still offered.
+- Creating an instance MUST match the start state's entry pattern against
+  the initial fields before init is offered
+  ([state conditions](#state-conditions)). A miss MUST fail creation and
+  MUST NOT offer init. Creation does not leave a state, so it does not run
+  the start state's post-condition.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
@@ -388,17 +391,26 @@ A transition MAY construct an unnamed child. The source spelling is open
 
 ### State conditions
 
-A state MAY declare a post-condition pattern over the fields in scope in
-that state. It is the check before leaving that state. It is not a check of
-the state being entered. It does not select the handler. Handler choice
+A state MAY declare an entry pattern and a post-condition over the fields in
+scope in that state. Each is an extra pattern, in addition to each field's
+own write pattern. Neither pattern selects the handler. Handler choice
 stays the route list and the message pattern, first match, as
-[matching](#matching) specifies.
+[matching](#matching) specifies. Each assign MUST match that field's own
+pattern before the entry pattern is tried.
 
-On a turn that would leave the state, that state's post-condition runs on
-the fields of the state being left, after the leaving handler's assignments
-and before `goto` commits. A state that does not declare a post-condition
-passes that check. Only then does the turn commit machine state and route
-the sends and constructions it recorded, and apply the releases it recorded.
+The entry pattern is the check of the state the turn would commit: the
+destination of `goto`, or the same state when the turn does not leave. The
+post-condition is the check before leaving the current state. It is not a
+check of the state being entered.
+
+On every turn, match the destination state's entry pattern against the
+fields after the handler's assignments, before the turn commits. A state
+that does not declare an entry pattern passes that check. On a turn that
+would leave the state, after that entry pattern matches, the post-condition
+of the state being left runs on those same fields, before `goto` commits.
+A state that does not declare a post-condition passes that check. Only then
+does the turn commit machine state and route the sends and constructions it
+recorded, and apply the releases it recorded.
 
 A miss MUST fail the transition with a diagnostic. Machine state stays as it
 was at the start of the turn, including every field the handler assigned.
@@ -406,17 +418,19 @@ Nothing recorded is routed. Constructions and releases do not take effect.
 A post-condition on a state the turn only enters does not run on that
 entering turn. A turn that does not leave its state does not run that
 state's post-condition. `complete` does not leave the state, so it does not
-run the post-condition. The pattern is not an exit action and not a
-`succeed` or `fail`.
+run the post-condition. It still matches the entry pattern of the state that
+remains. The patterns are not an exit action and not a `succeed` or `fail`.
 
-The pattern is pure. It does not send, construct, or read a clock.
+The patterns are pure. They do not send, construct, or read a clock.
 
-Creating an instance does not leave a state, so it does not run the start
-state's post-condition. Init is still offered. This check does not select a
+Creating an instance MUST match the start state's entry pattern against the
+initial fields before init is offered. A miss MUST fail creation with a
+diagnostic and MUST NOT offer init. Creation does not leave a state, so it
+does not run the start state's post-condition. This check does not select a
 handler.
 
 The source spelling stays open ([open questions](#open-questions)). The tree
-property is `post`.
+properties are `entry` and `post`.
 
 `Gate` keeps `n` in scope. Closed's `post` is `{ n: 0 }`. Open's `post` is
 `{ n: 1 }`. The `post` line in this program is that tree property, not a
@@ -491,7 +505,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
-- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], post: Pattern | null }`
+- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], entry: Pattern | null, post: Pattern | null }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
@@ -507,9 +521,9 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 
 Exactly one state in a component MUST have `start: true`. Unnamed `start { }`
 MUST project `name: "Start"` and `named: false`. `start Name` and
-`state Name` MUST project `named: true`. State `post` MAY be omitted. Omitted
-means that state does not declare a post-condition. It is a tree property,
-not a source spelling. Field `pattern` and
+`state Name` MUST project `named: true`. State `entry` and `post` MAY be omitted.
+Omitted means that state does not declare that pattern. They are tree
+properties, not a source spelling. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
@@ -563,9 +577,10 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   machine state, or mailbox would read another instance. The parent holds
   the port name and the key.
 - **State conditions do not select the handler.** The message pattern stays
-  the only enablement. The post-condition checks the fields of the state the
-  turn would leave, after that handler's assignments and before `goto`
-  commits.
+  the only enablement. The entry pattern checks the state the turn would
+  commit. The post-condition checks the fields of the state the turn would
+  leave, after that handler's assignments and before `goto` commits. The
+  entry pattern is a condition on the state change, not a guard on `on`.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -587,3 +602,7 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   open. The form the tree names is `post` on the state
   ([state conditions](#state-conditions)). It is not a silent edit to
   `field` or `on`.
+- **Entry spelling.** The source spelling of an entry pattern stays open.
+  The form the tree names is `entry` on the state
+  ([state conditions](#state-conditions)). It is not a silent edit to
+  `field`, `on`, or `post`.

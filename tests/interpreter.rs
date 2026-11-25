@@ -31,6 +31,7 @@ fn idle(name: &str, ports: Vec<Port>, handlers: Vec<Handler>) -> Component {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: None,
             handlers,
         }],
@@ -53,6 +54,7 @@ fn counting(name: &str) -> Component {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: None,
             handlers: vec![Handler {
                 kind: "handler".into(),
@@ -842,6 +844,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
                 name: "Idle".into(),
                 start: true,
                 named: true,
+                entry: None,
                 post: Some(kept),
                 handlers: vec![
                     Handler {
@@ -926,6 +929,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
                 name: "Open".into(),
                 start: false,
                 named: true,
+                entry: None,
                 post: Some(open_post),
                 handlers: vec![],
             },
@@ -941,6 +945,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: None,
             handlers: vec![on(json!({"kind": "any"}), vec![assign("seen", 1)])],
         }],
@@ -955,6 +960,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: None,
             handlers: vec![Handler {
                 kind: "handler".into(),
@@ -1055,6 +1061,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: Some(over_equal("n", json!(1))),
             handlers: vec![Handler {
                 kind: "handler".into(),
@@ -1110,6 +1117,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                 name: "Closed".into(),
                 start: true,
                 named: true,
+                entry: None,
                 post: Some(over_equal("n", json!(0))),
                 handlers: vec![
                     on(
@@ -1141,6 +1149,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                 name: "Open".into(),
                 start: false,
                 named: true,
+                entry: None,
                 post: Some(over_equal("n", json!(1))),
                 handlers: vec![],
             },
@@ -1156,6 +1165,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
             name: "Start".into(),
             start: true,
             named: false,
+            entry: None,
             post: None,
             handlers: vec![on(
                 "Tick",
@@ -1200,6 +1210,284 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
     assert_eq!(world.state(gate_id), Some("Closed"));
     assert_eq!(world.field(gate_id, "n"), Some(&json!(0.0)));
     assert_eq!(world.field(tick_id, "seen"), Some(&json!(0.0)));
+}
+
+#[test]
+// req:components-025
+fn an_entry_pattern_is_matched_before_the_post_condition() {
+    let number = |value: i64| json!({"kind": "number", "value": value});
+    let field = |name: &str, value: i64| Field {
+        kind: "field".into(),
+        name: name.into(),
+        pattern: None,
+        init: Some(number(value)),
+    };
+    let on = |pattern: serde_json::Value, body: Vec<Statement>| Handler {
+        kind: "handler".into(),
+        route: vec![],
+        item: None,
+        pattern,
+        body,
+    };
+    let assign = |name: &str, value: i64| Statement::Assign {
+        field: name.into(),
+        expression: number(value),
+    };
+    let one = over_equal("n", json!(1));
+    let zero = over_equal("n", json!(0));
+    let gate = Component {
+        kind: "component".into(),
+        name: "Gate".into(),
+        fields: vec![
+            Field {
+                kind: "field".into(),
+                name: "n".into(),
+                pattern: Some(json!({"kind": "type", "type": "number"})),
+                init: Some(number(1)),
+            },
+            field("heard", 0),
+        ],
+        ports: vec![port("Counter", "tick")],
+        states: vec![
+            State {
+                kind: "state".into(),
+                name: "Idle".into(),
+                start: true,
+                named: true,
+                entry: Some(one),
+                post: Some(over_equal("n", json!(1))),
+                handlers: vec![
+                    Handler {
+                        kind: "handler".into(),
+                        route: vec!["init".into()],
+                        item: None,
+                        pattern: json!({"kind": "any"}),
+                        body: vec![assign("heard", 1)],
+                    },
+                    on(
+                        kind_eq("Break"),
+                        vec![
+                            Statement::SendTo {
+                                port: "tick".into(),
+                                message: object_kind("Tick"),
+                                after: None,
+                            },
+                            assign("n", 0),
+                        ],
+                    ),
+                    on(kind_eq("Pick"), vec![assign("n", 0)]),
+                    on(kind_eq("Pick"), vec![assign("heard", 3)]),
+                    on(kind_eq("Hold"), vec![assign("heard", 4)]),
+                    on(
+                        kind_eq("Leave"),
+                        vec![Statement::Goto {
+                            state: "Open".into(),
+                        }],
+                    ),
+                    on(
+                        kind_eq("LeaveBad"),
+                        vec![
+                            assign("n", 0),
+                            Statement::Goto {
+                                state: "Open".into(),
+                            },
+                        ],
+                    ),
+                    on(
+                        kind_eq("PostMiss"),
+                        vec![
+                            assign("n", 0),
+                            Statement::Goto {
+                                state: "Wide".into(),
+                            },
+                        ],
+                    ),
+                    on(
+                        kind_eq("Finish"),
+                        vec![assign("n", 0), Statement::Complete { message: number(7) }],
+                    ),
+                    on(
+                        kind_eq("BadType"),
+                        vec![Statement::Assign {
+                            field: "n".into(),
+                            expression: json!({"kind": "string", "values": ["no"]}),
+                        }],
+                    ),
+                    on(
+                        kind_eq("Spawn"),
+                        vec![
+                            Statement::Construct {
+                                component: "Item".into(),
+                                key: None,
+                                children: vec![],
+                            },
+                            assign("n", 0),
+                        ],
+                    ),
+                ],
+            },
+            State {
+                kind: "state".into(),
+                name: "Open".into(),
+                start: false,
+                named: true,
+                entry: Some(over_equal("n", json!(1))),
+                post: Some(zero),
+                handlers: vec![],
+            },
+            State {
+                kind: "state".into(),
+                name: "Wide".into(),
+                start: false,
+                named: true,
+                entry: Some(over_equal("n", json!(0))),
+                post: Some(over_equal("n", json!(9))),
+                handlers: vec![],
+            },
+        ],
+    };
+    let counter = Component {
+        kind: "component".into(),
+        name: "Counter".into(),
+        fields: vec![field("seen", 0)],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            named: true,
+            entry: None,
+            post: None,
+            handlers: vec![on(json!({"kind": "any"}), vec![assign("seen", 1)])],
+        }],
+    };
+    let item = idle(
+        "Item",
+        vec![],
+        vec![Handler {
+            kind: "handler".into(),
+            route: vec!["init".into()],
+            item: None,
+            pattern: json!({"kind": "any"}),
+            body: vec![Statement::SendUp {
+                message: object_kind("Ready"),
+                after: None,
+            }],
+        }],
+    );
+    let program = scene_program(
+        vec![gate, counter, item],
+        instance(
+            "Gate",
+            None,
+            vec![instance("Counter", Some("tick"), vec![])],
+        ),
+    );
+    let start = |message: serde_json::Value| {
+        let mut world = World::start(program.clone()).expect("start");
+        world.inject(message).unwrap();
+        world
+    };
+
+    let mut world = start(json!({"kind": "Break"}));
+    let err = world.run_until_idle().expect_err("entry misses");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert!(err.message.contains("Idle"), "{}", err.message);
+    let root = world.root_id();
+    let tick = world.child(root, "tick").unwrap();
+    assert_eq!(world.field(root, "n"), Some(&json!(1.0)));
+    assert_eq!(world.field(root, "heard"), Some(&json!(1.0)));
+    assert_eq!(world.state(root), Some("Idle"));
+    assert_eq!(world.field(tick, "seen"), Some(&json!(0.0)));
+    assert!(world.children_of_kind(root, "Item").is_empty());
+
+    let mut world = start(json!({"kind": "Pick"}));
+    let err = world
+        .run_until_idle()
+        .expect_err("first handler stays selected");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(1.0)));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "Hold"}));
+    world.run_until_idle().unwrap();
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(4.0)));
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+
+    let mut world = start(json!({"kind": "Leave"}));
+    world.run_until_idle().unwrap();
+    assert_eq!(world.state(world.root_id()), Some("Open"));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "LeaveBad"}));
+    let err = world
+        .run_until_idle()
+        .expect_err("destination entry misses");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert!(err.message.contains("Open"), "{}", err.message);
+    assert!(!err.message.contains("post-condition"), "{}", err.message);
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "PostMiss"}));
+    let err = world.run_until_idle().expect_err("post follows entry");
+    assert!(err.message.contains("post-condition"), "{}", err.message);
+    assert!(err.message.contains("Idle"), "{}", err.message);
+    assert!(!err.message.contains("Wide"), "{}", err.message);
+    assert_eq!(world.state(world.root_id()), Some("Idle"));
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "Finish"}));
+    let err = world
+        .run_until_idle()
+        .expect_err("complete still checks entry");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert!(!world.completed(world.root_id()));
+    assert_eq!(world.output(world.root_id()), None);
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "BadType"}));
+    let err = world.run_until_idle().expect_err("field pattern is first");
+    assert!(
+        err.message.contains("field n did not match"),
+        "{}",
+        err.message
+    );
+    assert_eq!(world.field(world.root_id(), "n"), Some(&json!(1.0)));
+
+    let mut world = start(json!({"kind": "Spawn"}));
+    let err = world.run_until_idle().expect_err("construct is not routed");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert!(world.children_of_kind(world.root_id(), "Item").is_empty());
+    assert_eq!(world.field(world.root_id(), "heard"), Some(&json!(1.0)));
+
+    let closed = Component {
+        kind: "component".into(),
+        name: "Closed".into(),
+        fields: vec![field("n", 0), field("heard", 0)],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Idle".into(),
+            start: true,
+            named: true,
+            entry: Some(over_equal("n", json!(1))),
+            post: None,
+            handlers: vec![Handler {
+                kind: "handler".into(),
+                route: vec!["init".into()],
+                item: None,
+                pattern: json!({"kind": "any"}),
+                body: vec![assign("heard", 1)],
+            }],
+        }],
+    };
+    let created = World::start(scene_program(
+        vec![closed],
+        instance("Closed", None, vec![]),
+    ));
+    let err = created.err().expect("start entry misses");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
 }
 
 fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
@@ -1475,6 +1763,7 @@ fn first_matching_handler_consumes_the_message() {
             name: "Idle".into(),
             start: true,
             named: true,
+            entry: None,
             post: None,
             handlers: vec![
                 Handler {
