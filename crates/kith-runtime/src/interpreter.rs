@@ -848,8 +848,9 @@ impl World {
             .ok_or_else(|| Error::new(format!("kind {kind} has no start")))?
             .name
             .clone();
+        let declared = component_fields(&component)?;
         let mut fields = HashMap::new();
-        for field in &component.fields {
+        for field in &declared {
             if !field_in_state(field, &start) {
                 continue;
             }
@@ -858,7 +859,7 @@ impl World {
             } else {
                 doc::null()
             };
-            self.match_declared_field(&component.fields, &field.name, &value)?;
+            self.match_declared_field(&declared, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
         self.match_entry(&component, &start, &fields)?;
@@ -913,12 +914,11 @@ impl World {
 
     fn write_field(&mut self, id: ActorId, name: &str, value: Doc) -> Result<(), Error> {
         let kind = self.instances[&id].kind.clone();
-        let fields = self
-            .program
-            .component(&kind)
-            .ok_or_else(|| Error::new("unknown kind"))?
-            .fields
-            .clone();
+        let fields = component_fields(
+            self.program
+                .component(&kind)
+                .ok_or_else(|| Error::new("unknown kind"))?,
+        )?;
         let state = self.instances[&id].state.clone();
         let field = fields
             .iter()
@@ -1096,8 +1096,9 @@ impl World {
         to: &str,
         current: &HashMap<String, Doc>,
     ) -> Result<HashMap<String, Doc>, Error> {
+        let declared = component_fields(component)?;
         let mut proposed = HashMap::new();
-        for field in &component.fields {
+        for field in &declared {
             if !field_in_state(field, to) {
                 continue;
             }
@@ -1110,7 +1111,7 @@ impl World {
                 } else {
                     doc::null()
                 };
-                self.match_declared_field(&component.fields, &field.name, &value)?;
+                self.match_declared_field(&declared, &field.name, &value)?;
                 proposed.insert(field.name.clone(), value);
             }
         }
@@ -1145,7 +1146,7 @@ impl World {
             .component(&kind_name)
             .ok_or_else(|| Error::new("unknown kind"))?
             .clone();
-        let leaving = fields_in_scope(&component, &from, &current);
+        let leaving = fields_in_scope(&component, &from, &current)?;
         let proposed = match self.propose_scope(&component, &from, &state_name, &current) {
             Ok(fields) => fields,
             Err(err) => {
@@ -2120,7 +2121,7 @@ fn check_expr_stmt(expression: &Json, component: &str) -> Result<(), Error> {
 }
 
 fn check_effects(component: &crate::ast::Component) -> Result<(), Error> {
-    for field in &component.fields {
+    for field in &component_fields(component)? {
         if let Some(init) = &field.init {
             check_sync(init, &component.name)?;
         }
@@ -2326,9 +2327,9 @@ fn fields_in_scope(
     component: &Component,
     state: &str,
     current: &HashMap<String, Doc>,
-) -> HashMap<String, Doc> {
+) -> Result<HashMap<String, Doc>, Error> {
     let mut fields = HashMap::new();
-    for field in &component.fields {
+    for field in &component_fields(component)? {
         if !field_in_state(field, state) {
             continue;
         }
@@ -2336,7 +2337,56 @@ fn fields_in_scope(
             fields.insert(field.name.clone(), value.clone());
         }
     }
-    fields
+    Ok(fields)
+}
+
+/// Component fields, plus one field for each name declared in a state.
+/// The same name in several states is one field. `states` lists those states.
+fn component_fields(component: &Component) -> Result<Vec<Field>, Error> {
+    let mut fields = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for field in &component.fields {
+        if index.insert(field.name.clone(), fields.len()).is_some() {
+            return Err(Error::new(format!(
+                "duplicate field {} on {}",
+                field.name, component.name
+            )));
+        }
+        fields.push(field.clone());
+    }
+    for state in &component.states {
+        for declared in &state.fields {
+            if let Some(&pos) = index.get(&declared.name) {
+                let existing = &mut fields[pos];
+                if existing.states.is_none() {
+                    return Err(Error::new(format!(
+                        "duplicate field {} on {}",
+                        declared.name, component.name
+                    )));
+                }
+                if existing.pattern != declared.pattern || existing.init != declared.init {
+                    return Err(Error::new(format!(
+                        "field {} on {} is declared differently in {}",
+                        declared.name, component.name, state.name
+                    )));
+                }
+                let states = existing.states.as_mut().expect("state field");
+                if states.iter().any(|name| name == &state.name) {
+                    return Err(Error::new(format!(
+                        "duplicate field {} on {}",
+                        declared.name, component.name
+                    )));
+                }
+                states.push(state.name.clone());
+            } else {
+                let mut field = declared.clone();
+                field.states = Some(vec![state.name.clone()]);
+                index.insert(field.name.clone(), fields.len());
+                fields.push(field);
+            }
+        }
+    }
+    Ok(fields)
 }
 
 fn field_in_state(field: &Field, state: &str) -> bool {
@@ -2346,13 +2396,12 @@ fn field_in_state(field: &Field, state: &str) -> bool {
     }
 }
 
-fn fields_in_state<'a>(component: &'a Component, state: &str) -> HashSet<&'a str> {
-    component
-        .fields
+fn fields_in_state(component: &Component, state: &str) -> Result<HashSet<String>, Error> {
+    Ok(component_fields(component)?
         .iter()
         .filter(|field| field_in_state(field, state))
-        .map(|field| field.name.as_str())
-        .collect()
+        .map(|field| field.name.clone())
+        .collect())
 }
 
 fn check_fields(component: &Component) -> Result<(), Error> {
@@ -2361,14 +2410,7 @@ fn check_fields(component: &Component) -> Result<(), Error> {
         .iter()
         .map(|state| state.name.as_str())
         .collect();
-    let mut seen = HashSet::new();
-    for field in &component.fields {
-        if !seen.insert(field.name.as_str()) {
-            return Err(Error::new(format!(
-                "duplicate field {} on {}",
-                field.name, component.name
-            )));
-        }
+    for field in &component_fields(component)? {
         let Some(states) = &field.states else {
             continue;
         };
@@ -2404,8 +2446,9 @@ fn check_handler_scope(component: &Component) -> Result<(), Error> {
 }
 
 fn check_names_in_scope(component: &Component, state: &str, names: &[String]) -> Result<(), Error> {
+    let fields = component_fields(component)?;
     for name in names {
-        let Some(field) = component.fields.iter().find(|field| field.name == *name) else {
+        let Some(field) = fields.iter().find(|field| field.name == *name) else {
             continue;
         };
         if !field_in_state(field, state) {
@@ -2467,7 +2510,7 @@ fn collect_json_names(value: &Json, names: &mut Vec<String>) {
 
 fn check_state_conditions(component: &Component) -> Result<(), Error> {
     for state in &component.states {
-        let names = fields_in_state(component, &state.name);
+        let names = fields_in_state(component, &state.name)?;
         check_condition_scope(
             component,
             state,
@@ -2491,7 +2534,7 @@ fn check_condition_scope(
     state: &crate::ast::State,
     label: &str,
     pattern: Option<&Json>,
-    names: &HashSet<&str>,
+    names: &HashSet<String>,
 ) -> Result<(), Error> {
     let Some(pattern) = pattern else {
         return Ok(());
@@ -2503,7 +2546,7 @@ fn check_condition_scope(
         return Ok(());
     };
     for key in keys.keys() {
-        if !names.contains(key.as_str()) {
+        if !names.contains(key) {
             return Err(Error::new(format!(
                 "{label} names {key} which is not in scope on {} in {}",
                 component.name, state.name

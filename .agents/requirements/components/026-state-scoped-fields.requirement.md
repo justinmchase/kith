@@ -10,35 +10,21 @@ spec_ref: .agents/specifications/components.spec.md#state-scoped-fields; .agents
 
 Preconditions:
 
-- A field with `states` omitted is in scope in every state. A field may set
-  `states` to the state names it belongs to. The source spelling stays open.
-  Omitting `states` means every state.
-- One name is one field. A component-scoped field and a state-scoped field
-  do not share a name.
-- The list names at least one state of this component. An empty list or an
-  unknown name fails check.
-- `Box` keeps `total` in every state. `note` names `Open` and `Hold`.
-  `phase` names `Open`. `strict` names `Tight`. Those names are the tree
-  property `states` on the field node, not a chosen source spelling. The
-  message pattern selects the handler. The test harness delivers each
-  message as `down`.
+- A field declared on the component is in scope in every state. A field
+  declared in a state body is in scope only in that state. Fields in a state
+  come before its handlers.
+- The same name declared in more than one state is one field. Those
+  declarations agree on pattern and init. A component field and a field
+  declared in a state do not share a name.
+- A constructed field MAY set `states`. That property is not source spelling.
+  An empty list or an unknown name fails check.
+- `Box` declares `total` on the component. `note` is declared in `Open` and
+  in `Hold`. `phase` is declared in `Open` only. The message pattern selects
+  the handler. The test harness delivers each message as `down`.
 
 ```kith
-component Counter {
-  field seen: number = 0;
-  start {
-    on down @Tick {
-      seen -> 1;
-    }
-  }
-}
-
 component Box {
   field total: number = 0;
-  field note: number = 0;
-  field phase: number = 1;
-  field strict: number = "no";
-  tick: Counter;
 
   start Idle {
     on down @Go {
@@ -48,16 +34,14 @@ component Box {
     on down @Again {
       goto Open;
     }
-    on down @Bad {
-      send to tick @Tick;
-      goto Tight;
-    }
     on down @Done {
       complete 7;
     }
   }
 
   state Open {
+    field note: number = 0;
+    field phase: number = 1;
     on down @Bump {
       note -> 5;
       goto Hold;
@@ -72,12 +56,56 @@ component Box {
   }
 
   state Hold {
+    field note: number = 0;
     on down @Drop {
       goto Idle;
     }
   }
+}
 
-  state Tight {}
+export scene Main { Box(); }
+```
+
+- `strict` is declared on the component. Its pattern is `number`. `"no"`
+  does not match. Creation fails before the instance runs.
+
+```kith
+component Box {
+  field strict: number = "no";
+  start Idle {}
+}
+
+export scene Main { Box(); }
+```
+
+- `broken` is declared only in `Tight`, so creation leaves it absent. `@Bad`
+  would enter `Tight` and records `@Tick`. The initializer misses `number`.
+  The transition does not commit.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Box {
+  field total: number = 0;
+  tick: Counter;
+
+  start Idle {
+    on down @Bad {
+      send to tick @Tick;
+      goto Tight;
+    }
+  }
+
+  state Tight {
+    field broken: number = "no";
+  }
 }
 
 export scene Main {
@@ -87,13 +115,13 @@ export scene Main {
 }
 ```
 
-- A handler outside the set cannot read or write `note`. `note` names
-  `Open`. Each program fails check and says `not in scope`.
+- A handler in a state that does not declare `note` cannot read or write it.
+  `note` is declared in `Open`. Each program fails check and says `not in
+  scope`.
 
 ```kith
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Write {
@@ -101,7 +129,9 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
@@ -110,7 +140,6 @@ export scene Main { Box(); }
 ```kith
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Read {
@@ -118,7 +147,9 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
@@ -152,8 +183,11 @@ Postconditions:
   returns to `Idle` and drops `note`. `@Again` enters `Open` again and
   initializes `note` and `phase` once more. `@Wipe` writes `note` and leaves
   the set, so the write drops. `@Finish` completes in `Open` and keeps
-  `note`. `@Done` completes in `Idle` with `note` absent. `@Bad` misses
-  `strict`'s initialization, stays `Idle`, and does not route `@Tick`. The
-  `@Write` and `@Read` programs fail check and say `not in scope`. Check
-  also rejects an entry pattern that names a field outside the state, a
-  duplicate name, an empty list, and an unknown state.
+  `note`. `@Done` completes in `Idle` with `note` absent.   Creating the
+  `strict` program fails before the instance runs and says `field strict did
+  not match`. A field declared only in `Tight` as `field broken: number =
+  "no"` is absent at creation. `@Bad` then misses that initialization, stays
+  `Idle`, and does not route `@Tick`. The `@Write` and `@Read` programs fail
+  check and say `not in scope`. Check also rejects an entry pattern that names a field outside the
+  state, a duplicate name, declarations of one name that disagree, an empty
+  list, and an unknown state.

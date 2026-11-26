@@ -314,18 +314,18 @@ rule ElseHandler =
 
 rule StartState =
   | (
-    "start" "{" h:ComponentHandler* e:ElseHandler? "}"
-    -> { kind: "state", name: "Start", start: true, named: false, handlers: (flat [h (coalesce e [])]) }
+    "start" "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: "Start", start: true, named: false, fields: f, handlers: (flat [h (coalesce e [])]) }
   )
   | (
-    "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
-    -> { kind: "state", name: n, start: true, named: true, handlers: (flat [h (coalesce e [])]) }
+    "start" n:Identifier "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: n, start: true, named: true, fields: f, handlers: (flat [h (coalesce e [])]) }
   )
 ;
 
 rule NamedState =
-  "state" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
-  -> { kind: "state", name: n, start: false, named: true, handlers: (flat [h (coalesce e [])]) }
+  "state" n:Identifier "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
+  -> { kind: "state", name: n, start: false, named: true, fields: f, handlers: (flat [h (coalesce e [])]) }
 ;
 
 rule State =

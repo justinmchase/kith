@@ -560,30 +560,41 @@ handler does not run.
 
 ### State-scoped fields
 
-A field declared on the component, with `states` omitted on the field node,
-stays in scope in every state. That is the field
-[declaration](#declaration) specifies, including init and `name -> E`.
+A field declared on the component stays in scope in every state. That is the
+field [declaration](#declaration) specifies, including init and `name -> E`.
 
-A field MAY instead name the states it belongs to. It is one field. Its
-value persists across `goto` among those states. A transition that lands
-outside the set drops it from machine state. The value that left is gone. It
-is not stored beside the machine. Entering the set again initializes it with
-the component-field rules: the init expression, or null when init is omitted,
-then the field pattern. A miss MUST fail that initialization the way a missed
-field write fails, and the transition MUST NOT commit.
+A field declared in a state body is in scope only in that state. Fields in a
+state come before its handlers. The same name declared in more than one state
+is one field. Those declarations MUST agree on pattern and init. Check MUST
+fail if they do not. A component field and a field declared in a state MUST
+NOT share a name. One name is one field, not a copy per state.
 
-A handler in a state outside the set cannot read or write the field. Check
-MUST fail. A component-scoped field and a state-scoped field MUST NOT share
-a name. One name is one field, not a copy per state. Entry and post-condition
-patterns name only fields in scope in that state. Check MUST fail if they
-name a field that is not. `complete` does not leave the state, so scoped
-fields stay until a later `goto` leaves the set or the instance is destroyed.
-Entering and leaving initialize or drop fields as part of the transition's
-proposed machine state. They do not run another handler and do not send.
-Scoped fields are not step-local data and not entry or exit actions. At
-creation, fields in scope in the start state initialize with the
-component-field rules, and state-scoped fields outside that set are absent,
-before the creation check in [state conditions](#state-conditions).
+Its value persists across `goto` among the states that declare it. A
+transition that lands outside that set drops it from machine state. The value
+that left is gone. It is not stored beside the machine. Entering the set
+again initializes it with the component-field rules: the init expression, or
+null when init is omitted, then the field pattern. A miss MUST fail that
+initialization the way a missed field write fails, and the transition MUST
+NOT commit.
+
+A handler in a state that does not declare the field cannot read or write it.
+Check MUST fail. Entry and post-condition patterns name only fields in scope
+in that state. Check MUST fail if they name a field that is not. `complete`
+does not leave the state, so a field declared there stays until a later
+`goto` leaves the set or the instance is destroyed. Entering and leaving
+initialize or drop fields as part of the transition's proposed machine state.
+They do not run another handler and do not send. Scoped fields are not
+step-local data and not entry or exit actions. At creation, fields in scope
+in the start state initialize with the component-field rules, and fields
+declared only in other states are absent, before the creation check in
+[state conditions](#state-conditions). A field declared on the component is
+in scope in the start state. Its initializer MUST match its pattern, or
+creation fails before init is offered and before the instance runs.
+
+The grammar projects each of those declarations onto the state that contains
+it. A program constructed without parsing MAY instead set `states` on a
+component field. Omitted means every state. That property is not a source
+spelling.
 
 Proposed order inside one transition:
 
@@ -605,30 +616,14 @@ Proposed order inside one transition:
    only if those checks pass. A miss fails as
    [state conditions](#state-conditions) specifies.
 
-The source spelling stays open ([open questions](#open-questions)). The tree
-property is `states`. Omitted means every state.
-
-`Box` keeps `total` in every state. `note` names `Open` and `Hold`. `phase`
-names `Open`. `strict` names `Tight`. Those names are the tree property
-`states` on the field node, not a chosen source spelling. The message pattern
-selects the handler.
+`Box` declares `total` on the component, so `total` stays in every state.
+`note` is declared in `Open` and in `Hold`, so it is one field in those
+states. `phase` is declared in `Open` only. The message pattern selects the
+handler.
 
 ```kith
-component Counter {
-  field seen: number = 0;
-  start {
-    on down @Tick {
-      seen -> 1;
-    }
-  }
-}
-
 component Box {
   field total: number = 0;
-  field note: number = 0;
-  field phase: number = 1;
-  field strict: number = "no";
-  tick: Counter;
 
   start Idle {
     on down @Go {
@@ -638,16 +633,14 @@ component Box {
     on down @Again {
       goto Open;
     }
-    on down @Bad {
-      send to tick @Tick;
-      goto Tight;
-    }
     on down @Done {
       complete 7;
     }
   }
 
   state Open {
+    field note: number = 0;
+    field phase: number = 1;
     on down @Bump {
       note -> 5;
       goto Hold;
@@ -662,43 +655,49 @@ component Box {
   }
 
   state Hold {
+    field note: number = 0;
     on down @Drop {
       goto Idle;
     }
   }
-
-  state Tight {}
 }
 
-export scene Main {
-  Box() {
-    tick = Counter();
-  }
-}
+export scene Main { Box(); }
 ```
 
-`Box` starts in `Idle`. `total` is `0`. `note`, `phase`, and `strict` are
-absent. `@Go`, delivered as `down`, assigns `total` to `2` and goes to
-`Open`. `note` initializes to `0` and `phase` to `1`. `@Bump` assigns `note`
-to `5` and goes to `Hold`. `note` stays, because `Hold` is in its set.
-`phase` drops, because `Hold` is not. `@Drop` goes to `Idle` and drops
-`note`. The value that left is gone. `@Again` goes back to `Open` and
-initializes `note` to `0` and `phase` to `1` again. `total` is still `2`.
+`Box` starts in `Idle`. `total` is `0`. `note` and `phase` are absent.
+`@Go`, delivered as `down`, assigns `total` to `2` and goes to `Open`.
+`note` initializes to `0` and `phase` to `1`. `@Bump` assigns `note` to `5`
+and goes to `Hold`. `note` stays, because `Hold` declares it. `phase` drops,
+because `Hold` does not. `@Drop` goes to `Idle` and drops `note`. The value
+that left is gone. `@Again` goes back to `Open` and initializes `note` to
+`0` and `phase` to `1` again. `total` is still `2`.
 
 `@Wipe` from `Open` assigns `note` to `9` and would leave to `Idle`. The
 write drops with the field. `@Finish` completes in `Open`. `complete` does
 not leave, so `note` stays. `@Done` completes in `Idle`. `note` stays absent
-and `total` stays `0`. `@Bad` would go to `Tight` and records `@Tick`.
-`strict` initializes from `"no"`, which misses `number`. The turn does not
-commit: `Box` stays `Idle`, `total` stays `0`, and `@Tick` is not routed.
+and `total` stays `0`.
 
-A handler outside the set cannot read or write the field. `note` still names
-`Open`. Each program fails check and says `not in scope`.
+`strict` is its own component. It is declared on the component, so creation
+initializes it. The pattern is `number`. `"no"` does not match. Creation
+fails before the instance runs. The diagnostic says `field strict did not
+match`.
+
+```kith
+component Box {
+  field strict: number = "no";
+  start Idle {}
+}
+
+export scene Main { Box(); }
+```
+
+A handler in a state that does not declare the field cannot read or write it.
+`note` is declared in `Open`. Each program fails check and says `not in scope`.
 
 ```kith
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Write {
@@ -706,7 +705,9 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
@@ -715,7 +716,6 @@ export scene Main { Box(); }
 ```kith
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Read {
@@ -723,7 +723,9 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
@@ -745,7 +747,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
-- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], entry: Pattern | null, post: Pattern | null }`
+- `{ kind: "state", name: string, start: boolean, named: boolean, fields: [Field], handlers: [Handler], entry: Pattern | null, post: Pattern | null }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
@@ -854,7 +856,3 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   The form the tree names is `entry` on the state
   ([state conditions](#state-conditions)). It is not a silent edit to
   `field`, `on`, or `post`.
-- **Field scope spelling.** The source spelling of a state-scoped field
-  stays open. The form the tree names is `states` on the field
-  ([state-scoped fields](#state-scoped-fields)). Omitted means every state.
-  It is not a silent edit to `field` or to a state.

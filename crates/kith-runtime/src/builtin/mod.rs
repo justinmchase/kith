@@ -227,6 +227,7 @@ fn host_component(name: &str) -> Component {
             named: false,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: Vec::new(),
         }],
     }

@@ -33,6 +33,7 @@ fn idle(name: &str, ports: Vec<Port>, handlers: Vec<Handler>) -> Component {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers,
         }],
     }
@@ -57,6 +58,7 @@ fn counting(name: &str) -> Component {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![Handler {
                 kind: "handler".into(),
                 route: vec![],
@@ -851,6 +853,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
                 named: true,
                 entry: None,
                 post: Some(kept),
+                fields: vec![],
                 handlers: vec![
                     Handler {
                         kind: "handler".into(),
@@ -936,6 +939,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
                 named: true,
                 entry: None,
                 post: Some(open_post),
+                fields: vec![],
                 handlers: vec![],
             },
         ],
@@ -952,6 +956,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![on(json!({"kind": "any"}), vec![assign("seen", 1)])],
         }],
     };
@@ -967,6 +972,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![Handler {
                 kind: "handler".into(),
                 route: vec!["init".into()],
@@ -1068,6 +1074,7 @@ fn a_post_condition_must_match_before_the_turn_commits() {
             named: true,
             entry: None,
             post: Some(over_equal("n", json!(1))),
+            fields: vec![],
             handlers: vec![Handler {
                 kind: "handler".into(),
                 route: vec!["init".into()],
@@ -1125,6 +1132,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                 named: true,
                 entry: None,
                 post: Some(over_equal("n", json!(0))),
+                fields: vec![],
                 handlers: vec![
                     on(
                         "Open",
@@ -1157,6 +1165,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
                 named: true,
                 entry: None,
                 post: Some(over_equal("n", json!(1))),
+                fields: vec![],
                 handlers: vec![],
             },
         ],
@@ -1173,6 +1182,7 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
             named: false,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![on(
                 "Tick",
                 vec![Statement::Assign {
@@ -1258,6 +1268,7 @@ fn the_latch_entry_example_commits_a_match_and_drops_a_miss() {
                 named: true,
                 entry: None,
                 post: None,
+                fields: vec![],
                 handlers: vec![
                     on(
                         "Open",
@@ -1291,6 +1302,7 @@ fn the_latch_entry_example_commits_a_match_and_drops_a_miss() {
                 named: true,
                 entry: Some(over_equal("n", json!(1))),
                 post: None,
+                fields: vec![],
                 handlers: vec![],
             },
         ],
@@ -1307,6 +1319,7 @@ fn the_latch_entry_example_commits_a_match_and_drops_a_miss() {
             named: false,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![on(
                 "Tick",
                 vec![Statement::Assign {
@@ -1399,6 +1412,7 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
                 named: true,
                 entry: Some(one),
                 post: Some(over_equal("n", json!(1))),
+                fields: vec![],
                 handlers: vec![
                     Handler {
                         kind: "handler".into(),
@@ -1476,6 +1490,7 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
                 named: true,
                 entry: Some(over_equal("n", json!(1))),
                 post: Some(zero),
+                fields: vec![],
                 handlers: vec![],
             },
             State {
@@ -1485,6 +1500,7 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
                 named: true,
                 entry: Some(over_equal("n", json!(0))),
                 post: Some(over_equal("n", json!(9))),
+                fields: vec![],
                 handlers: vec![],
             },
         ],
@@ -1501,6 +1517,7 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![on(json!({"kind": "any"}), vec![assign("seen", 1)])],
         }],
     };
@@ -1616,6 +1633,7 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
             named: true,
             entry: Some(over_equal("n", json!(1))),
             post: None,
+            fields: vec![],
             handlers: vec![Handler {
                 kind: "handler".into(),
                 route: vec!["init".into()],
@@ -1637,21 +1655,8 @@ fn an_entry_pattern_is_matched_before_the_post_condition() {
 // req:components-026
 fn a_field_stays_in_scope_only_in_the_states_it_names() {
     let source = r#"
-component Counter {
-  field seen: number = 0;
-  start {
-    on down @Tick {
-      seen -> 1;
-    }
-  }
-}
-
 component Box {
   field total: number = 0;
-  field note: number = 0;
-  field phase: number = 1;
-  field strict: number = "no";
-  tick: Counter;
 
   start Idle {
     on down @Go {
@@ -1661,16 +1666,14 @@ component Box {
     on down @Again {
       goto Open;
     }
-    on down @Bad {
-      send to tick @Tick;
-      goto Tight;
-    }
     on down @Done {
       complete 7;
     }
   }
 
   state Open {
+    field note: number = 0;
+    field phase: number = 1;
     on down @Bump {
       note -> 5;
       goto Hold;
@@ -1685,24 +1688,26 @@ component Box {
   }
 
   state Hold {
+    field note: number = 0;
     on down @Drop {
       goto Idle;
     }
   }
-
-  state Tight {}
 }
 
-export scene Main {
-  Box() {
-    tick = Counter();
-  }
+export scene Main { Box(); }
+"#;
+    let strict_source = r#"
+component Box {
+  field strict: number = "no";
+  start Idle {}
 }
+
+export scene Main { Box(); }
 "#;
     let write_source = r#"
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Write {
@@ -1710,7 +1715,9 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
@@ -1718,7 +1725,6 @@ export scene Main { Box(); }
     let read_source = r#"
 component Box {
   field total: number = 0;
-  field note: number = 0;
 
   start Idle {
     on down @Read {
@@ -1726,20 +1732,14 @@ component Box {
     }
   }
 
-  state Open {}
+  state Open {
+    field note: number = 0;
+  }
 }
 
 export scene Main { Box(); }
 "#;
-    let mut program = kith::parse::parse_source(source).expect("parse box");
-    // `states` is the tree property. The source spelling stays open.
-    set_states(
-        &mut program,
-        "note",
-        Some(vec!["Open".into(), "Hold".into()]),
-    );
-    set_states(&mut program, "phase", Some(vec!["Open".into()]));
-    set_states(&mut program, "strict", Some(vec!["Tight".into()]));
+    let program = kith::parse::parse_source(source).expect("parse box");
 
     let root_fields = |world: &World| {
         let root = world.root_id();
@@ -1762,7 +1762,6 @@ export scene Main { Box(); }
     assert_eq!(world.field(root, "total"), Some(&json!(0.0)));
     assert!(world.field(root, "note").is_none());
     assert!(world.field(root, "phase").is_none());
-    assert!(world.field(root, "strict").is_none());
     deliver(&mut world, "Go");
     assert_eq!(
         root_fields(&world),
@@ -1816,13 +1815,57 @@ export scene Main { Box(); }
     assert!(world.field(world.root_id(), "note").is_none());
     assert_eq!(world.field(world.root_id(), "total"), Some(&json!(0.0)));
 
-    let mut world = World::start(program.clone()).expect("start");
+    let err = World::start(kith::parse::parse_source(strict_source).expect("parse strict"))
+        .err()
+        .expect("strict misses at create");
+    assert!(
+        err.message.contains("field strict did not match"),
+        "{}",
+        err.message
+    );
+
+    let enter_source = r#"
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Box {
+  field total: number = 0;
+  tick: Counter;
+
+  start Idle {
+    on down @Bad {
+      send to tick @Tick;
+      goto Tight;
+    }
+  }
+
+  state Tight {
+    field broken: number = "no";
+  }
+}
+
+export scene Main {
+  Box() {
+    tick = Counter();
+  }
+}
+"#;
+    let mut world = World::start(kith::parse::parse_source(enter_source).expect("parse enter"))
+        .expect("broken is absent at create");
+    assert_eq!(world.field(world.root_id(), "total"), Some(&json!(0.0)));
+    assert!(world.field(world.root_id(), "broken").is_none());
     world
         .send_document(world.root_id(), kith::doc::symbol("Bad"))
         .unwrap();
     let err = world.run_until_idle().expect_err("entering init misses");
     assert!(
-        err.message.contains("field strict did not match"),
+        err.message.contains("field broken did not match"),
         "{}",
         err.message
     );
@@ -1831,14 +1874,12 @@ export scene Main { Box(); }
     let tick = world.child(world.root_id(), "tick").unwrap();
     assert_eq!(world.field(tick, "seen"), Some(&json!(0.0)));
 
-    let mut write = kith::parse::parse_source(write_source).expect("parse write");
-    set_states(&mut write, "note", Some(vec!["Open".into()]));
+    let write = kith::parse::parse_source(write_source).expect("parse write");
     let err = World::check(&write).expect_err("write outside the set");
     assert!(err.message.contains("not in scope"), "{}", err.message);
     assert!(err.message.contains("Idle"), "{}", err.message);
 
-    let mut read = kith::parse::parse_source(read_source).expect("parse read");
-    set_states(&mut read, "note", Some(vec!["Open".into()]));
+    let read = kith::parse::parse_source(read_source).expect("parse read");
     let err = World::check(&read).expect_err("read outside the set");
     assert!(err.message.contains("not in scope"), "{}", err.message);
     assert!(err.message.contains("Idle"), "{}", err.message);
@@ -1847,29 +1888,24 @@ export scene Main { Box(); }
     component_mut(&mut entry, "Box")
         .states
         .iter_mut()
-        .find(|state| state.name == "Open")
-        .expect("Open")
-        .entry = Some(over_equal("strict", json!(1)));
+        .find(|state| state.name == "Hold")
+        .expect("Hold")
+        .entry = Some(over_equal("phase", json!(1)));
     let err = World::check(&entry).expect_err("entry names a field out of scope");
     assert!(err.message.contains("not in scope"), "{}", err.message);
-    assert!(err.message.contains("strict"), "{}", err.message);
+    assert!(err.message.contains("phase"), "{}", err.message);
 
     let dup_source = r#"
 component Box {
   field total: number = 0;
-  field total: number = 0;
   start Idle {}
-  state Open {}
+  state Open {
+    field total: number = 0;
+  }
 }
 export scene Main { Box(); }
 "#;
-    let mut dup = kith::parse::parse_source(dup_source).expect("parse duplicate");
-    component_mut(&mut dup, "Box")
-        .fields
-        .iter_mut()
-        .rfind(|field| field.name == "total")
-        .expect("second total")
-        .states = Some(vec!["Open".into()]);
+    let dup = kith::parse::parse_source(dup_source).expect("parse duplicate");
     let err = World::check(&dup).expect_err("one name");
     assert!(
         err.message.contains("duplicate field total"),
@@ -1877,13 +1913,45 @@ export scene Main { Box(); }
         err.message
     );
 
+    let disagree = r#"
+component Box {
+  start Idle {}
+  state Open {
+    field note: number = 0;
+  }
+  state Hold {
+    field note: number = 1;
+  }
+}
+export scene Main { Box(); }
+"#;
+    let disagree = kith::parse::parse_source(disagree).expect("parse disagree");
+    let err = World::check(&disagree).expect_err("declarations disagree");
+    assert!(
+        err.message.contains("declared differently"),
+        "{}",
+        err.message
+    );
+
     let mut empty = program.clone();
-    set_states(&mut empty, "note", Some(vec![]));
+    component_mut(&mut empty, "Box").fields.push(Field {
+        kind: "field".into(),
+        name: "ghost".into(),
+        pattern: None,
+        init: None,
+        states: Some(vec![]),
+    });
     let err = World::check(&empty).expect_err("empty state list");
     assert!(err.message.contains("names no states"), "{}", err.message);
 
     let mut unknown = program.clone();
-    set_states(&mut unknown, "note", Some(vec!["Nope".into()]));
+    component_mut(&mut unknown, "Box").fields.push(Field {
+        kind: "field".into(),
+        name: "ghost".into(),
+        pattern: None,
+        init: None,
+        states: Some(vec!["Nope".into()]),
+    });
     let err = World::check(&unknown).expect_err("unknown state");
     assert!(
         err.message.contains("unknown state Nope"),
@@ -1898,15 +1966,6 @@ fn component_mut<'a>(program: &'a mut Program, name: &str) -> &'a mut Component 
         .iter_mut()
         .find(|component| component.name == name)
         .unwrap_or_else(|| panic!("missing {name}"))
-}
-
-fn set_states(program: &mut Program, field: &str, states: Option<Vec<String>>) {
-    let field = component_mut(program, "Box")
-        .fields
-        .iter_mut()
-        .find(|item| item.name == field)
-        .unwrap_or_else(|| panic!("missing field {field}"));
-    field.states = states;
 }
 
 fn over_equal(key: &str, value: serde_json::Value) -> serde_json::Value {
@@ -2185,6 +2244,7 @@ fn first_matching_handler_consumes_the_message() {
             named: true,
             entry: None,
             post: None,
+            fields: vec![],
             handlers: vec![
                 Handler {
                     kind: "handler".into(),

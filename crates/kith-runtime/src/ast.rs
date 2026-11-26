@@ -103,6 +103,9 @@ pub struct State {
     /// Post-condition over the fields in scope. Omitted means none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post: Option<Json>,
+    /// Fields declared in this state. The same name in several states is one field.
+    #[serde(default)]
+    pub fields: Vec<Field>,
     #[serde(default)]
     pub handlers: Vec<Handler>,
 }
