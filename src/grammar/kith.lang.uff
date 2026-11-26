@@ -33,7 +33,35 @@ rule ExportList =
   -> (flat [[f] (flat r)])
 ;
 
+rule InState = n:Identifier -> n;
+
+rule InStates =
+  first:InState rest:("|" n:InState -> n)*
+  -> (flat [[first] (flat rest)])
+;
+
+rule InWrite = "write" -> true;
+
+rule InPre = "pre" p:Pattern -> p;
+
+rule InPost = "post" p:Pattern -> p;
+
+rule InClause =
+  "in" s:InStates w:InWrite? pre:InPre? post:InPost?
+  -> { states: s, write: (coalesce w false), pre: pre, post: post }
+;
+
+# A block opts the field into the states its `in` clauses name. No semicolon
+# after an `in`. The block closes with `}`.
 rule Field =
+  | (
+    "field" n:Identifier ":" p:Pattern "=" e:Expression "{" c:InClause+ "}"
+    -> { kind: "field", name: n, pattern: p, init: e, rules: c }
+  )
+  | (
+    "field" n:Identifier ":" p:Pattern "{" c:InClause+ "}"
+    -> { kind: "field", name: n, pattern: p, rules: c }
+  )
   | (
     "field" n:Identifier ":" p:Pattern "=" e:Expression ";"
     -> { kind: "field", name: n, pattern: p, init: e }
@@ -314,18 +342,18 @@ rule ElseHandler =
 
 rule StartState =
   | (
-    "start" "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
-    -> { kind: "state", name: "Start", start: true, named: false, fields: f, handlers: (flat [h (coalesce e [])]) }
+    "start" "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: "Start", start: true, named: false, handlers: (flat [h (coalesce e [])]) }
   )
   | (
-    "start" n:Identifier "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
-    -> { kind: "state", name: n, start: true, named: true, fields: f, handlers: (flat [h (coalesce e [])]) }
+    "start" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+    -> { kind: "state", name: n, start: true, named: true, handlers: (flat [h (coalesce e [])]) }
   )
 ;
 
 rule NamedState =
-  "state" n:Identifier "{" f:Field* h:ComponentHandler* e:ElseHandler? "}"
-  -> { kind: "state", name: n, start: false, named: true, fields: f, handlers: (flat [h (coalesce e [])]) }
+  "state" n:Identifier "{" h:ComponentHandler* e:ElseHandler? "}"
+  -> { kind: "state", name: n, start: false, named: true, handlers: (flat [h (coalesce e [])]) }
 ;
 
 rule State =

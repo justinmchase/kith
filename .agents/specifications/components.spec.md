@@ -17,8 +17,8 @@ capitals.
 - **Component declaration**: the source that names a component, its fields, its
   ports, and its state machine.
 - **Field**: named state a component instance holds, matched by a pattern.
-  A field declared without a state list is in scope in every state. A field
-  MAY name the states it belongs to
+  A field with no `in` clause exists in every state. The first `in` opts it
+  into only the states those clauses name
   ([state-scoped fields](#state-scoped-fields)).
 - **Port**: a typed named slot for one child instance, filled by a scene.
 
@@ -48,8 +48,8 @@ capitals.
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
   matched message MUST produce the same field changes, the same sends, the
-  same children constructed or released, and the same entry-pattern and
-  post-condition matches.
+  same children constructed or released, and the same `pre` and `post`
+  matches.
 - A transition MAY send zero or more messages, change fields, evaluate
   expression statements, complete, and change the machine's state. It MUST
   NOT wait by blocking the dispatcher. The
@@ -127,15 +127,17 @@ export scene Main {
 
 - `component Name { ... }` declares a kind. Instances of that kind are created
   by a scene.
-- `field name: pattern = expression` is local state. Every write MUST
-  match `pattern` as a Uffda scalar value: the init and `name -> E`.
-  A miss MUST fail that write with a diagnostic.
+- `field name: pattern = expression;` is local state in every state. Every
+  write MUST match `pattern` as a Uffda scalar value: the init and
+  `name -> E`. A miss MUST fail that write with a diagnostic.
   `= expression` MAY be omitted; a missing init is **null**. `number?`
   matches null or a number and MUST NOT match a string: Uffda Maybe that
   skips a present non-null value is not a match for a stored field.
-  The value used is the value that matched. That field is in scope in every
-  state. A field MAY instead name the states it belongs to
-  ([state-scoped fields](#state-scoped-fields)).
+  The value used is the value that matched. A block instead of the
+  semicolon names the states, who may assign, and each state's `pre` and
+  `post` ([state-scoped fields](#state-scoped-fields),
+  [state conditions](#state-conditions)). A state body does not declare
+  fields.
 - `name: Kind;` is a port: one child of kind `Kind` bound as `name`.
   `Kind` is a component.
 - `start { ... }` is the start state with implicit name `Start`. That name
@@ -321,8 +323,8 @@ A handler body is a synchronous prefix followed by at most one terminal.
   with a diagnostic. It MUST NOT be forwarded to this instance's children.
 - An unmatched `send down` is ignored by that child. It MUST NOT fail the
   send and MUST NOT be forwarded to that child's children.
-- This match selects the handler. An entry pattern and a post-condition do
-  not ([state conditions](#state-conditions)).
+- This match selects the handler. A field's `pre` and `post` do not
+  ([state conditions](#state-conditions)).
 
 ### Identity and lifetime
 
@@ -356,11 +358,12 @@ A handler body is a synchronous prefix followed by at most one terminal.
   diagnostic and MUST NOT drop a child. Zero matches MUST fail that
   release. The source spelling is open
   ([open questions](#open-questions)). Collection is unreachability only.
-- Creating an instance MUST match the start state's entry pattern against
-  the initial fields before init is offered
+- Creating an instance MUST match each in-scope field's initializer against
+  that field's pattern, then match the start state's `pre` for each field
+  that exists there, before init is offered
   ([state conditions](#state-conditions)). A miss MUST fail creation and
   MUST NOT offer init. Creation does not leave a state, so it does not run
-  the start state's post-condition.
+  `post`.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
@@ -396,59 +399,52 @@ A transition MAY construct an unnamed child. The source spelling is open
 
 ### State conditions
 
-A state MAY declare an entry pattern and a post-condition over the fields in
-scope in that state. Each is an extra pattern, in addition to each field's
-own write pattern. Neither pattern selects the handler. Handler choice
-stays the route list and the message pattern, first match, as
-[matching](#matching) specifies. Each assign MUST match that field's own
-pattern before the entry pattern is tried.
+`pre` and `post` live on the field, inside an `in` clause
+([state-scoped fields](#state-scoped-fields)). A state does not declare
+`entry` or `post`, including a check across fields. Neither pattern selects
+the handler. Handler choice stays the route list and the message pattern,
+first match, as [matching](#matching) specifies.
 
-The entry pattern is the check of the state the turn would commit: the
-destination of `goto`, or the same state when the turn does not leave. The
-post-condition is the check before leaving the current state. It is not a
-check of the state being entered.
+The pattern on the field is the default for every state where the field
+exists. A state overrides it only inside its `in` clause. `pre` MAY be
+omitted; that state then uses the field pattern. `post` MAY be omitted; that
+state then uses its `pre`, or the field pattern when `pre` is omitted too.
+`write` does not change `pre` or `post`. The initializer is matched against
+the field pattern, not against `pre`.
 
-On every turn, match the destination state's entry pattern against the
-fields that would be in scope in that state
-([state-scoped fields](#state-scoped-fields)), after the handler's
-assignments and after this transition initializes fields that enter and
-drops fields that leave. A state that does not declare an entry pattern
-passes that check. On a turn that would leave the state, after that entry
-pattern matches, the post-condition of the state being left runs on the
-fields in scope in that state after the leaving handler's assignments and
-before `goto` commits. Those are not the destination's fields. A state that
-does not declare a post-condition passes that check. Only then does the turn
-commit machine state and route the sends and constructions it recorded, and
-apply the releases it recorded.
+`pre` is the check on entering that state, before commit. It runs when
+`goto` proposes a different state, and when the instance is created. A turn
+that does not leave does not run `pre`. `complete` does not leave, so it
+does not run `pre`. `post` is the check before leaving, after the leaving
+handler's assignments and before `goto` commits. It sees each field that
+exists in the state being left. A state the turn only enters does not run
+`post` on that turn. A turn that does not leave does not run `post`.
+`complete` does not leave, so it does not run `post`.
 
-A miss MUST fail the transition with a diagnostic. Machine state stays as it
-was at the start of the turn, including every field the handler assigned.
-Nothing recorded is routed. Constructions and releases do not take effect.
-A post-condition on a state the turn only enters does not run on that
-entering turn. A turn that does not leave its state does not run that
-state's post-condition. `complete` does not leave the state, so it does not
-run the post-condition. It still matches the entry pattern of the state that
-remains. The patterns are not an exit action and not a `succeed` or `fail`.
+On a turn that would leave, match the destination's `pre` for each field
+that would exist there, after the handler's assignments and after this
+transition initializes fields that enter. Then match `post` of the state
+being left. Only then does the turn commit machine state and route the
+sends and constructions it recorded, and apply the releases it recorded.
+
+A miss MUST fail the transition with a diagnostic. `pre` says `pre` and
+names the state being entered. `post` says `post` and names the state being
+left. The machine stays in the state the turn started in. Assigned fields
+revert. Nothing recorded is routed. Constructions and releases do not take
+effect. A `pre` miss does not report `post`.
 
 The patterns are pure. They do not send, construct, or read a clock.
 
-Creating an instance MUST match the start state's entry pattern against the
-initial fields before init is offered. A miss MUST fail creation with a
-diagnostic and MUST NOT offer init. Creation does not leave a state, so it
-does not run the start state's post-condition. This check does not select a
-handler.
+Creating an instance initializes each field that exists in the start state
+and matches that value against the field pattern, then matches the start
+state's `pre` for each of those fields, before init is offered. A miss MUST
+fail creation and MUST NOT offer init. Creation does not leave a state, so
+it does not run `post`. This check does not select a handler.
 
-The source spelling stays open ([open questions](#open-questions)). The tree
-properties are `entry` and `post`.
-
-`Gate` keeps `n` in scope. Closed's `post` is `{ n: 0 }`. Open's `post` is
-`{ n: 1 }`. The `post` line in this program is that tree property, not a
-chosen source spelling. The example does not leave Open. Open's post does
-not run on the turn that only enters Open.
-
-The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate keeps
-`on down` for those messages. Closed's post runs because those turns would
-leave Closed.
+`Gate` keeps `n` in Closed and Open. Closed's `post` is `0`. Open's `post`
+is `1`. No `in` is marked `write`, so `n` is writable in both. The example
+does not leave Open, so Open's `post` does not run on the entering turn.
+One handler matches `@Open`. One handler matches `@Stuck`.
 
 ```kith
 component Counter {
@@ -461,11 +457,15 @@ component Counter {
 }
 
 component Gate {
-  field n: number = 0;
+  field n: number = 0 {
+    in Closed
+      post 0
+    in Open
+      post 1
+  }
   tick: Counter;
 
   start Closed {
-    post { n: 0 }
     on down @Open {
       send to tick @Tick;
       goto Open;
@@ -477,9 +477,7 @@ component Gate {
     }
   }
 
-  state Open {
-    post { n: 1 }
-  }
+  state Open {}
 }
 
 export scene Main {
@@ -490,21 +488,18 @@ export scene Main {
 ```
 
 `@Open`, delivered to Gate as `down`, would leave Closed. After the handler's
-assignments `n` is still `0`, so Closed's `post { n: 0 }` matches before
-`goto` commits. The turn commits: Gate is `Open`, and `@Tick` is routed, so
-`seen` is `1`. Open's `post { n: 1 }` does not run on that entering turn.
+assignments `n` is still `0`, so Closed's `post` matches before `goto`
+commits. The turn commits: Gate is `Open`, and `@Tick` is routed, so `seen`
+is `1`. Open's `post` does not run on that entering turn.
 
 `@Stuck`, delivered the same way, assigns `n` to `1` and then would leave
-Closed. Closed's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
-not commit: Gate stays `Closed`, `n` stays `0`, and `@Tick` is not routed.
+Closed. Closed's `post` sees `n` as `1` and misses, so the turn does not
+commit: Gate stays `Closed`, `n` stays `0`, and `@Tick` is not routed.
 
-`Latch` keeps `n` in scope. Shut is the start. Open's `entry` is `{ n: 1 }`.
-The `entry` line in this program is that tree property, not a chosen source
-spelling. The message pattern selects the handler. Open's entry does not.
-Shut declares no post-condition, so leaving Shut does not run `post`.
-
-The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
-`on down @Stuck` handlers match that message. The first is selected.
+`Latch` keeps `n` in Shut and Open. Shut's clause is blank, so its `pre`
+and `post` are the field pattern `number`. Open's `pre` is `1`. No `in` is
+marked `write`. The message pattern selects the handler. Open's `pre` does
+not. One handler matches `@Open`. One handler matches `@Stuck`.
 
 ```kith
 component Counter {
@@ -517,7 +512,11 @@ component Counter {
 }
 
 component Latch {
-  field n: number = 0;
+  field n: number = 0 {
+    in Shut
+    in Open
+      pre 1
+  }
   tick: Counter;
 
   start Shut {
@@ -530,16 +529,9 @@ component Latch {
       send to tick @Tick;
       goto Open;
     }
-    on down @Stuck {
-      n -> 1;
-      send to tick @Tick;
-      goto Open;
-    }
   }
 
-  state Open {
-    entry { n: 1 }
-  }
+  state Open {}
 }
 
 export scene Main {
@@ -550,80 +542,82 @@ export scene Main {
 ```
 
 `@Open`, delivered to Latch as `down`, assigns `n` to `1` and proposes Open.
-Open's `entry { n: 1 }` matches before commit, so the turn commits: Latch is
-`Open`, and `@Tick` is routed, so `seen` is `1`.
+Open's `pre` matches before commit, so the turn commits: Latch is `Open`,
+and `@Tick` is routed, so `seen` is `1`. Leaving Shut, `post` is `number`,
+so `0` and `1` both pass.
 
 `@Stuck`, delivered the same way, proposes Open with `n` still `0`. Open's
-`entry { n: 1 }` misses, the same failure as a missed post-condition. Latch
-stays `Shut`, `n` stays `0`, and `@Tick` is not routed. The later `@Stuck`
-handler does not run.
+`pre` misses. Latch stays `Shut`, `n` stays `0`, and `@Tick` is not routed.
 
 ### State-scoped fields
 
-A field declared on the component stays in scope in every state. That is the
-field [declaration](#declaration) specifies, including init and `name -> E`.
+A field is one name. Its value stays across the states where it exists,
+drops on the way out of that set, and initializes again on re-entry. A
+handler in a state where it does not exist cannot read or write it.
 
-A field declared in a state body is in scope only in that state. Fields in a
-state come before its handlers. The same name declared in more than one state
-is one field. Those declarations MUST agree on pattern and init. Check MUST
-fail if they do not. A component field and a field declared in a state MUST
-NOT share a name. One name is one field, not a copy per state.
+`field name: pattern = expression;` is the whole-component form. The field
+exists in every state, handlers in every state may assign it, and `pre` and
+`post` are the field pattern. The declaration ends with a semicolon and has
+no block. `= expression` MAY be omitted.
 
-Its value persists across `goto` among the states that declare it. A
-transition that lands outside that set drops it from machine state. The value
-that left is gone. It is not stored beside the machine. Entering the set
-again initializes it with the component-field rules: the init expression, or
-null when init is omitted, then the field pattern. A miss MUST fail that
-initialization the way a missed field write fails, and the transition MUST
-NOT commit.
+A block opts the field in. The field then exists only in the states its
+`in` clauses name. Omit every `in` and it exists in every state, which is
+the semicolon form. `in Open|Hold` is one clause shared by those states. A
+state with its own `pre` or `post` gets its own `in`. A blank `in Hold`
+includes Hold on the field pattern. There is no semicolon after an `in`.
+The block closes with `}`.
 
-A handler in a state that does not declare the field cannot read or write it.
-Check MUST fail. Entry and post-condition patterns name only fields in scope
-in that state. Check MUST fail if they name a field that is not. `complete`
-does not leave the state, so a field declared there stays until a later
-`goto` leaves the set or the instance is destroyed. Entering and leaving
-initialize or drop fields as part of the transition's proposed machine state.
-They do not run another handler and do not send. Scoped fields are not
-step-local data and not entry or exit actions. At creation, fields in scope
-in the start state initialize with the component-field rules, and fields
-declared only in other states are absent, before the creation check in
-[state conditions](#state-conditions). A field declared on the component is
-in scope in the start state. Its initializer MUST match its pattern, or
-creation fails before init is offered and before the instance runs.
+`write` on an `in` means handlers in those states may assign the field. A
+state that is not marked `write` may read the field and may leave it. An
+assignment there MUST be rejected. Check MUST fail and say `not writable`.
+If no `in` is marked `write`, the field is writable in every state where it
+exists. The initializer still runs when the field comes into scope,
+including on re-entry, whether or not that state says `write`.
 
-The grammar projects each of those declarations onto the state that contains
-it. A program constructed without parsing MAY instead set `states` on a
-component field. Omitted means every state. That property is not a source
-spelling.
+Check MUST fail a duplicate field name, an `in` that names an unknown
+state, a state named in more than one clause, and a rules list that names
+no states. A handler that reads or writes a field in a state where it does
+not exist MUST fail check and say `not in scope`.
 
-Proposed order inside one transition:
+Entering and leaving initialize or drop the field as part of the
+transition's proposed machine state. They do not run another handler and do
+not send. `complete` does not leave the state, so a field that exists there
+stays. At creation, fields that exist in the start state initialize, and
+fields that exist only in other states are absent, before `pre`
+([state conditions](#state-conditions)). The initializer MUST match the
+field pattern, or creation fails before init is offered and before the
+instance runs.
 
-1. The message match selects the handler. State conditions do not.
-2. Assigns update component-scoped fields and any state-scoped field that
-   stays in scope. Each assign MUST match that field's own pattern first.
-   An assign names a field in scope in the handler's state. Check MUST fail
-   otherwise. A write to a field that then leaves the set is dropped with
-   that field.
-3. State-scoped fields that are newly in scope initialize.
+Order inside one transition:
+
+1. The message match selects the handler. `pre` and `post` do not.
+2. Assigns update fields that exist in the handler's state. Each assign
+   MUST match that field's pattern. The state MUST be allowed to write it.
+   A write to a field that then leaves the set is dropped with that field.
+3. Fields that are newly in scope initialize, including on re-entry. The
+   initializer MUST match the field pattern.
 4. Fields that leave the set are absent.
-5. The destination state's entry pattern is matched against the fields that
-   would be in scope in that state. On a turn that would leave, the
-   post-condition of the state being left is then matched against the fields
-   in scope in that state after the handler's assignments, before `goto`
-   commits. A post-condition on a state the turn only enters does not run.
-   `complete` does not leave, so it does not run `post`.
+5. On a turn that would leave, the destination's `pre` is matched, then
+   `post` of the state being left. A turn that stays, including `complete`,
+   runs neither.
 6. The turn commits, routes sends and constructions, and applies releases
    only if those checks pass. A miss fails as
    [state conditions](#state-conditions) specifies.
 
-`Box` declares `total` on the component, so `total` stays in every state.
-`note` is declared in `Open` and in `Hold`, so it is one field in those
-states. `phase` is declared in `Open` only. The message pattern selects the
-handler.
+`Box` keeps `total` in every state. `note` exists in Open and Hold, those
+handlers may assign it, and leaving either state requires `number`. `phase`
+exists in Open, and Open may assign it. `note` initializes to null.
 
 ```kith
 component Box {
   field total: number = 0;
+  field note: number? = null {
+    in Open|Hold write
+      post number
+  }
+  field phase: number = 1 {
+    in Open write
+  }
 
   start Idle {
     on down @Go {
@@ -639,8 +633,6 @@ component Box {
   }
 
   state Open {
-    field note: number = 0;
-    field phase: number = 1;
     on down @Bump {
       note -> 5;
       goto Hold;
@@ -655,7 +647,6 @@ component Box {
   }
 
   state Hold {
-    field note: number = 0;
     on down @Drop {
       goto Idle;
     }
@@ -667,21 +658,21 @@ export scene Main { Box(); }
 
 `Box` starts in `Idle`. `total` is `0`. `note` and `phase` are absent.
 `@Go`, delivered as `down`, assigns `total` to `2` and goes to `Open`.
-`note` initializes to `0` and `phase` to `1`. `@Bump` assigns `note` to `5`
-and goes to `Hold`. `note` stays, because `Hold` declares it. `phase` drops,
-because `Hold` does not. `@Drop` goes to `Idle` and drops `note`. The value
-that left is gone. `@Again` goes back to `Open` and initializes `note` to
-`0` and `phase` to `1` again. `total` is still `2`.
+`note` initializes to null and `phase` to `1`. `@Bump` assigns `note` to
+`5` and goes to `Hold`. `note` stays, because Hold names it. `phase` drops.
+`@Drop` goes to `Idle` and drops `note`. The value that left is gone.
+`@Again` goes back to `Open` and initializes `note` to null and `phase` to
+`1` again. `total` is still `2`.
 
-`@Wipe` from `Open` assigns `note` to `9` and would leave to `Idle`. The
-write drops with the field. `@Finish` completes in `Open`. `complete` does
-not leave, so `note` stays. `@Done` completes in `Idle`. `note` stays absent
+`@Wipe` from `Open` assigns `note` to `9` and would leave to `Idle`. `post`
+is `number`, so `9` matches, and the write drops with the field.
+`@Finish` completes in `Open`. `complete` does not leave, so `post` does
+not run and `note` stays. `@Done` completes in `Idle`. `note` stays absent
 and `total` stays `0`.
 
-`strict` is its own component. It is declared on the component, so creation
-initializes it. The pattern is `number`. `"no"` does not match. Creation
-fails before the instance runs. The diagnostic says `field strict did not
-match`.
+`strict` is its own component. The initializer is matched against the field
+pattern `number`. `"no"` does not match. Creation fails before the instance
+runs. The diagnostic says `field strict did not match`.
 
 ```kith
 component Box {
@@ -692,12 +683,15 @@ component Box {
 export scene Main { Box(); }
 ```
 
-A handler in a state that does not declare the field cannot read or write it.
-`note` is declared in `Open`. Each program fails check and says `not in scope`.
+A handler in a state where `note` does not exist cannot read or write it.
+Each program fails check and says `not in scope`.
 
 ```kith
 component Box {
   field total: number = 0;
+  field note: number = 0 {
+    in Open write
+  }
 
   start Idle {
     on down @Write {
@@ -705,9 +699,7 @@ component Box {
     }
   }
 
-  state Open {
-    field note: number = 0;
-  }
+  state Open {}
 }
 
 export scene Main { Box(); }
@@ -716,6 +708,9 @@ export scene Main { Box(); }
 ```kith
 component Box {
   field total: number = 0;
+  field note: number = 0 {
+    in Open
+  }
 
   start Idle {
     on down @Read {
@@ -723,9 +718,30 @@ component Box {
     }
   }
 
-  state Open {
-    field note: number = 0;
+  state Open {}
+}
+
+export scene Main { Box(); }
+```
+
+`shown` exists in Idle and Open. Only Open is marked `write`, so an
+assignment in Idle is rejected. Idle may still read `shown` and may leave
+it.
+
+```kith
+component Box {
+  field shown: number = 1 {
+    in Idle
+    in Open write
   }
+
+  start Idle {
+    on down @Set {
+      shown -> 2;
+    }
+  }
+
+  state Open {}
 }
 
 export scene Main { Box(); }
@@ -743,11 +759,12 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "import", moduleUrl: string, names: [string] }`
 - `{ kind: "export", name: string }`
 - `{ kind: "component", name: string, fields: [Field], ports: [Port], states: [State] }`
-- `{ kind: "field", name: string, pattern: Pattern, init: Expression, states: [string] | null }`
+- `{ kind: "field", name: string, pattern: Pattern, init: Expression, rules: [FieldRule] }`
+- FieldRule: `{ states: [string], write: boolean, pre: Pattern | null, post: Pattern | null }`
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
-- `{ kind: "state", name: string, start: boolean, named: boolean, fields: [Field], handlers: [Handler], entry: Pattern | null, post: Pattern | null }`
+- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler] }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
@@ -763,13 +780,15 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 
 Exactly one state in a component MUST have `start: true`. Unnamed `start { }`
 MUST project `name: "Start"` and `named: false`. `start Name` and
-`state Name` MUST project `named: true`. State `entry` and `post` MAY be omitted.
-Omitted means that state does not declare that pattern. They are tree
-properties, not a source spelling. Field `states` MAY be omitted. Omitted means
-the field is in scope in every state. A present list names the states it
-belongs to, including the implicit `Start` of an unnamed start. The list
-MUST name at least one state of this component. An unknown name or an empty
-list MUST fail check. `states` is a tree property, not a source spelling.
+`state Name` MUST project `named: true`. A state does not carry fields,
+`entry`, or `post`. Field `rules` MAY be omitted. Omitted means the field
+exists in every state, handlers in every state may assign it, and `pre` and
+`post` are the field pattern. A present list is the `in` clauses. Each
+clause's `states` names one or more states of this component, including the
+implicit `Start` of an unnamed start. `write` is false when the clause does
+not say `write`. `pre` and `post` are null when omitted; resolution is in
+[state conditions](#state-conditions). An unknown name, a state named in
+more than one clause, or a rules list that names no states MUST fail check.
 Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
@@ -823,14 +842,15 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
 - **A release sees what the parent holds.** Matching a child's fields,
   machine state, or mailbox would read another instance. The parent holds
   the port name and the key.
-- **State conditions do not select the handler.** The message pattern stays
-  the only enablement. The entry pattern checks the state the turn would
-  commit. The post-condition checks the fields of the state the turn would
-  leave, after that handler's assignments and before `goto` commits. The
-  entry pattern is a condition on the state change, not a guard on `on`.
-- **One field, scoped by where it lives.** A second copy per state would
-  fork the value. Dropping it on the way out and initializing it on the way
-  back keeps one field. That is not an entry action and not a handler.
+- **`pre` and `post` do not select the handler.** The message pattern stays
+  the only enablement. `pre` checks a field as the turn enters a state.
+  `post` checks that field in the state the turn would leave, after that
+  handler's assignments and before `goto` commits. Neither is a guard on
+  `on`.
+- **One field, scoped by its `in` clauses.** A second copy per state would
+  fork the value. Dropping it on the way out of that set and initializing
+  it on the way back keeps one field. That is not an entry action and not
+  a handler.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -848,11 +868,3 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   designates the child, stays open. The tree is `{ kind: "release", filter }`.
 - **Construct spelling.** The source spelling of constructing a child stays
   open. The tree is `{ kind: "construct", component, key, children }`.
-- **Post-condition spelling.** The source spelling of a post-condition stays
-  open. The form the tree names is `post` on the state
-  ([state conditions](#state-conditions)). It is not a silent edit to
-  `field` or `on`.
-- **Entry spelling.** The source spelling of an entry pattern stays open.
-  The form the tree names is `entry` on the state
-  ([state conditions](#state-conditions)). It is not a silent edit to
-  `field`, `on`, or `post`.

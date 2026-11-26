@@ -1,27 +1,24 @@
 ---
 id: components-025
-title: An entry pattern is matched before the post-condition
+title: A field pre is matched on entry before post
 spec_ref: .agents/specifications/components.spec.md#state-conditions; .agents/specifications/components.spec.md#matching; .agents/specifications/components.spec.md#identity-and-lifetime
 ---
 
-# Entry patterns
+# A field pre is matched on entry before post
 
 ## Requirement
 
 Preconditions:
 
-- A state may declare `entry`, a pattern over the fields in scope. The source
-  spelling stays open. Omitting `entry` means the state declares none.
-- Handler choice is the route list and the message pattern. The entry
-  pattern does not select a handler.
-- Each assign still matches that field's own pattern before the entry
-  pattern is tried.
-- `Latch` keeps `n` in scope. Shut is the start. Open's `entry` is
-  `{ n: 1 }`. The `entry` line below is that tree property, not a chosen
-  source spelling. The message pattern selects the handler. Open's entry
-  does not.
-- The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
-  `on down @Stuck` handlers match that message. The first is selected.
+- `pre` is declared on a field, inside an `in` clause. A state does not
+  declare `entry`. Omitting `pre` means that state uses the field pattern.
+- Handler choice is the route list and the message pattern. `pre` does not
+  select a handler.
+- Each assign still matches that field's own pattern before `pre` is tried.
+- `Latch` keeps `n` in Shut and Open. Shut's clause is blank, so its `pre`
+  and `post` are `number`. Open's `pre` is `1`. No `in` is marked `write`.
+  One handler matches `@Open`. One handler matches `@Stuck`.
+- The test harness delivers `@Open` and `@Stuck` to Latch as `down`.
 
 ```kith
 component Counter {
@@ -34,7 +31,11 @@ component Counter {
 }
 
 component Latch {
-  field n: number = 0;
+  field n: number = 0 {
+    in Shut
+    in Open
+      pre 1
+  }
   tick: Counter;
 
   start Shut {
@@ -47,16 +48,9 @@ component Latch {
       send to tick @Tick;
       goto Open;
     }
-    on down @Stuck {
-      n -> 1;
-      send to tick @Tick;
-      goto Open;
-    }
   }
 
-  state Open {
-    entry { n: 1 }
-  }
+  state Open {}
 }
 
 export scene Main {
@@ -68,33 +62,31 @@ export scene Main {
 
 Expected behavior:
 
-- Creating an instance MUST match the start state's entry pattern against
-  the initial fields before init is offered. A miss MUST fail creation with
-  a diagnostic that says `entry pattern` and MUST NOT offer init. Creation
-  does not leave a state, so it does not run the start state's
-  post-condition.
-- A transition MUST match the destination state's entry pattern against the
-  fields after the handler's assignments, before the commit and before the
-  post-condition of the state being left. `goto` uses the destination.
-  `complete` does not change state, so the entry pattern of the state that
-  remains is checked, and `post` does not run.
-- A miss is the same failure as a missed post-condition. The diagnostic
-  MUST say `entry pattern`. Machine state MUST stay as it was at the start
-  of the turn. Nothing recorded is routed, including a construction.
-- When the destination entry matches and the post-condition of the state
-  being left does not, the diagnostic MUST say `post-condition` and name
-  that state. The turn MUST NOT commit. The destination's post-condition
-  does not run on the entering turn.
+- Creating an instance MUST match the start state's `pre` for each field
+  that exists there, after the initializer has matched the field pattern
+  and before init is offered. A miss MUST fail creation with a diagnostic
+  that says `pre` and MUST NOT offer init. Creation does not leave a state,
+  so it does not run `post`.
+- A transition that would leave MUST match the destination's `pre` against
+  the fields that would exist there, after the handler's assignments and
+  before commit, and before `post` of the state being left. A turn that
+  does not leave, including `complete`, MUST NOT run `pre`.
+- A miss MUST fail the transition. The diagnostic MUST say `pre` and name
+  the state being entered. Machine state MUST stay as it was at the start
+  of the turn. Nothing recorded is routed. A `pre` miss MUST NOT report
+  `post`.
+- When the destination `pre` matches and `post` of the state being left
+  does not, the diagnostic MUST say `post` and name that state. The turn
+  MUST NOT commit.
 - A field write that misses that field's own pattern MUST fail with that
-  field diagnostic before the entry pattern is tried.
+  field diagnostic before `pre` is tried.
 
 Postconditions:
 
 - Tests: `tests/interpreter.rs` (`req:components-025`). In the Latch
-  example, `@Open` delivered as `down` assigns `n` to `1`, Open's entry
+  example, `@Open` delivered as `down` assigns `n` to `1`, Open's `pre`
   matches, commits `Open`, and routes `@Tick`. `@Stuck` delivered as `down`
-  leaves `n` at `0`. Open's entry misses, so Latch stays `Shut`, `n` stays
-  `0`, `@Tick` is not routed, and the later `@Stuck` handler does not run.
-  A missed entry leaves fields, machine state, completion, and recorded
-  sends and constructions uncommitted. Creation fails before init when the
-  initial fields miss the start state's entry pattern.
+  leaves `n` at `0`. Open's `pre` misses, so Latch stays `Shut`, `n` stays
+  `0`, and `@Tick` is not routed. A missed `pre` leaves fields, machine
+  state, completion, and recorded sends uncommitted. Creation fails before
+  init when the initial fields miss the start state's `pre`.
