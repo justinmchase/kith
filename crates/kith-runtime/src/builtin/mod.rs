@@ -225,6 +225,7 @@ fn host_component(name: &str) -> Component {
             name: "interval".into(),
             pattern: Some(serde_json::json!({"kind": "type", "type": "number"})),
             init: None,
+            rules: None,
         }]
     } else {
         Vec::new()
@@ -239,7 +240,6 @@ fn host_component(name: &str) -> Component {
             name: "Start".into(),
             start: true,
             named: false,
-            post: None,
             handlers: Vec::new(),
         }],
     }
