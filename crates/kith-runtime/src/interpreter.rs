@@ -153,7 +153,7 @@ impl World {
             check_routes(component)?;
             check_effects(component)?;
             check_constructs(program, component)?;
-            check_posts(component)?;
+            check_state_conditions(component)?;
         }
         check_instance(program, &scene.root)?;
         Ok(())
@@ -856,6 +856,7 @@ impl World {
             self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
+        self.match_entry(&component, &start, &fields)?;
         let id = ActorId(self.next_id);
         self.next_id += 1;
         self.dispatcher.register(id);
@@ -1012,6 +1013,16 @@ impl World {
         instance.completion_json = snap.completion_json;
     }
 
+    /// Entry pattern of the state the turn would commit. A missing pattern passes.
+    fn match_entry(
+        &self,
+        component: &Component,
+        state: &str,
+        fields: &HashMap<String, Doc>,
+    ) -> Result<(), Error> {
+        self.match_named_condition(component, state, fields, true)
+    }
+
     /// Post-condition of the state being left. The fields are the ones after
     /// the leaving handler's assignments and before `goto` commits. A missing
     /// pattern passes. A state the turn only enters is not checked here.
@@ -1021,12 +1032,27 @@ impl World {
         state: &str,
         fields: &HashMap<String, Doc>,
     ) -> Result<(), Error> {
+        self.match_named_condition(component, state, fields, false)
+    }
+
+    fn match_named_condition(
+        &self,
+        component: &Component,
+        state: &str,
+        fields: &HashMap<String, Doc>,
+        entry: bool,
+    ) -> Result<(), Error> {
         let declared = component
             .states
             .iter()
             .find(|item| item.name == state)
             .ok_or_else(|| Error::new(format!("unknown state {state}")))?;
-        let Some(pattern) = &declared.post else {
+        let pattern = if entry {
+            declared.entry.as_ref()
+        } else {
+            declared.post.as_ref()
+        };
+        let Some(pattern) = pattern else {
             return Ok(());
         };
         let object = doc::object(
@@ -1035,8 +1061,13 @@ impl World {
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
         if match_program(pattern, &object, &self.program.rules)?.is_none() {
+            let label = if entry {
+                "entry pattern"
+            } else {
+                "post-condition"
+            };
             return Err(Error::new(format!(
-                "post-condition did not match on {} in {state}",
+                "{label} did not match on {} in {state}",
                 component.name
             )));
         }
@@ -1066,12 +1097,16 @@ impl World {
                 instance.fields.clone(),
             )
         };
+        let component = self
+            .program
+            .component(&kind_name)
+            .ok_or_else(|| Error::new("unknown kind"))?
+            .clone();
+        if let Err(err) = self.match_entry(&component, &state_name, &fields) {
+            self.restore_machine(id, snap);
+            return Err(err);
+        }
         if state_name != from {
-            let component = self
-                .program
-                .component(&kind_name)
-                .ok_or_else(|| Error::new("unknown kind"))?
-                .clone();
             if let Err(err) = self.match_post(&component, &from, &fields) {
                 self.restore_machine(id, snap);
                 return Err(err);
@@ -2232,29 +2267,53 @@ fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Erro
     Ok(())
 }
 
-fn check_posts(component: &Component) -> Result<(), Error> {
+fn check_state_conditions(component: &Component) -> Result<(), Error> {
     let names: HashSet<&str> = component
         .fields
         .iter()
         .map(|field| field.name.as_str())
         .collect();
     for state in &component.states {
-        let Some(pattern) = &state.post else {
-            continue;
-        };
-        if pattern.get("kind").and_then(Json::as_str) != Some("over") {
-            continue;
-        }
-        let Some(keys) = pattern.get("keys").and_then(Json::as_object) else {
-            continue;
-        };
-        for key in keys.keys() {
-            if !names.contains(key.as_str()) {
-                return Err(Error::new(format!(
-                    "post-condition names {key} which is not in scope on {} in {}",
-                    component.name, state.name
-                )));
-            }
+        check_condition_scope(
+            component,
+            state,
+            "entry pattern",
+            state.entry.as_ref(),
+            &names,
+        )?;
+        check_condition_scope(
+            component,
+            state,
+            "post-condition",
+            state.post.as_ref(),
+            &names,
+        )?;
+    }
+    Ok(())
+}
+
+fn check_condition_scope(
+    component: &Component,
+    state: &crate::ast::State,
+    label: &str,
+    pattern: Option<&Json>,
+    names: &HashSet<&str>,
+) -> Result<(), Error> {
+    let Some(pattern) = pattern else {
+        return Ok(());
+    };
+    if pattern.get("kind").and_then(Json::as_str) != Some("over") {
+        return Ok(());
+    }
+    let Some(keys) = pattern.get("keys").and_then(Json::as_object) else {
+        return Ok(());
+    };
+    for key in keys.keys() {
+        if !names.contains(key.as_str()) {
+            return Err(Error::new(format!(
+                "{label} names {key} which is not in scope on {} in {}",
+                component.name, state.name
+            )));
         }
     }
     Ok(())
