@@ -370,22 +370,43 @@ rule ComponentDeclaration =
   -> { kind: "component", name: n, fields: f, ports: p, states: s }
 ;
 
+rule ConstructArg =
+  n:Identifier ":" e:Expression
+  -> { kind: "arg", name: n, expression: e }
+;
+
+rule ConstructArgTail =
+  ","? more:ConstructArg -> more
+;
+
+rule ConstructArgs =
+  first:ConstructArg rest:ConstructArgTail* ","?
+  -> (flat (pack first rest))
+;
+
+rule ConstructionArgs =
+  "(" a:ConstructArgs? ")"
+  -> (coalesce a [])
+;
+
 rule NamedChild =
-  k:Identifier "=" n:Identifier "(" ")" b:InstanceBody? ";"?
+  k:Identifier "=" n:Identifier a:ConstructionArgs b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
     key: k,
+    args: a,
     children: (coalesce b [])
   }
 ;
 
 rule UnnamedChild =
-  n:Identifier "(" ")" b:InstanceBody? ";"?
+  n:Identifier a:ConstructionArgs b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
     key: null,
+    args: a,
     children: (coalesce b [])
   }
 ;
@@ -398,11 +419,12 @@ rule ChildConstruction =
 rule InstanceBody = "{" c:ChildConstruction* "}" -> c;
 
 rule Construction =
-  n:Identifier "(" ")" b:InstanceBody? ";"?
+  n:Identifier a:ConstructionArgs b:InstanceBody? ";"?
   -> {
     kind: "instance",
     component: n,
     key: null,
+    args: a,
     children: (coalesce b [])
   }
 ;

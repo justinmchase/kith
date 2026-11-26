@@ -246,8 +246,8 @@ A host driver MUST NOT run Kith `on` handlers for a child instance it
 replaces. Same-turn stream writes are not Uffda `HostCallable` returns
 that wait; they return `undefined` now. The real driver for a kind this
 runtime provides is the built-in import in
-[built-ins](./builtins.spec.md#registration). `Pipe` and `Clock` are those
-drivers. The scene-filled `Http` in `examples/health.kith` remains the user
+[built-ins](./builtins.spec.md#registration). `Pipe`, `Clock`, and `Timer`
+are those drivers. The scene-filled `Http` in `examples/health.kith` remains the user
 mock and still replies with one `@Response`. `kith:http` is not this slice.
 The mock does not import `kith:http`.
 

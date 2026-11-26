@@ -526,3 +526,160 @@ fn a_gap_and_an_overlap_fail_the_expression() {
         "{leap}"
     );
 }
+
+const METRONOME: &str = r#"
+import "kith:time" Timer;
+
+export Metronome;
+export Main;
+
+component Metronome {
+  field beats: number = 0;
+  field err: any;
+  timer: Timer;
+
+  start {
+    on up @Tick {
+      beats -> (add beats 1);
+    }
+    on up "Error" reason:string {
+      err -> reason;
+    }
+  }
+}
+
+export scene Main {
+  Metronome() {
+    timer = Timer(interval: 1500);
+  }
+}
+"#;
+
+fn timer_program(construction: &str) -> String {
+    format!(
+        r#"
+import "kith:time" Timer;
+export Main;
+component Metronome {{
+  timer: Timer;
+  start {{}}
+}}
+export scene Main {{
+  Metronome() {{
+    timer = {construction};
+  }}
+}}
+"#
+    )
+}
+
+fn construction_error(source: &str) -> String {
+    match load(source) {
+        Err(error) => error.message,
+        Ok(program) => match World::start(program) {
+            Err(error) => error.message,
+            Ok(_) => panic!("construction was accepted"),
+        },
+    }
+}
+
+#[test]
+// req:builtins-005
+fn timer_sends_tick_on_the_dispatcher_clock_without_blocking() {
+    let program = load(METRONOME).expect("resolve timer");
+    let declared = program.component("Timer").expect("Timer component");
+    assert_eq!(declared.fields[0].name, "interval");
+    assert!(program.host_kinds.iter().any(|name| name == "Timer"));
+    let child = &program.scene("Main").expect("Main").root.children[0];
+    assert_eq!(child.component, "Timer");
+    assert_eq!(child.args.len(), 1);
+    assert_eq!(child.args[0].name, "interval");
+    assert_eq!(child.args[0].kind, "arg");
+    assert_eq!(
+        child.args[0].expression["value"].as_f64(),
+        Some(1500.0),
+        "expression {:?}",
+        child.args[0].expression
+    );
+
+    let mut world = World::start(program.clone()).expect("start");
+    world.run_until_idle().unwrap();
+    assert_eq!(field(&world, "beats"), &json!(0.0));
+    assert_eq!(world.virtual_now(), 0);
+    let timer = world.child(root(&world), "timer").expect("timer");
+    assert_eq!(world.field(timer, "interval"), Some(&json!(1500.0)));
+    let snap = world.snapshot().unwrap();
+    let decoded = decode(&snap).unwrap();
+    let timers = decoded["timers"].as_array().expect("timers");
+    assert_eq!(timers.len(), 1);
+    assert_eq!(timers[0]["due"].as_f64(), Some(1500.0));
+
+    world.send(timer, json!("Nope")).unwrap();
+    world.run_until_idle().unwrap();
+    assert_eq!(field(&world, "err"), &json!("unknown"));
+    assert_eq!(field(&world, "beats"), &json!(0.0));
+    assert_eq!(world.virtual_now(), 0);
+
+    assert!(world.fire_next_timer().unwrap());
+    assert_eq!(world.virtual_now(), 1500);
+    world.run_until_idle().unwrap();
+    assert_eq!(field(&world, "beats"), &json!(1.0));
+    world.run_until_idle().unwrap();
+    assert_eq!(field(&world, "beats"), &json!(1.0));
+    assert_eq!(world.virtual_now(), 1500);
+
+    assert!(world.fire_next_timer().unwrap());
+    assert_eq!(world.virtual_now(), 3000);
+    world.run_until_idle().unwrap();
+    assert_eq!(field(&world, "beats"), &json!(2.0));
+
+    let mut restored = World::restore(program, &snap).unwrap();
+    restored.run_until_idle().unwrap();
+    assert_eq!(field(&restored, "beats"), &json!(0.0));
+    assert!(restored.fire_next_timer().unwrap());
+    restored.run_until_idle().unwrap();
+    assert_eq!(field(&restored, "beats"), &json!(1.0));
+    assert_eq!(restored.virtual_now(), 1500);
+
+    let string_tick = METRONOME.replace("on up @Tick", "on up \"Tick\"");
+    let mut missed = start(&string_tick);
+    missed.run_until_idle().unwrap();
+    assert!(missed.fire_next_timer().unwrap());
+    missed.run_until_idle().unwrap();
+    assert_eq!(field(&missed, "beats"), &json!(0.0));
+}
+
+#[test]
+// req:builtins-005
+fn timer_rejects_a_non_positive_interval_at_construction() {
+    let zero = construction_error(&timer_program("Timer(interval: 0)"));
+    assert!(zero.contains("positive"), "{zero}");
+    let negative = construction_error(&timer_program("Timer(interval: (sub 0 5))"));
+    assert!(negative.contains("positive"), "{negative}");
+    let missing = construction_error(&timer_program("Timer()"));
+    assert!(missing.contains("interval"), "{missing}");
+    let text = construction_error(&timer_program("Timer(interval: \"no\")"));
+    assert!(text.contains("interval"), "{text}");
+    let duplicate = construction_error(&timer_program("Timer(interval: 1500, interval: 1500)"));
+    assert!(duplicate.contains("duplicate"), "{duplicate}");
+    let extra = construction_error(&timer_program("Timer(interval: 1500 extra: 1)"));
+    assert!(extra.contains("unknown field"), "{extra}");
+
+    let clock = construction_error(
+        r#"
+import "kith:time" Clock;
+export Main;
+component Box {
+  clock: Clock;
+  start {}
+}
+export scene Main {
+  Box() { clock = Clock(interval: 1); }
+}
+"#,
+    );
+    assert!(
+        clock.contains("does not take construction arguments"),
+        "{clock}"
+    );
+}

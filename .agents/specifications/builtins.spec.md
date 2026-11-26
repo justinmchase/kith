@@ -135,7 +135,7 @@ continue that pipe.
 
 ## Time
 
-`import "kith:time" Instant DateTime Zone Clock instant instant_text zone date_time instant_at add_seconds diff_seconds offset_seconds;`
+`import "kith:time" Instant DateTime Zone Clock Timer instant instant_text zone date_time instant_at add_seconds diff_seconds offset_seconds;`
 
 An instant is an Uffda Date: a millisecond UTC instant. At a codec boundary
 the compact spelling is `d"…"` in RFC3339. `@date"…"` still decodes to the
@@ -205,6 +205,19 @@ run is reading the wall), and the `"Now"` replies already produced, in order.
 Restore MUST answer the next `"Now"` with the next remaining scripted
 instant. Per-instance driver state for `Pipe` is part of the same snapshot.
 
+### Timer component
+
+`Timer` is the [Timer component](./glossary.spec.md#host). A parent holds it by
+port and constructs it as `Timer(interval: Milliseconds)`. `Milliseconds` is
+a finite number of milliseconds (`Timer(interval: 1500)`). It is not a
+keyword. `Timer` is a host driver: it MUST NOT run Kith `on` handlers, it
+MUST NOT `complete`, and unmatched init is dropped.
+
+The behavior, including the dispatcher-clock delay `interval / 1000`
+seconds, `@Tick`, and the non-positive interval, is defined in
+[timers](./timers.spec.md#timer-component). `Timer` MUST NOT read the wall
+clock. `"Now"` and `"Zone"` stay on `Clock`.
+
 ## Why this design
 
 - **The prefix is not a download.** A built-in has no version range and no
@@ -219,3 +232,5 @@ instant. Per-instance driver state for `Pipe` is part of the same snapshot.
 - **The dispatcher clock stays virtual.** `send after` is still seconds from
   zero. The wall is a message a checker can script. Connecting them is
   `(diff_seconds later earlier)`, and the program writes that number itself.
+  `Timer` arms that same clock from a millisecond `interval`. It does not
+  read the wall.

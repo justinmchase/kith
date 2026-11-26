@@ -73,6 +73,41 @@ route list includes `self`, not `on down` alone.
 The first slice uses a virtual clock starting at 0. Advancing to a timer does
 not wait on real time.
 
+## Timer component
+
+`Timer(interval: Milliseconds)` is the [Timer component](./glossary.spec.md#host):
+a child a parent holds, imported from `kith:time`. The contract for that
+module is in [built-ins](./builtins.spec.md#timer-component). It is not the
+dispatcher clock, and it is not the `Clock` component.
+
+`Milliseconds` is the unit of `interval`: a finite number of milliseconds,
+written as an expression (`Timer(interval: 1500)`). There is no `every`
+keyword and no `Milliseconds` keyword.
+
+- Construction MUST record `interval` and MUST arm one dispatcher-clock
+  delay of `interval / 1000` seconds. That duration becomes a millisecond
+  count the same way `send after` does, truncating toward zero. Construction
+  MUST NOT sleep, wait, or otherwise block a turn.
+- A missing `interval`, a value that is not a finite number, a non-positive
+  number, a duplicate argument name, or an argument name other than
+  `interval` MUST fail construction. Construction is creating the instance.
+  `check` MUST NOT construct actors.
+- A construction argument on any other kind MUST fail construction. `Kind()`
+  with empty parentheses is unchanged.
+- When the delay is due, `Timer` MUST send `@Tick` up, then arm the next
+  delay of the same length. Recurrence is that rescheduling. The parent
+  handles `on up @Tick`. `@Tick` is the registry symbol `Tick` and MUST NOT
+  be the string `"Tick"`.
+- Any other message MUST reply `"Error" "unknown"` and MUST NOT arm or
+  replace the pending delay.
+- `World::run_until_idle` MUST leave the delay pending. `World::run`
+  delivers it by advancing the dispatcher clock, as
+  [constraints](#constraints) require, and leaves the next interval pending.
+  A reachable Timer keeps one delay pending, so `World::run` does not go
+  idle while that child is held.
+- The pending delay is a dispatcher timer, so snapshot and restore keep it.
+  The recorded `interval` is the millisecond count the next arm uses.
+
 ## Why this design
 
 - **Delay is a send, not a sleep.** Sleeping on a turn would stall every other
@@ -82,6 +117,8 @@ not wait on real time.
 - **Idle vs run.** Tests need to see Carrier in `Shipping` with delivery still
   in flight. Operators need `kith run` to finish. Those are two drains of the
   same clock.
+- **A child, not a keyword.** The Timer component arms the next delay after
+  `@Tick`. The parent stays an ordinary `on up`.
 
 ## Open questions
 

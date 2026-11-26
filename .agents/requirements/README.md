@@ -74,6 +74,7 @@ verify it cite it with `req:{id}`.
 - [Data values](./builtins/002-data.requirement.md)
 - [Stream pipe](./builtins/003-stream.requirement.md)
 - [Time values and Clock](./builtins/004-time.requirement.md)
+- [Timer component](./builtins/005-timer.requirement.md)
 
 ## Edges
 
