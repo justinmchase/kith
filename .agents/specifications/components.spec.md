@@ -44,7 +44,8 @@ capitals.
 - Choosing what happens MUST be done by a transition. Expressions MUST NOT send
   messages or change machine state.
 - A transition MUST be deterministic: the same machine state and the same
-  matched message MUST produce the same field changes and the same sends.
+  matched message MUST produce the same field changes, the same sends, the
+  same children constructed or released, and the same post-condition match.
 - A transition MAY send zero or more messages, change fields, evaluate
   expression statements, complete, and change the machine's state. It MUST
   NOT wait by blocking the dispatcher. The
@@ -314,6 +315,8 @@ A handler body is a synchronous prefix followed by at most one terminal.
   with a diagnostic. It MUST NOT be forwarded to this instance's children.
 - An unmatched `send down` is ignored by that child. It MUST NOT fail the
   send and MUST NOT be forwarded to that child's children.
+- This match selects the handler. A post-condition does not
+  ([state conditions](#state-conditions)).
 
 ### Identity and lifetime
 
@@ -347,6 +350,9 @@ A handler body is a synchronous prefix followed by at most one terminal.
   diagnostic and MUST NOT drop a child. Zero matches MUST fail that
   release. The source spelling is open
   ([open questions](#open-questions)). Collection is unreachability only.
+- Creating an instance does not leave a state, so it does not run the start
+  state's post-condition ([state conditions](#state-conditions)). Init is
+  still offered.
 - After the scene tree is constructed, the runtime MUST offer each
   component instance init in its start state, before any injected message.
   Init has no payload. Only `on init` matches it. Unmatched init MUST be
@@ -380,6 +386,95 @@ A transition MAY construct an unnamed child. The source spelling is open
 - A release in the same turn, before the new instance runs, MUST drop it,
   init included, so it does not run. Expressions MUST NOT construct.
 
+### State conditions
+
+A state MAY declare a post-condition pattern over the fields in scope in
+that state. It is the check before leaving that state. It is not a check of
+the state being entered. It does not select the handler. Handler choice
+stays the route list and the message pattern, first match, as
+[matching](#matching) specifies.
+
+On a turn that would leave the state, that state's post-condition runs on
+the fields of the state being left, after the leaving handler's assignments
+and before `goto` commits. A state that does not declare a post-condition
+passes that check. Only then does the turn commit machine state and route
+the sends and constructions it recorded, and apply the releases it recorded.
+
+A miss MUST fail the transition with a diagnostic. Machine state stays as it
+was at the start of the turn, including every field the handler assigned.
+Nothing recorded is routed. Constructions and releases do not take effect.
+A post-condition on a state the turn only enters does not run on that
+entering turn. A turn that does not leave its state does not run that
+state's post-condition. `complete` does not leave the state, so it does not
+run the post-condition. The pattern is not an exit action and not a
+`succeed` or `fail`.
+
+The pattern is pure. It does not send, construct, or read a clock.
+
+Creating an instance does not leave a state, so it does not run the start
+state's post-condition. Init is still offered. This check does not select a
+handler.
+
+The source spelling stays open ([open questions](#open-questions)). The tree
+property is `post`.
+
+`Gate` keeps `n` in scope. Closed's `post` is `{ n: 0 }`. Open's `post` is
+`{ n: 1 }`. The `post` line in this program is that tree property, not a
+chosen source spelling. The example does not leave Open. Open's post does
+not run on the turn that only enters Open.
+
+The test harness delivers `@Open` and `@Stuck` to Gate as `down`. Gate keeps
+`on down` for those messages. Closed's post runs because those turns would
+leave Closed.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Gate {
+  field n: number = 0;
+  tick: Counter;
+
+  start Closed {
+    post { n: 0 }
+    on down @Open {
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+  }
+
+  state Open {
+    post { n: 1 }
+  }
+}
+
+export scene Main {
+  Gate() {
+    tick = Counter();
+  }
+}
+```
+
+`@Open`, delivered to Gate as `down`, would leave Closed. After the handler's
+assignments `n` is still `0`, so Closed's `post { n: 0 }` matches before
+`goto` commits. The turn commits: Gate is `Open`, and `@Tick` is routed, so
+`seen` is `1`. Open's `post { n: 1 }` does not run on that entering turn.
+
+`@Stuck`, delivered the same way, assigns `n` to `1` and then would leave
+Closed. Closed's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
+not commit: Gate stays `Closed`, `n` stays `0`, and `@Tick` is not routed.
+
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
@@ -396,7 +491,7 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
 - `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
-- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler] }`
+- `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], post: Pattern | null }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
 - `{ kind: "sendUp", message: Expression | Sequence, after: Expression | null }`
@@ -412,7 +507,9 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 
 Exactly one state in a component MUST have `start: true`. Unnamed `start { }`
 MUST project `name: "Start"` and `named: false`. `start Name` and
-`state Name` MUST project `named: true`. Field `pattern` and
+`state Name` MUST project `named: true`. State `post` MAY be omitted. Omitted
+means that state does not declare a post-condition. It is a tree property,
+not a source spelling. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
 MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
@@ -465,6 +562,10 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
 - **A release sees what the parent holds.** Matching a child's fields,
   machine state, or mailbox would read another instance. The parent holds
   the port name and the key.
+- **State conditions do not select the handler.** The message pattern stays
+  the only enablement. The post-condition checks the fields of the state the
+  turn would leave, after that handler's assignments and before `goto`
+  commits.
 - **One terminal, last.** Several `goto`s would leave the next state's
   meaning ambiguous. Running statements after `goto` or `complete` would
   hide that the turn already ended. Sends stay later-turn, so `send` then
@@ -482,3 +583,7 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   designates the child, stays open. The tree is `{ kind: "release", filter }`.
 - **Construct spelling.** The source spelling of constructing a child stays
   open. The tree is `{ kind: "construct", component, key, children }`.
+- **Post-condition spelling.** The source spelling of a post-condition stays
+  open. The form the tree names is `post` on the state
+  ([state conditions](#state-conditions)). It is not a silent edit to
+  `field` or `on`.

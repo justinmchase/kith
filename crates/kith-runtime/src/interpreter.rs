@@ -1,4 +1,4 @@
-use crate::ast::{Field, Instance, Program, Statement};
+use crate::ast::{Component, Field, Instance, Program, Statement};
 use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::doc::{self, Doc};
@@ -66,6 +66,15 @@ struct InstanceState {
     completion: Option<Doc>,
     completion_json: Option<Json>,
     driver: Option<Driver>,
+}
+
+struct MachineSnap {
+    fields: HashMap<String, Doc>,
+    field_json: HashMap<String, Json>,
+    state: String,
+    completed: bool,
+    completion: Option<Doc>,
+    completion_json: Option<Json>,
 }
 
 pub struct World {
@@ -144,6 +153,7 @@ impl World {
             check_routes(component)?;
             check_effects(component)?;
             check_constructs(program, component)?;
+            check_posts(component)?;
         }
         check_instance(program, &scene.root)?;
         Ok(())
@@ -836,9 +846,6 @@ impl World {
             .ok_or_else(|| Error::new(format!("kind {kind} has no start")))?
             .name
             .clone();
-        let id = ActorId(self.next_id);
-        self.next_id += 1;
-        self.dispatcher.register(id);
         let mut fields = HashMap::new();
         for field in &component.fields {
             let value = if let Some(init) = &field.init {
@@ -849,6 +856,9 @@ impl World {
             self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
         }
+        let id = ActorId(self.next_id);
+        self.next_id += 1;
+        self.dispatcher.register(id);
         let field_json = project_map(&fields)?;
         self.instances.insert(
             id,
@@ -978,7 +988,99 @@ impl World {
         unmatched(route, &kind_name, self.instances[&id].parent, message)
     }
 
+    fn machine_snap(&self, id: ActorId) -> MachineSnap {
+        let instance = &self.instances[&id];
+        MachineSnap {
+            fields: instance.fields.clone(),
+            field_json: instance.field_json.clone(),
+            state: instance.state.clone(),
+            completed: instance.completed,
+            completion: instance.completion.clone(),
+            completion_json: instance.completion_json.clone(),
+        }
+    }
+
+    fn restore_machine(&mut self, id: ActorId, snap: MachineSnap) {
+        let Some(instance) = self.instances.get_mut(&id) else {
+            return;
+        };
+        instance.fields = snap.fields;
+        instance.field_json = snap.field_json;
+        instance.state = snap.state;
+        instance.completed = snap.completed;
+        instance.completion = snap.completion;
+        instance.completion_json = snap.completion_json;
+    }
+
+    /// Post-condition of the state being left. The fields are the ones after
+    /// the leaving handler's assignments and before `goto` commits. A missing
+    /// pattern passes. A state the turn only enters is not checked here.
+    fn match_post(
+        &self,
+        component: &Component,
+        state: &str,
+        fields: &HashMap<String, Doc>,
+    ) -> Result<(), Error> {
+        let declared = component
+            .states
+            .iter()
+            .find(|item| item.name == state)
+            .ok_or_else(|| Error::new(format!("unknown state {state}")))?;
+        let Some(pattern) = &declared.post else {
+            return Ok(());
+        };
+        let object = doc::object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        if match_program(pattern, &object, &self.program.rules)?.is_none() {
+            return Err(Error::new(format!(
+                "post-condition did not match on {} in {state}",
+                component.name
+            )));
+        }
+        Ok(())
+    }
+
     fn run_statements(
+        &mut self,
+        id: ActorId,
+        statements: &[Statement],
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+        let snap = self.machine_snap(id);
+        let from = snap.state.clone();
+        let sends = match self.propose_turn(id, statements, bindings) {
+            Ok(sends) => sends,
+            Err(err) => {
+                self.restore_machine(id, snap);
+                return Err(err);
+            }
+        };
+        let (kind_name, state_name, fields) = {
+            let instance = &self.instances[&id];
+            (
+                instance.kind.clone(),
+                instance.state.clone(),
+                instance.fields.clone(),
+            )
+        };
+        if state_name != from {
+            let component = self
+                .program
+                .component(&kind_name)
+                .ok_or_else(|| Error::new("unknown kind"))?
+                .clone();
+            if let Err(err) = self.match_post(&component, &from, &fields) {
+                self.restore_machine(id, snap);
+                return Err(err);
+            }
+        }
+        Ok(sends)
+    }
+
+    fn propose_turn(
         &mut self,
         id: ActorId,
         statements: &[Statement],
@@ -2125,6 +2227,34 @@ fn check_ports(program: &Program, ports: &[crate::ast::Port]) -> Result<(), Erro
         }
         if program.kind(&port.component).is_none() {
             return Err(Error::new(format!("unknown port kind {}", port.component)));
+        }
+    }
+    Ok(())
+}
+
+fn check_posts(component: &Component) -> Result<(), Error> {
+    let names: HashSet<&str> = component
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    for state in &component.states {
+        let Some(pattern) = &state.post else {
+            continue;
+        };
+        if pattern.get("kind").and_then(Json::as_str) != Some("over") {
+            continue;
+        }
+        let Some(keys) = pattern.get("keys").and_then(Json::as_object) else {
+            continue;
+        };
+        for key in keys.keys() {
+            if !names.contains(key.as_str()) {
+                return Err(Error::new(format!(
+                    "post-condition names {key} which is not in scope on {} in {}",
+                    component.name, state.name
+                )));
+            }
         }
     }
     Ok(())
