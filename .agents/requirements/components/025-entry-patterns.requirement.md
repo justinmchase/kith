@@ -16,6 +16,55 @@ Preconditions:
   pattern does not select a handler.
 - Each assign still matches that field's own pattern before the entry
   pattern is tried.
+- `Latch` keeps `n` in scope. Shut is the start. Open's `entry` is
+  `{ n: 1 }`. The `entry` line below is that tree property, not a chosen
+  source spelling. The message pattern selects the handler. Open's entry
+  does not.
+- The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
+  `on down @Stuck` handlers match that message. The first is selected.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Latch {
+  field n: number = 0;
+  tick: Counter;
+
+  start Shut {
+    on down @Open {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+  }
+
+  state Open {
+    entry { n: 1 }
+  }
+}
+
+export scene Main {
+  Latch() {
+    tick = Counter();
+  }
+}
+```
 
 Expected behavior:
 
@@ -41,8 +90,11 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:components-025`). A missed entry
-  leaves fields, machine state, completion, and recorded sends and
-  constructions uncommitted. A destination entry that matches commits the
-  goto. Creation fails before init when the initial fields miss the start
-  state's entry pattern.
+- Tests: `tests/interpreter.rs` (`req:components-025`). In the Latch
+  example, `@Open` delivered as `down` assigns `n` to `1`, Open's entry
+  matches, commits `Open`, and routes `@Tick`. `@Stuck` delivered as `down`
+  leaves `n` at `0`. Open's entry misses, so Latch stays `Shut`, `n` stays
+  `0`, `@Tick` is not routed, and the later `@Stuck` handler does not run.
+  A missed entry leaves fields, machine state, completion, and recorded
+  sends and constructions uncommitted. Creation fails before init when the
+  initial fields miss the start state's entry pattern.

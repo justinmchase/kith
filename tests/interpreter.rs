@@ -1214,6 +1214,140 @@ fn the_gate_post_example_commits_a_match_and_drops_a_miss() {
 
 #[test]
 // req:components-025
+fn the_latch_entry_example_commits_a_match_and_drops_a_miss() {
+    let number = |value: i64| json!({"kind": "number", "value": value});
+    let field = |name: &str, value: i64| Field {
+        kind: "field".into(),
+        name: name.into(),
+        pattern: None,
+        init: Some(number(value)),
+    };
+    let symbol = |name: &str| json!({"kind": "symbol", "name": name});
+    let on = |name: &str, body: Vec<Statement>| Handler {
+        kind: "handler".into(),
+        route: vec!["down".into()],
+        item: None,
+        pattern: symbol(name),
+        body,
+    };
+    let tick = Statement::SendTo {
+        port: "tick".into(),
+        message: symbol("Tick"),
+        after: None,
+    };
+    let goto_open = Statement::Goto {
+        state: "Open".into(),
+    };
+    let latch = Component {
+        kind: "component".into(),
+        name: "Latch".into(),
+        fields: vec![field("n", 0)],
+        ports: vec![port("Counter", "tick")],
+        states: vec![
+            State {
+                kind: "state".into(),
+                name: "Shut".into(),
+                start: true,
+                named: true,
+                entry: None,
+                post: None,
+                handlers: vec![
+                    on(
+                        "Open",
+                        vec![
+                            Statement::Assign {
+                                field: "n".into(),
+                                expression: number(1),
+                            },
+                            tick.clone(),
+                            goto_open.clone(),
+                        ],
+                    ),
+                    on("Stuck", vec![tick.clone(), goto_open.clone()]),
+                    on(
+                        "Stuck",
+                        vec![
+                            Statement::Assign {
+                                field: "n".into(),
+                                expression: number(1),
+                            },
+                            tick,
+                            goto_open,
+                        ],
+                    ),
+                ],
+            },
+            State {
+                kind: "state".into(),
+                name: "Open".into(),
+                start: false,
+                named: true,
+                entry: Some(over_equal("n", json!(1))),
+                post: None,
+                handlers: vec![],
+            },
+        ],
+    };
+    let counter = Component {
+        kind: "component".into(),
+        name: "Counter".into(),
+        fields: vec![field("seen", 0)],
+        ports: vec![],
+        states: vec![State {
+            kind: "state".into(),
+            name: "Start".into(),
+            start: true,
+            named: false,
+            entry: None,
+            post: None,
+            handlers: vec![on(
+                "Tick",
+                vec![Statement::Assign {
+                    field: "seen".into(),
+                    expression: number(1),
+                }],
+            )],
+        }],
+    };
+    let program = scene_program(
+        vec![latch, counter],
+        instance(
+            "Latch",
+            None,
+            vec![instance("Counter", Some("tick"), vec![])],
+        ),
+    );
+
+    let mut world = World::start(program.clone()).expect("start");
+    world
+        .send_document(world.root_id(), kith::doc::symbol("Open"))
+        .unwrap();
+    world.run_until_idle().expect("matching entry commits");
+    let latch_id = world.root_id();
+    let tick_id = world.child(latch_id, "tick").unwrap();
+    assert_eq!(world.state(latch_id), Some("Open"));
+    assert_eq!(world.field(latch_id, "n"), Some(&json!(1.0)));
+    assert_eq!(world.field(tick_id, "seen"), Some(&json!(1.0)));
+
+    let mut world = World::start(program).expect("start");
+    world
+        .send_document(world.root_id(), kith::doc::symbol("Stuck"))
+        .unwrap();
+    let err = world
+        .run_until_idle()
+        .expect_err("missed entry drops the send");
+    assert!(err.message.contains("entry pattern"), "{}", err.message);
+    assert!(err.message.contains("Open"), "{}", err.message);
+    assert!(!err.message.contains("post-condition"), "{}", err.message);
+    let latch_id = world.root_id();
+    let tick_id = world.child(latch_id, "tick").unwrap();
+    assert_eq!(world.state(latch_id), Some("Shut"));
+    assert_eq!(world.field(latch_id, "n"), Some(&json!(0.0)));
+    assert_eq!(world.field(tick_id, "seen"), Some(&json!(0.0)));
+}
+
+#[test]
+// req:components-025
 fn an_entry_pattern_is_matched_before_the_post_condition() {
     let number = |value: i64| json!({"kind": "number", "value": value});
     let field = |name: &str, value: i64| Field {

@@ -489,6 +489,66 @@ assignments `n` is still `0`, so Closed's `post { n: 0 }` matches before
 Closed. Closed's `post { n: 0 }` sees `n` as `1` and misses, so the turn does
 not commit: Gate stays `Closed`, `n` stays `0`, and `@Tick` is not routed.
 
+`Latch` keeps `n` in scope. Shut is the start. Open's `entry` is `{ n: 1 }`.
+The `entry` line in this program is that tree property, not a chosen source
+spelling. The message pattern selects the handler. Open's entry does not.
+Shut declares no post-condition, so leaving Shut does not run `post`.
+
+The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
+`on down @Stuck` handlers match that message. The first is selected.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Latch {
+  field n: number = 0;
+  tick: Counter;
+
+  start Shut {
+    on down @Open {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      send to tick @Tick;
+      goto Open;
+    }
+    on down @Stuck {
+      n -> 1;
+      send to tick @Tick;
+      goto Open;
+    }
+  }
+
+  state Open {
+    entry { n: 1 }
+  }
+}
+
+export scene Main {
+  Latch() {
+    tick = Counter();
+  }
+}
+```
+
+`@Open`, delivered to Latch as `down`, assigns `n` to `1` and proposes Open.
+Open's `entry { n: 1 }` matches before commit, so the turn commits: Latch is
+`Open`, and `@Tick` is routed, so `seen` is `1`.
+
+`@Stuck`, delivered the same way, proposes Open with `n` still `0`. Open's
+`entry { n: 1 }` misses, the same failure as a missed post-condition. Latch
+stays `Shut`, `n` stays `0`, and `@Tick` is not routed. The later `@Stuck`
+handler does not run.
+
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
