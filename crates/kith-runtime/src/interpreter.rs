@@ -1,4 +1,4 @@
-use crate::ast::{Component, Field, Instance, Program, Statement};
+use crate::ast::{Component, ConstructArg, Field, Instance, Program, Statement};
 use crate::builtin::{self, Driver};
 use crate::dispatch::{ActorId, Dispatcher, Message};
 use crate::doc::{self, Doc};
@@ -705,7 +705,7 @@ impl World {
         node: &Instance,
         parent: Option<ActorId>,
     ) -> Result<ActorId, Error> {
-        let id = self.spawn_kind(&node.component, parent)?;
+        let id = self.spawn_kind(&node.component, parent, &node.args)?;
         let mut children = Vec::new();
         for child in &node.children {
             let child_id = self.spawn_instance(child, Some(id))?;
@@ -729,7 +729,7 @@ impl World {
         parent: ActorId,
         node: &Instance,
     ) -> Result<ActorId, Error> {
-        let id = self.spawn_kind(&node.component, Some(parent))?;
+        let id = self.spawn_kind(&node.component, Some(parent), &node.args)?;
         let mut children = Vec::new();
         for child in &node.children {
             let child_id = self.spawn_instance(child, Some(id))?;
@@ -764,7 +764,7 @@ impl World {
         children: &[Instance],
     ) -> Result<Vec<ActorId>, Error> {
         check_construct_children(&self.program, component, children)?;
-        let id = self.spawn_kind(component, Some(parent))?;
+        let id = self.spawn_kind(component, Some(parent), &[])?;
         let mut nested = Vec::new();
         for child in children {
             let child_id = self.spawn_instance(child, Some(id))?;
@@ -835,7 +835,12 @@ impl World {
         Ok(())
     }
 
-    fn spawn_kind(&mut self, kind: &str, parent: Option<ActorId>) -> Result<ActorId, Error> {
+    fn spawn_kind(
+        &mut self,
+        kind: &str,
+        parent: Option<ActorId>,
+        args: &[ConstructArg],
+    ) -> Result<ActorId, Error> {
         let component = self
             .program
             .component(kind)
@@ -846,15 +851,34 @@ impl World {
             .ok_or_else(|| Error::new(format!("kind {kind} has no start")))?
             .name
             .clone();
+        if !args.is_empty() && kind != "Timer" {
+            return Err(Error::new(format!(
+                "{kind} does not take construction arguments"
+            )));
+        }
+        let named = named_args(args)?;
+        for name in named.keys() {
+            if !component.fields.iter().any(|field| field.name == *name) {
+                return Err(Error::new(format!("unknown field {name}")));
+            }
+        }
         let mut fields = HashMap::new();
         for field in &component.fields {
-            let value = if let Some(init) = &field.init {
+            let value = if let Some(expression) = named.get(field.name.as_str()) {
+                self.eval(expression, &HashMap::new())?
+            } else if let Some(init) = &field.init {
                 self.eval(init, &HashMap::new())?
             } else {
                 doc::null()
             };
             self.match_declared_field(&component.fields, &field.name, &value)?;
             fields.insert(field.name.clone(), value);
+        }
+        if kind == "Timer" {
+            let interval = fields
+                .get("interval")
+                .ok_or_else(|| Error::new("Timer requires interval"))?;
+            timer_delay_ms(interval)?;
         }
         let id = ActorId(self.next_id);
         self.next_id += 1;
@@ -878,7 +902,28 @@ impl World {
         if kind == "Stdout" {
             self.suppress_result = true;
         }
+        if kind == "Timer" {
+            self.arm_timer(id)?;
+        }
         Ok(id)
+    }
+
+    fn arm_timer(&mut self, id: ActorId) -> Result<(), Error> {
+        let interval = self.instances[&id]
+            .fields
+            .get("interval")
+            .cloned()
+            .ok_or_else(|| Error::new("Timer requires interval"))?;
+        let delay = timer_delay_ms(&interval)?;
+        self.timers.push(Timer {
+            due: self.now.saturating_add(delay),
+            to: id,
+            message: doc::symbol("Tick"),
+            route: Route::SelfSend,
+            join: None,
+            slot: None,
+        });
+        Ok(())
     }
 
     fn driver_for(&self, kind: &str) -> Option<Driver> {
@@ -945,7 +990,7 @@ impl World {
             if route == Route::Init {
                 return Ok(vec![]);
             }
-            return self.drive(id, message);
+            return self.drive(id, message, route);
         }
         let (kind_name, state_name, fields, completed, parent) = {
             let instance = self
@@ -1516,7 +1561,12 @@ impl World {
         match_field_document(pattern, value)
     }
 
-    fn drive(&mut self, id: ActorId, message: &Doc) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
+    fn drive(
+        &mut self,
+        id: ActorId,
+        message: &Doc,
+        route: Route,
+    ) -> Result<Vec<(ActorId, Doc, Route)>, Error> {
         let parent = self.instances[&id].parent;
         let driver = self.instances[&id]
             .driver
@@ -1529,6 +1579,14 @@ impl World {
                 replies
             }
             Driver::Clock => vec![self.clock_reply(message)],
+            Driver::Timer => {
+                if route == Route::SelfSend && doc::as_symbol(message).as_deref() == Some("Tick") {
+                    self.arm_timer(id)?;
+                    vec![doc::symbol("Tick")]
+                } else {
+                    vec![doc::array([doc::string("Error"), doc::string("unknown")])]
+                }
+            }
             Driver::Edge(driver) => {
                 let symbols = driver.speaks_symbols();
                 let replies = self.drive_edge(id, driver, message)?;
@@ -1850,6 +1908,30 @@ fn route_matches_one(name: &str, route: Route) -> bool {
         "down" => matches!(route, Route::Down | Route::Offer | Route::Inject),
         _ => false,
     }
+}
+
+fn timer_delay_ms(interval: &Doc) -> Result<u64, Error> {
+    let millis = doc::as_number(interval)
+        .filter(|number| number.is_finite())
+        .ok_or_else(|| Error::new("Timer interval must be milliseconds"))?;
+    if millis <= 0.0 {
+        return Err(Error::new("Timer interval must be positive"));
+    }
+    let seconds = millis / 1000.0;
+    Ok((seconds * 1000.0) as u64)
+}
+
+fn named_args(args: &[ConstructArg]) -> Result<HashMap<&str, &Json>, Error> {
+    let mut named = HashMap::new();
+    for arg in args {
+        if named.insert(arg.name.as_str(), &arg.expression).is_some() {
+            return Err(Error::new(format!(
+                "duplicate construction argument {}",
+                arg.name
+            )));
+        }
+    }
+    Ok(named)
 }
 
 fn rand_args(expression: &Json) -> Option<(&Json, &Json)> {

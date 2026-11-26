@@ -147,3 +147,6 @@ capitals.
   flags and the program path. Later reads see that copy.
 - **Frozen env**: the process environment captured at start. Later reads see
   that copy and MUST NOT re-read the operating system.
+- **Timer component**: the `kith:time` child `Timer(interval: Milliseconds)`.
+  It arms a dispatcher timer and sends `@Tick` up. It is not the dispatcher
+  timer, and it is not the `Clock` component.

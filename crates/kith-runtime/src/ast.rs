@@ -73,11 +73,20 @@ pub struct Scene {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConstructArg {
+    pub kind: String,
+    pub name: String,
+    pub expression: Json,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Instance {
     pub kind: String,
     pub component: String,
     #[serde(default)]
     pub key: Option<String>,
+    #[serde(default)]
+    pub args: Vec<ConstructArg>,
     #[serde(default)]
     pub children: Vec<Instance>,
 }

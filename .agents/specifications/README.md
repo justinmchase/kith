@@ -28,10 +28,10 @@ primitives rather than redefining them.
   actor interpreter, and how the `kith` binary consumes crates.io.
 - [CLI](./cli.spec.md): `parse`, `check`, `compile`, and `run`.
 - [Timers](./timers.spec.md): delayed sends (`send after`); time from a clock
-  the checker can replace.
+  the checker can replace. The Timer component arms that clock.
 - [Built-ins](./builtins.spec.md): the `kith:` prefix and the data, stream,
-  and time modules. `Clock` there is the wall read. The dispatcher clock
-  stays in Timers.
+  and time modules. `Clock` there is the wall read. `Timer` is the interval
+  child. The dispatcher clock stays in Timers.
 - [Edges](./edges.spec.md): net, http, stdio, fs, encoding, crypto, path,
   and process.
 

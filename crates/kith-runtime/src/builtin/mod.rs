@@ -11,7 +11,7 @@ mod rules;
 mod stream;
 mod time;
 
-use crate::ast::{Component, Program, State};
+use crate::ast::{Component, Field, Program, State};
 use crate::doc::{self, Doc};
 use crate::error::Error;
 use std::collections::HashMap;
@@ -56,6 +56,7 @@ const PROCESS: &str = r#"{imports:[] exports:[{kind:"rule" name:"OptionalValue"}
 pub enum Driver {
     Pipe(Pipe),
     Clock,
+    Timer,
     Edge(Edge),
 }
 
@@ -126,6 +127,7 @@ pub fn initial_driver(kind: &str) -> Option<Driver> {
     match kind {
         "Pipe" => Some(Driver::Pipe(Pipe::new())),
         "Clock" => Some(Driver::Clock),
+        "Timer" => Some(Driver::Timer),
         other => edge::kind_for(other).map(|kind| Driver::Edge(Edge::new(kind))),
     }
 }
@@ -138,6 +140,7 @@ pub fn driver_document(driver: &Driver) -> Doc {
     match driver {
         Driver::Pipe(pipe) => stream::to_document(pipe),
         Driver::Clock => doc::object([("kind", doc::string("clock"))]),
+        Driver::Timer => doc::object([("kind", doc::string("timer"))]),
         Driver::Edge(driver) => driver.to_document(),
     }
 }
@@ -146,6 +149,7 @@ pub fn driver_from(value: &Doc) -> Option<Driver> {
     match doc::as_str(&doc::get(value, "kind")?).as_deref() {
         Some("pipe") => stream::from_document(value).map(Driver::Pipe),
         Some("clock") => Some(Driver::Clock),
+        Some("timer") => Some(Driver::Timer),
         Some(
             "socket" | "listener" | "http" | "server" | "stdin" | "stdout" | "stderr" | "file"
             | "crypto" | "process",
@@ -203,7 +207,7 @@ fn install(resolver: &mut Resolver) -> Result<(), Error> {
 fn component_names(specifier: &str) -> &'static [&'static str] {
     match specifier {
         "kith:stream" => &["Pipe"],
-        "kith:time" => &["Clock"],
+        "kith:time" => &["Clock", "Timer"],
         "kith:net" => &["Socket", "Listener"],
         "kith:http" => &["Http", "Server"],
         "kith:stdio" => &["Stdin", "Stdout", "Stderr"],
@@ -215,10 +219,20 @@ fn component_names(specifier: &str) -> &'static [&'static str] {
 }
 
 fn host_component(name: &str) -> Component {
+    let fields = if name == "Timer" {
+        vec![Field {
+            kind: "field".into(),
+            name: "interval".into(),
+            pattern: Some(serde_json::json!({"kind": "type", "type": "number"})),
+            init: None,
+        }]
+    } else {
+        Vec::new()
+    };
     Component {
         kind: "component".into(),
         name: name.to_string(),
-        fields: Vec::new(),
+        fields,
         ports: Vec::new(),
         states: vec![State {
             kind: "state".into(),

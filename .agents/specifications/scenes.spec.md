@@ -66,6 +66,11 @@ export scene Main {
 - `scene Name { ... }` declares a named scene.
 - `Kind()` constructs an instance of `Kind`. The top-level construction has no
   port name.
+- `Timer(interval: Expression)` is the construction form of the Timer
+  component. `Expression` is milliseconds. See
+  [timers](./timers.spec.md#timer-component).
+- A construction argument on a kind that does not take one MUST fail when
+  the instance is created. Empty parentheses stay valid for every other kind.
 - `name = Kind() { ... }` fills port `name`. Nested braces are further children
   of that instance.
 - Bare `Kind() { ... }` is an unnamed child of the surrounding instance.

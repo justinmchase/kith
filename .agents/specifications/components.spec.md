@@ -490,7 +490,8 @@ Uffda pattern and expression subtrees keep Uffda's own AST kinds (`over`,
 - `{ kind: "field", name: string, pattern: Pattern, init: Expression }`
 - `{ kind: "port", component: string, name: string }`
 - `{ kind: "scene", name: string, root: Instance }`
-- `{ kind: "instance", component: string, key: string | null, children: [Instance] }`
+- `{ kind: "instance", component: string, key: string | null, children: [Instance], args: [Arg] }`
+- `{ kind: "arg", name: string, expression: Expression }`
 - `{ kind: "state", name: string, start: boolean, named: boolean, handlers: [Handler], post: Pattern | null }`
 - `{ kind: "handler", pattern: Pattern, item: Pattern | null, route: ["up" | "down" | "self" | "init"], body: [Statement] }`
 - `{ kind: "assign", field: string, expression: Expression }`
@@ -512,7 +513,10 @@ means that state does not declare a post-condition. It is a tree property,
 not a source spelling. Field `pattern` and
 `init` MAY be omitted when the field is untyped or uninitialized; a missing
 `init` is `undefined` until a transition assigns it. The root instance's `key`
-MUST be `null`. An unnamed child's `key` MUST be `null`. `sendDown.component`
+MUST be `null`. An unnamed child's `key` MUST be `null`. Instance `args` MAY
+be omitted. Omitted and empty both mean no construction arguments. The
+grammar projects `args`. `Timer(interval: 1500)` projects one argument named
+`interval` whose expression is the number `1500`. `sendDown.component`
 MUST be `null`. `send down` does not name a component and does not carry a
 filter. A release statement's tree is `{ kind: "release", filter: Pattern }`.
 The pattern matches `port` and `key` as

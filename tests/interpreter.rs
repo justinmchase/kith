@@ -73,6 +73,7 @@ fn instance(component: &str, key: Option<&str>, children: Vec<Instance>) -> Inst
         kind: "instance".into(),
         component: component.into(),
         key: key.map(str::to_string),
+        args: Vec::new(),
         children,
     }
 }
