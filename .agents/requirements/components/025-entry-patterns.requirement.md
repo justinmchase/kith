@@ -20,8 +20,8 @@ Preconditions:
   `{ n: 1 }`. The `entry` line below is that tree property, not a chosen
   source spelling. The message pattern selects the handler. Open's entry
   does not.
-- The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
-  `on down @Stuck` handlers match that message. The first is selected.
+- The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Each
+  message selects its own handler. Open's entry does not.
 
 ```kith
 component Counter {
@@ -44,11 +44,6 @@ component Latch {
       goto Open;
     }
     on down @Stuck {
-      send to tick @Tick;
-      goto Open;
-    }
-    on down @Stuck {
-      n -> 1;
       send to tick @Tick;
       goto Open;
     }
@@ -94,7 +89,7 @@ Postconditions:
   example, `@Open` delivered as `down` assigns `n` to `1`, Open's entry
   matches, commits `Open`, and routes `@Tick`. `@Stuck` delivered as `down`
   leaves `n` at `0`. Open's entry misses, so Latch stays `Shut`, `n` stays
-  `0`, `@Tick` is not routed, and the later `@Stuck` handler does not run.
+  `0`, and `@Tick` is not routed.
   A missed entry leaves fields, machine state, completion, and recorded
   sends and constructions uncommitted. Creation fails before init when the
   initial fields miss the start state's entry pattern.

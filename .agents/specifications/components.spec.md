@@ -494,8 +494,8 @@ The `entry` line in this program is that tree property, not a chosen source
 spelling. The message pattern selects the handler. Open's entry does not.
 Shut declares no post-condition, so leaving Shut does not run `post`.
 
-The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Two
-`on down @Stuck` handlers match that message. The first is selected.
+The test harness delivers `@Open` and `@Stuck` to Latch as `down`. Each
+message selects its own handler. Open's entry does not.
 
 ```kith
 component Counter {
@@ -521,11 +521,6 @@ component Latch {
       send to tick @Tick;
       goto Open;
     }
-    on down @Stuck {
-      n -> 1;
-      send to tick @Tick;
-      goto Open;
-    }
   }
 
   state Open {
@@ -546,8 +541,7 @@ Open's `entry { n: 1 }` matches before commit, so the turn commits: Latch is
 
 `@Stuck`, delivered the same way, proposes Open with `n` still `0`. Open's
 `entry { n: 1 }` misses, the same failure as a missed post-condition. Latch
-stays `Shut`, `n` stays `0`, and `@Tick` is not routed. The later `@Stuck`
-handler does not run.
+stays `Shut`, `n` stays `0`, and `@Tick` is not routed.
 
 ## Syntax tree
 

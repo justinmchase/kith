@@ -1263,18 +1263,7 @@ fn the_latch_entry_example_commits_a_match_and_drops_a_miss() {
                             goto_open.clone(),
                         ],
                     ),
-                    on("Stuck", vec![tick.clone(), goto_open.clone()]),
-                    on(
-                        "Stuck",
-                        vec![
-                            Statement::Assign {
-                                field: "n".into(),
-                                expression: number(1),
-                            },
-                            tick,
-                            goto_open,
-                        ],
-                    ),
+                    on("Stuck", vec![tick, goto_open]),
                 ],
             },
             State {
