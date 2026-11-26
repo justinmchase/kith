@@ -56,6 +56,22 @@ pub struct Field {
     pub pattern: Option<Json>,
     #[serde(default)]
     pub init: Option<Json>,
+    /// Omitted means the field exists in every state, writable, with `pre` and
+    /// `post` equal to `pattern`. The first clause opts the field into only
+    /// the states those clauses name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Vec<FieldRule>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FieldRule {
+    pub states: Vec<String>,
+    #[serde(default)]
+    pub write: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre: Option<Json>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<Json>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -94,12 +110,6 @@ pub struct State {
     /// `false` for unnamed `start { }`: the implicit name `Start` is not a `goto` target.
     #[serde(default = "default_true")]
     pub named: bool,
-    /// Entry pattern over the fields in scope. Omitted means none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry: Option<Json>,
-    /// Post-condition over the fields in scope. Omitted means none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub post: Option<Json>,
     #[serde(default)]
     pub handlers: Vec<Handler>,
 }
