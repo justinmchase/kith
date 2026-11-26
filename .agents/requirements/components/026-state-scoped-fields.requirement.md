@@ -17,6 +17,112 @@ Preconditions:
   do not share a name.
 - The list names at least one state of this component. An empty list or an
   unknown name fails check.
+- `Box` keeps `total` in every state. `note` names `Open` and `Hold`.
+  `phase` names `Open`. `strict` names `Tight`. Those names are the tree
+  property `states` on the field node, not a chosen source spelling. The
+  message pattern selects the handler. The test harness delivers each
+  message as `down`.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+  field phase: number = 1;
+  field strict: number = "no";
+  tick: Counter;
+
+  start Idle {
+    on down @Go {
+      total -> 2;
+      goto Open;
+    }
+    on down @Again {
+      goto Open;
+    }
+    on down @Bad {
+      send to tick @Tick;
+      goto Tight;
+    }
+    on down @Done {
+      complete 7;
+    }
+  }
+
+  state Open {
+    on down @Bump {
+      note -> 5;
+      goto Hold;
+    }
+    on down @Wipe {
+      note -> 9;
+      goto Idle;
+    }
+    on down @Finish {
+      complete 3;
+    }
+  }
+
+  state Hold {
+    on down @Drop {
+      goto Idle;
+    }
+  }
+
+  state Tight {}
+}
+
+export scene Main {
+  Box() {
+    tick = Counter();
+  }
+}
+```
+
+- A handler outside the set cannot read or write `note`. `note` names
+  `Open`. Each program fails check and says `not in scope`.
+
+```kith
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+
+  start Idle {
+    on down @Write {
+      note -> 1;
+    }
+  }
+
+  state Open {}
+}
+
+export scene Main { Box(); }
+```
+
+```kith
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+
+  start Idle {
+    on down @Read {
+      total -> note;
+    }
+  }
+
+  state Open {}
+}
+
+export scene Main { Box(); }
+```
 
 Expected behavior:
 
@@ -39,9 +145,15 @@ Expected behavior:
 
 Postconditions:
 
-- Tests: `tests/interpreter.rs` (`req:components-026`). A scoped field
-  persists across the states it names, drops on the way out, and initializes
-  again on the way back. A failed initialization leaves the machine
-  unchanged and does not route a recorded send. `complete` keeps the field.
-  Check rejects a handler, an entry pattern, a duplicate name, an empty
-  list, and an unknown state.
+- Tests: `tests/interpreter.rs` (`req:components-026`). The test contains
+  the Box Kith source above. `@Go` delivered as `down` commits `Open`,
+  initializes `note` to `0` and `phase` to `1`, and keeps `total` at `2`.
+  `@Bump` commits `Hold` with `note` at `5` and drops `phase`. `@Drop`
+  returns to `Idle` and drops `note`. `@Again` enters `Open` again and
+  initializes `note` and `phase` once more. `@Wipe` writes `note` and leaves
+  the set, so the write drops. `@Finish` completes in `Open` and keeps
+  `note`. `@Done` completes in `Idle` with `note` absent. `@Bad` misses
+  `strict`'s initialization, stays `Idle`, and does not route `@Tick`. The
+  `@Write` and `@Read` programs fail check and say `not in scope`. Check
+  also rejects an entry pattern that names a field outside the state, a
+  duplicate name, an empty list, and an unknown state.

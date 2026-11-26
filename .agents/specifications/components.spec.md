@@ -608,6 +608,127 @@ Proposed order inside one transition:
 The source spelling stays open ([open questions](#open-questions)). The tree
 property is `states`. Omitted means every state.
 
+`Box` keeps `total` in every state. `note` names `Open` and `Hold`. `phase`
+names `Open`. `strict` names `Tight`. Those names are the tree property
+`states` on the field node, not a chosen source spelling. The message pattern
+selects the handler.
+
+```kith
+component Counter {
+  field seen: number = 0;
+  start {
+    on down @Tick {
+      seen -> 1;
+    }
+  }
+}
+
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+  field phase: number = 1;
+  field strict: number = "no";
+  tick: Counter;
+
+  start Idle {
+    on down @Go {
+      total -> 2;
+      goto Open;
+    }
+    on down @Again {
+      goto Open;
+    }
+    on down @Bad {
+      send to tick @Tick;
+      goto Tight;
+    }
+    on down @Done {
+      complete 7;
+    }
+  }
+
+  state Open {
+    on down @Bump {
+      note -> 5;
+      goto Hold;
+    }
+    on down @Wipe {
+      note -> 9;
+      goto Idle;
+    }
+    on down @Finish {
+      complete 3;
+    }
+  }
+
+  state Hold {
+    on down @Drop {
+      goto Idle;
+    }
+  }
+
+  state Tight {}
+}
+
+export scene Main {
+  Box() {
+    tick = Counter();
+  }
+}
+```
+
+`Box` starts in `Idle`. `total` is `0`. `note`, `phase`, and `strict` are
+absent. `@Go`, delivered as `down`, assigns `total` to `2` and goes to
+`Open`. `note` initializes to `0` and `phase` to `1`. `@Bump` assigns `note`
+to `5` and goes to `Hold`. `note` stays, because `Hold` is in its set.
+`phase` drops, because `Hold` is not. `@Drop` goes to `Idle` and drops
+`note`. The value that left is gone. `@Again` goes back to `Open` and
+initializes `note` to `0` and `phase` to `1` again. `total` is still `2`.
+
+`@Wipe` from `Open` assigns `note` to `9` and would leave to `Idle`. The
+write drops with the field. `@Finish` completes in `Open`. `complete` does
+not leave, so `note` stays. `@Done` completes in `Idle`. `note` stays absent
+and `total` stays `0`. `@Bad` would go to `Tight` and records `@Tick`.
+`strict` initializes from `"no"`, which misses `number`. The turn does not
+commit: `Box` stays `Idle`, `total` stays `0`, and `@Tick` is not routed.
+
+A handler outside the set cannot read or write the field. `note` still names
+`Open`. Each program fails check and says `not in scope`.
+
+```kith
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+
+  start Idle {
+    on down @Write {
+      note -> 1;
+    }
+  }
+
+  state Open {}
+}
+
+export scene Main { Box(); }
+```
+
+```kith
+component Box {
+  field total: number = 0;
+  field note: number = 0;
+
+  start Idle {
+    on down @Read {
+      total -> note;
+    }
+  }
+
+  state Open {}
+}
+
+export scene Main { Box(); }
+```
+
 ## Syntax tree
 
 The grammar MUST project source to this tagged data shape. The interpreter MUST
