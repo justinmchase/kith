@@ -3033,3 +3033,245 @@ export scene Main { Client(); }
     assert_eq!(restored.state(restored.root_id()), Some("Idle"));
     assert_eq!(restored.prints(), &[json!("ok")]);
 }
+
+#[test]
+// req:components-027
+fn send_to_an_array_field_offers_each_element() {
+    let source = r#"
+export Forest;
+export Main;
+component Tree {
+  field kept: number = 0;
+  start Awake {
+    on down @Season @Summer {
+      kept -> (add kept 1);
+    }
+    on down @Sleep {
+      goto Asleep;
+    }
+  }
+  state Asleep {}
+}
+component Quiet {
+  field kept: number = 0;
+  start {
+    on down @Poke {
+      kept -> (add kept 1);
+    }
+  }
+}
+component Leaf {
+  start {
+    on down @Up {
+      send up "Tree" @Season @Summer;
+    }
+  }
+}
+component Forest {
+  field trees: [Tree*] = [];
+  field heard: number = 0;
+  field bag: any = [];
+  field note: number = 0;
+  child: Quiet;
+  leaf: Leaf;
+
+  start {
+    on down @Go {
+      send to trees @Season @Summer;
+    }
+    on down @Down {
+      send down @Season @Summer;
+    }
+    on down @Miss {
+      send to child @Season @Summer;
+    }
+    on down @Poke {
+      send down @Poke;
+    }
+    on down @Bad {
+      bag -> [1];
+      send to bag @No;
+    }
+    on down @Num {
+      send to note @No;
+    }
+    on down @Filter {
+      send to leaf @Up;
+    }
+    on up @Season @Summer {
+      heard -> 1;
+    }
+  }
+}
+export scene Main {
+  Forest() {
+    child = Quiet();
+    Quiet();
+    leaf = Leaf();
+  }
+}
+"#;
+    let program = kith::parse::parse_source(source).expect("parse forest");
+    let send = &program.component("Forest").expect("Forest").states[0].handlers[0].body[0];
+    match send {
+        kith::ast::Statement::SendTo { port, .. } => assert_eq!(port, "trees"),
+        other => panic!("expected sendTo, got {other:?}"),
+    }
+
+    let start = |program: &kith::ast::Program| {
+        let mut world = World::start(program.clone()).unwrap_or_else(|err| {
+            let pattern = &program.component("Forest").unwrap().fields[0].pattern;
+            panic!("start failed: {} pattern {pattern:?}", err.message);
+        });
+        world.run_until_idle().expect("init");
+        world
+    };
+    let quiet_kept = |world: &World, root| {
+        world
+            .children_of_kind(root, "Quiet")
+            .iter()
+            .map(|id| world.field(*id, "kept").cloned())
+            .collect::<Vec<_>>()
+    };
+
+    let mut empty = start(&program);
+    let root = empty.root_id();
+    empty.inject_document(kith::doc::symbol("Go")).unwrap();
+    empty.run_until_idle().expect("empty array is success");
+    assert_eq!(empty.field(root, "trees"), Some(&json!([])));
+    assert!(empty.children_of_kind(root, "Tree").is_empty());
+    assert!(empty.child(root, "child").is_some());
+    assert!(empty.child(root, "trees").is_none());
+
+    let mut world = start(&program);
+    let root = world.root_id();
+    let trees = world
+        .hold_field_instances(root, "trees", &["Tree", "Tree"])
+        .expect("hold trees");
+    world.run_until_idle().expect("tree init");
+    assert!(world.children_of_kind(root, "Tree").is_empty());
+    world
+        .send_document(trees[0], kith::doc::symbol("Sleep"))
+        .unwrap();
+    world.run_until_idle().expect("sleep");
+    assert_eq!(world.state(trees[0]), Some("Asleep"));
+    assert_eq!(world.state(trees[1]), Some("Awake"));
+    world.inject_document(kith::doc::symbol("Go")).unwrap();
+    world
+        .run_until_idle()
+        .expect("an element with no handler is ignored");
+    assert_eq!(world.field(trees[0], "kept"), Some(&json!(0.0)));
+    assert_eq!(world.field(trees[1], "kept"), Some(&json!(1.0)));
+    assert!(world.children_of_kind(root, "Tree").is_empty());
+    assert!(world.child(root, "child").is_some());
+    assert!(quiet_kept(&world, root)
+        .iter()
+        .all(|kept| kept == &Some(json!(0.0))));
+
+    let mut down = start(&program);
+    let root = down.root_id();
+    let trees = down
+        .hold_field_instances(root, "trees", &["Tree", "Tree"])
+        .expect("hold trees");
+    down.run_until_idle().expect("tree init");
+    down.inject_document(kith::doc::symbol("Down")).unwrap();
+    down.run_until_idle()
+        .expect("send down still ignores a child with no handler");
+    assert_eq!(down.field(trees[0], "kept"), Some(&json!(0.0)));
+    assert_eq!(down.field(trees[1], "kept"), Some(&json!(0.0)));
+    down.inject_document(kith::doc::symbol("Poke")).unwrap();
+    down.run_until_idle()
+        .expect("send down reaches every direct child");
+    assert_eq!(
+        quiet_kept(&down, root),
+        vec![Some(json!(1.0)), Some(json!(1.0))]
+    );
+    assert_eq!(down.field(trees[0], "kept"), Some(&json!(0.0)));
+
+    let mut miss = start(&program);
+    miss.inject_document(kith::doc::symbol("Miss")).unwrap();
+    let err = miss
+        .run_until_idle()
+        .expect_err("send to one child still fails unmatched");
+    assert!(err.message.contains("unmatched down"), "{}", err.message);
+    assert!(err.message.contains("Quiet"), "{}", err.message);
+
+    let mut bad = start(&program);
+    bad.inject_document(kith::doc::symbol("Bad")).unwrap();
+    let err = bad
+        .run_until_idle()
+        .expect_err("a non-instance element fails");
+    assert!(
+        err.message.contains("is not an instance"),
+        "{}",
+        err.message
+    );
+    assert_eq!(bad.field(bad.root_id(), "bag"), Some(&json!([])));
+
+    let mut note = start(&program);
+    note.inject_document(kith::doc::symbol("Num")).unwrap();
+    let err = note.run_until_idle().expect_err("a non-array field fails");
+    assert!(err.message.contains("is not an array"), "{}", err.message);
+
+    let mut filtered = start(&program);
+    filtered
+        .inject_document(kith::doc::symbol("Filter"))
+        .unwrap();
+    filtered.run_until_idle().expect("send up does not filter");
+    assert_eq!(
+        filtered.field(filtered.root_id(), "heard"),
+        Some(&json!(0.0))
+    );
+
+    let selected = kith::parse::parse_source(
+        r#"
+export Forest;
+export Main;
+component Tree {
+  start {}
+}
+component Forest {
+  start {
+    on down @Go {
+      send down Tree @Season @Summer;
+    }
+  }
+}
+export scene Main { Forest(); }
+"#,
+    )
+    .expect("parse selector");
+    let err = World::check(&selected).expect_err("send down must not name a component");
+    assert!(
+        err.message.contains("must not name a component"),
+        "{}",
+        err.message
+    );
+
+    let both = kith::parse::parse_source(
+        r#"
+export Box;
+export Main;
+component Quiet {
+  start {}
+}
+component Box {
+  field child: number = 0;
+  child: Quiet;
+  start {}
+}
+export scene Main {
+  Box() {
+    child = Quiet();
+  }
+}
+"#,
+    )
+    .expect("parse both");
+    let err = World::check(&both).expect_err("field and port share a name");
+    assert!(
+        err.message.contains("both a field and a port"),
+        "{}",
+        err.message
+    );
+}

@@ -10,10 +10,13 @@ spec_ref: .agents/specifications/components.spec.md#identity-and-lifetime; .agen
 
 Preconditions:
 
-- An instance is the root, or its parent is reachable and still holds it.
+- An instance is the root, or its parent is reachable and still holds it
+  in the child collection, or a reachable instance stores it in a field.
 - The parent holds each scene-constructed child, port or unnamed, for the
   parent's whole life. It holds a dynamic child until a transition of that
-  parent releases it, or the parent is destroyed.
+  parent releases it, or the parent is destroyed. A field that stores an
+  instance holds that instance. The store is not a child and does not fill
+  a port.
 - A release is `{ kind: "release", filter: Pattern }`. The pattern matches
   the record the parent holds: `port` is the port name, or null when the
   child is unnamed, and `key` is null. The source spelling is open.
