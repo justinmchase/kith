@@ -200,7 +200,8 @@ global for text.
 
 `Crypto` `"Random" n` replies `"Bytes" bytes` of length `n`, or
 `"Error" reason` when `n` is not a non-negative whole number. The draw uses
-a snapshot stream that is not `(rand Lo Hi)`. Restore repeats the remaining
+a snapshot stream that is not `(rand Lo Hi)` and not the seeded `Random`
+component in [random](./random.spec.md). Restore repeats the remaining
 scripted bytes, or the next draw of that stream when no script is installed.
 
 ## Path

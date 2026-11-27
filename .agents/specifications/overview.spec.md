@@ -109,12 +109,14 @@ everything outside a machine's control. The language MUST stay checkable.
   that arrive and their order, and the dispatcher's choice among ready actors.
 - A machine given the same state and the same enabling message MUST take the
   same transition and send the same messages.
-- A feature that would hide a source of variation inside a machine, such as
-  reading a wall clock or generating an identity other than through a declared
-  service of a higher language, MUST NOT be added here. A wall read that is a
-  message to the `Clock` component in [built-ins](./builtins.spec.md#time) is
-  that declared edge: the checker replaces the driver, and the dispatcher
-  clock stays unread.
+- A feature that would hide a source of variation inside a machine MUST NOT
+  be added. The wall is a message to the `Clock` component in
+  [built-ins](./builtins.spec.md#time): the checker replaces the driver, and
+  the dispatcher clock stays unread. A new identity is an explicit `(id)`
+  call, as [runtime](./runtime.spec.md#identity) defines it. A handler that
+  does not evaluate `(id)` MUST NOT mint one. A numeric draw is `(rand Lo Hi)`
+  or another draw on that same stream, or a message to a seeded `Random`
+  child, as [random](./random.spec.md) defines them.
 
 ## Open questions
 

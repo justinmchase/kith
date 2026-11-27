@@ -59,6 +59,7 @@ verify it cite it with `req:{id}`.
 - [Stdlib stream functions](./runtime/004-stdlib-streams.requirement.md)
 - [Async send join](./runtime/005-async-send.requirement.md)
 - [Library and CLI packages](./runtime/006-packages.requirement.md)
+- [Incremental id](./runtime/007-id.requirement.md)
 
 ## Grammar
 
@@ -76,6 +77,15 @@ verify it cite it with `req:{id}`.
 - [Stream pipe](./builtins/003-stream.requirement.md)
 - [Time values and Clock](./builtins/004-time.requirement.md)
 - [Timer component](./builtins/005-timer.requirement.md)
+
+## Random
+
+- [Numeric draws](./random/001-numeric-draws.requirement.md)
+- [Seeded Random](./random/002-seeded-component.requirement.md)
+
+## Persistence
+
+- [Store](./persistence/001-store.requirement.md)
 
 ## Edges
 

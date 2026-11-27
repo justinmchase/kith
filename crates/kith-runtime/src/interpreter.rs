@@ -87,6 +87,8 @@ pub struct World {
     prints: Vec<Json>,
     now: u64,
     rng: u64,
+    /// Ids already returned by `(id)`. The next call encodes this plus one.
+    id_counter: u64,
     timers: Vec<Timer>,
     joins: HashMap<u64, PendingJoin>,
     next_join: u64,
@@ -174,6 +176,7 @@ impl World {
             prints: Vec::new(),
             now: 0,
             rng: 1,
+            id_counter: 0,
             timers: Vec::new(),
             joins: HashMap::new(),
             next_join: 1,
@@ -537,6 +540,7 @@ impl World {
             ("routeSeq", doc::number(self.route_seq as f64)),
             ("now", doc::number(self.now as f64)),
             ("rng", doc::number(self.rng as f64)),
+            ("idCounter", doc::string(self.id_counter.to_string())),
             ("instances", instances),
             ("dispatcher", self.dispatcher.snapshot()),
             ("routes", routes),
@@ -625,6 +629,7 @@ impl World {
             .collect::<Result<Vec<_>, _>>()?;
         let now = doc::as_u64(&doc::get(&snapshot, "now").unwrap_or_else(doc::null)).unwrap_or(0);
         let rng = doc::as_u64(&doc::get(&snapshot, "rng").unwrap_or_else(doc::null)).unwrap_or(1);
+        let id_counter = id_counter_from(&snapshot);
         let next_join =
             doc::as_u64(&doc::get(&snapshot, "nextJoin").unwrap_or_else(doc::null)).unwrap_or(1);
         let mut timers = Vec::new();
@@ -669,6 +674,7 @@ impl World {
             prints,
             now,
             rng,
+            id_counter,
             timers,
             joins,
             next_join,
@@ -853,7 +859,7 @@ impl World {
             .ok_or_else(|| Error::new(format!("kind {kind} has no start")))?
             .name
             .clone();
-        if !args.is_empty() && kind != "Timer" {
+        if !args.is_empty() && kind != "Timer" && kind != "Random" {
             return Err(Error::new(format!(
                 "{kind} does not take construction arguments"
             )));
@@ -885,6 +891,14 @@ impl World {
                 .ok_or_else(|| Error::new("Timer requires interval"))?;
             timer_delay_ms(interval)?;
         }
+        let random_state = if kind == "Random" {
+            let seed = fields
+                .get("seed")
+                .ok_or_else(|| Error::new("Random requires seed"))?;
+            Some(builtin::random_seed(seed)?)
+        } else {
+            None
+        };
         self.match_pre(&component, &start, &fields)?;
         let id = ActorId(self.next_id);
         self.next_id += 1;
@@ -910,6 +924,10 @@ impl World {
         }
         if kind == "Timer" {
             self.arm_timer(id)?;
+        }
+        if let Some(state) = random_state {
+            self.instances.get_mut(&id).expect("actor").driver =
+                Some(Driver::Random(builtin::Generator::new(state)));
         }
         Ok(id)
     }
@@ -1577,6 +1595,9 @@ impl World {
                     let hi = self.eval(hi, bindings)?;
                     return Ok(Slot::Ready(self.rand_between(&lo, &hi)?));
                 }
+                "random" | "uniform" | "bernoulli" | "normal" | "id" => {
+                    return Ok(Slot::Ready(self.host_draw(name, args, bindings)?));
+                }
                 "write" | "writeLine" | "print" => {
                     let value = self.eval_write(name, args, bindings)?;
                     return Ok(Slot::Ready(value));
@@ -1626,7 +1647,7 @@ impl World {
         seq: &mut u32,
     ) -> Result<Json, Error> {
         if let Some(name) = invocation_name(expression) {
-            if self.program.functions.iter().any(|item| item == name) {
+            if self.program.functions.iter().any(|item| item == name) || is_value_callable(name) {
                 let value = self.eval(expression, bindings)?;
                 let key = format!("$k{seq}");
                 *seq += 1;
@@ -1786,6 +1807,17 @@ impl World {
                 } else {
                     vec![doc::array([doc::string("Error"), doc::string("unknown")])]
                 }
+            }
+            Driver::Random(generator) => {
+                let (generator, replies) = builtin::drive_random(generator, message);
+                self.instances.get_mut(&id).expect("actor").driver =
+                    Some(Driver::Random(generator));
+                replies
+            }
+            Driver::Store(stored) => {
+                let (stored, replies) = builtin::drive_store(stored, message);
+                self.instances.get_mut(&id).expect("actor").driver = Some(Driver::Store(stored));
+                replies
             }
             Driver::Edge(driver) => {
                 let symbols = driver.speaks_symbols();
@@ -2048,14 +2080,83 @@ impl World {
         if lo > hi {
             return Err(Error::new("rand low bound is greater than high bound"));
         }
-        self.rng = self.rng.wrapping_mul(1664525).wrapping_add(1013904223);
-        if lo.fract() == 0.0 && hi.fract() == 0.0 {
-            let width = (hi as i64 - lo as i64 + 1) as u64;
-            let pick = lo as i64 + (self.rng % width) as i64;
-            return Ok(doc::number(pick as f64));
+        Ok(doc::number(builtin::range(&mut self.rng, lo, hi)))
+    }
+
+    fn host_draw(
+        &mut self,
+        name: &str,
+        args: &[Json],
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<Doc, Error> {
+        match name {
+            "random" => {
+                if !args.is_empty() {
+                    return Err(Error::new("random expected no arguments"));
+                }
+                Ok(doc::number(builtin::unit(&mut self.rng)))
+            }
+            "uniform" => {
+                let (lo, hi) = self.two_numbers("uniform", args, bindings)?;
+                Ok(doc::number(builtin::uniform(&mut self.rng, lo, hi)?))
+            }
+            "bernoulli" => {
+                let p = self.one_number("bernoulli", args, bindings)?;
+                Ok(doc::number(builtin::bernoulli(&mut self.rng, p)?))
+            }
+            "normal" => {
+                let (mean, deviation) = self.two_numbers("normal", args, bindings)?;
+                Ok(doc::number(builtin::normal(
+                    &mut self.rng,
+                    mean,
+                    deviation,
+                )?))
+            }
+            "id" => self.mint_id(args),
+            _ => Err(Error::new(format!("unknown built-in function {name}"))),
         }
-        let t = (self.rng as f64) / (u64::MAX as f64);
-        Ok(doc::number(lo + (hi - lo) * t))
+    }
+
+    fn mint_id(&mut self, args: &[Json]) -> Result<Doc, Error> {
+        if !args.is_empty() {
+            return Err(Error::new("id expected no arguments"));
+        }
+        if self.id_counter >= builtin::ID_LAST {
+            return Err(Error::new("id space is exhausted"));
+        }
+        self.id_counter += 1;
+        Ok(doc::string(builtin::object_id(self.id_counter)))
+    }
+
+    fn one_number(
+        &mut self,
+        name: &str,
+        args: &[Json],
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<f64, Error> {
+        let [only] = args else {
+            return Err(Error::new(format!("{name} expected a number")));
+        };
+        let value = self.eval(only, bindings)?;
+        doc::as_number(&value).ok_or_else(|| Error::new(format!("{name} expected a number")))
+    }
+
+    fn two_numbers(
+        &mut self,
+        name: &str,
+        args: &[Json],
+        bindings: &HashMap<String, Doc>,
+    ) -> Result<(f64, f64), Error> {
+        let [left, right] = args else {
+            return Err(Error::new(format!("{name} expected two numbers")));
+        };
+        let left = self.eval(left, bindings)?;
+        let right = self.eval(right, bindings)?;
+        let left = doc::as_number(&left)
+            .ok_or_else(|| Error::new(format!("{name} expected two numbers")))?;
+        let right = doc::as_number(&right)
+            .ok_or_else(|| Error::new(format!("{name} expected two numbers")))?;
+        Ok((left, right))
     }
 
     fn delay_ms(&mut self, after: &Json, bindings: &HashMap<String, Doc>) -> Result<u64, Error> {
@@ -2091,6 +2192,21 @@ impl World {
             Route::Inject
         }
     }
+}
+
+fn is_value_callable(name: &str) -> bool {
+    matches!(
+        name,
+        "rand" | "random" | "uniform" | "bernoulli" | "normal" | "id"
+    )
+}
+
+fn id_counter_from(snapshot: &Doc) -> u64 {
+    let value = doc::get(snapshot, "idCounter").unwrap_or_else(doc::null);
+    if let Some(text) = doc::as_str(&value) {
+        return text.parse().unwrap_or(0);
+    }
+    doc::as_u64(&value).unwrap_or(0)
 }
 
 fn route_matches(expected: &[String], route: Route) -> bool {

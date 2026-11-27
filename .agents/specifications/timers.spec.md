@@ -44,7 +44,8 @@ capitals.
 - `Delay` is a Uffda expression that produces a number of **seconds**.
   `(rand Lo Hi)` is a Kith host callable: inclusive if both bounds are
   integers, otherwise a number in `[Lo, Hi]`. It is not a Uffda global.
-  A checker MAY replace the RNG.
+  A checker MAY replace the RNG. The other numeric draws on this stream
+  are defined in [random](./random.spec.md#numeric-draws).
 - A negative delay MUST fail that send.
 - `World::run_until_idle` MUST drain mailboxes only. Pending timers MUST stay
   pending so a test can observe a wait.

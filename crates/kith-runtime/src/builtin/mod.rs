@@ -6,8 +6,11 @@ mod crypto;
 mod data;
 mod edge;
 mod encoding;
+mod identity;
 mod path;
+mod random;
 mod rules;
+mod store;
 mod stream;
 mod time;
 
@@ -23,6 +26,8 @@ pub use edge::{
     begin_listen, spawn_job, step, stop_listen, Edge, Host, Incoming, IoDone, IoShared, Job,
     ListenOn, Outcome,
 };
+pub use identity::{text as object_id, LAST as ID_LAST};
+pub use random::{bernoulli, normal, random_seed, range, uniform, unit, Generator};
 pub use rules::{match_with_rules, uses_rule};
 pub use stream::Pipe;
 pub use time::{instant_doc, instant_text, parse_instant, process_zone, wall_millis, zone_value};
@@ -58,6 +63,8 @@ pub enum Driver {
     Clock,
     Timer,
     Edge(Edge),
+    Random(random::Generator),
+    Store(store::Store),
 }
 
 pub fn classify(specifier: &str) -> Result<bool, Error> {
@@ -128,6 +135,8 @@ pub fn initial_driver(kind: &str) -> Option<Driver> {
         "Pipe" => Some(Driver::Pipe(Pipe::new())),
         "Clock" => Some(Driver::Clock),
         "Timer" => Some(Driver::Timer),
+        "Random" => Some(Driver::Random(random::Generator::new(0))),
+        "Store" => Some(Driver::Store(store::Store::new())),
         other => edge::kind_for(other).map(|kind| Driver::Edge(Edge::new(kind))),
     }
 }
@@ -136,12 +145,22 @@ pub fn drive_pipe(pipe: Pipe, message: &Doc) -> (Pipe, Vec<Doc>) {
     stream::step(pipe, message)
 }
 
+pub fn drive_random(generator: random::Generator, message: &Doc) -> (random::Generator, Vec<Doc>) {
+    random::drive(generator, message)
+}
+
+pub fn drive_store(stored: store::Store, message: &Doc) -> (store::Store, Vec<Doc>) {
+    store::step(stored, message)
+}
+
 pub fn driver_document(driver: &Driver) -> Doc {
     match driver {
         Driver::Pipe(pipe) => stream::to_document(pipe),
         Driver::Clock => doc::object([("kind", doc::string("clock"))]),
         Driver::Timer => doc::object([("kind", doc::string("timer"))]),
         Driver::Edge(driver) => driver.to_document(),
+        Driver::Random(generator) => random::to_document(generator),
+        Driver::Store(stored) => store::to_document(stored),
     }
 }
 
@@ -150,6 +169,8 @@ pub fn driver_from(value: &Doc) -> Option<Driver> {
         Some("pipe") => stream::from_document(value).map(Driver::Pipe),
         Some("clock") => Some(Driver::Clock),
         Some("timer") => Some(Driver::Timer),
+        Some("random") => random::from_document(value).map(Driver::Random),
+        Some("store") => store::from_document(value).map(Driver::Store),
         Some(
             "socket" | "listener" | "http" | "server" | "stdin" | "stdout" | "stderr" | "file"
             | "crypto" | "process",
@@ -197,6 +218,8 @@ fn install(resolver: &mut Resolver) -> Result<(), Error> {
         ("kith:crypto", CRYPTO),
         ("kith:path", PATH),
         ("kith:process", PROCESS),
+        ("kith:random", EMPTY),
+        ("kith:store", EMPTY),
     ] {
         let url = Url::parse(specifier).map_err(|error| Error::new(error.to_string()))?;
         resolver.insert_declaration_codec_source(url, source);
@@ -214,15 +237,18 @@ fn component_names(specifier: &str) -> &'static [&'static str] {
         "kith:fs" => &["File"],
         "kith:crypto" => &["Crypto"],
         "kith:process" => &["Process"],
+        "kith:random" => &["Random"],
+        "kith:store" => &["Store"],
         _ => &[],
     }
 }
 
 fn host_component(name: &str) -> Component {
-    let fields = if name == "Timer" {
+    let fields = if name == "Timer" || name == "Random" {
+        let field = if name == "Timer" { "interval" } else { "seed" };
         vec![Field {
             kind: "field".into(),
-            name: "interval".into(),
+            name: field.into(),
             pattern: Some(serde_json::json!({"kind": "type", "type": "number"})),
             init: None,
             rules: None,

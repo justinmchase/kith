@@ -163,11 +163,43 @@ The callee decides whether the result is this turn or a later message.
 
 **Same-turn.** `(rand Lo Hi)` is a number in that range from World RNG,
 inclusive when both bounds are integers. Snapshot MUST include the RNG so
-restore is determined. `(write stream V…)`, `(writeLine stream V…)`, and
-`(print V…)` write to a stream capability and return `undefined` this
-turn. `(print V…)` is `(writeLine stdout V…)`. World binds `stdin`,
-`stdout`, and `stderr` in handler scope. They are not Uffda globals. An
-unknown callee MUST fail evaluation.
+restore is determined. `(random)`, `(uniform Lo Hi)`, `(bernoulli p)`, and
+`(normal mean deviation)` draw on that same stream, as
+[random](./random.spec.md#numeric-draws) defines. `(write stream V…)`,
+`(writeLine stream V…)`, and `(print V…)` write to a stream capability and
+return `undefined` this turn. `(print V…)` is `(writeLine stdout V…)`. World
+binds `stdin`, `stdout`, and `stderr` in handler scope. They are not Uffda
+globals. An unknown callee MUST fail evaluation.
+
+### Identity
+
+`(id)` is a same-turn host callable. It is not a Uffda global and not an
+import. Each evaluation MUST return a new id. Constructing a component,
+offering init, or running a handler that does not evaluate `(id)` MUST NOT
+mint one.
+
+The result is 24 lowercase hexadecimal digits, the text of a 12-byte
+ObjectId layout:
+
+- Bytes 0–3 are the high 32 bits of the call count, big-endian.
+- Bytes 4–8 are zero. The call MUST NOT draw those bytes from World RNG
+  or from `Crypto`.
+- Bytes 9–11 are the low 24 bits of the call count, big-endian.
+
+The count starts at zero. A successful call adds one, then encodes that
+count. The first id is `000000000000000000000001`. The second is
+`000000000000000000000002`. Count `16777215` is
+`000000000000000000ffffff`. Count `16777216` is
+`000000010000000000000000`. The hexadecimal text MUST sort in call order.
+
+`(id)` takes no arguments. An argument MUST fail the expression. The call
+MUST NOT read the wall clock or the dispatcher clock. The count
+`72057594037927935` (`2^56 - 1`) is the last id. The next call MUST fail
+with a message containing `exhausted` and MUST NOT change the count.
+
+Snapshot MUST include the count as decimal text under `idCounter`: the
+number of ids already returned. A snapshot that omits `idCounter` restores
+as zero. Restore MUST continue from that count.
 
 **Later-turn.** `(http_get url)` has no value this turn. It is legal only
 as a send argument: `send self (http_get url)` starts the request and
