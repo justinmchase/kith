@@ -87,8 +87,10 @@ pub struct World {
     prints: Vec<Json>,
     now: u64,
     rng: u64,
-    /// Ids already returned by `(id)`. The next call encodes this plus one.
+    /// Next increment at `id_timestamp`.
     id_counter: u64,
+    /// Dispatcher time in milliseconds that `id_counter` belongs to.
+    id_timestamp: u64,
     timers: Vec<Timer>,
     joins: HashMap<u64, PendingJoin>,
     next_join: u64,
@@ -177,6 +179,7 @@ impl World {
             now: 0,
             rng: 1,
             id_counter: 0,
+            id_timestamp: 0,
             timers: Vec::new(),
             joins: HashMap::new(),
             next_join: 1,
@@ -541,6 +544,7 @@ impl World {
             ("now", doc::number(self.now as f64)),
             ("rng", doc::number(self.rng as f64)),
             ("idCounter", doc::string(self.id_counter.to_string())),
+            ("idTimestamp", doc::string(self.id_timestamp.to_string())),
             ("instances", instances),
             ("dispatcher", self.dispatcher.snapshot()),
             ("routes", routes),
@@ -629,7 +633,8 @@ impl World {
             .collect::<Result<Vec<_>, _>>()?;
         let now = doc::as_u64(&doc::get(&snapshot, "now").unwrap_or_else(doc::null)).unwrap_or(0);
         let rng = doc::as_u64(&doc::get(&snapshot, "rng").unwrap_or_else(doc::null)).unwrap_or(1);
-        let id_counter = id_counter_from(&snapshot);
+        let id_counter = decimal_field(&snapshot, "idCounter");
+        let id_timestamp = decimal_field(&snapshot, "idTimestamp");
         let next_join =
             doc::as_u64(&doc::get(&snapshot, "nextJoin").unwrap_or_else(doc::null)).unwrap_or(1);
         let mut timers = Vec::new();
@@ -675,6 +680,7 @@ impl World {
             now,
             rng,
             id_counter,
+            id_timestamp,
             timers,
             joins,
             next_join,
@@ -2121,11 +2127,20 @@ impl World {
         if !args.is_empty() {
             return Err(Error::new("id expected no arguments"));
         }
-        if self.id_counter >= builtin::ID_LAST {
+        let timestamp = self.now;
+        let increment = if timestamp == self.id_timestamp {
+            self.id_counter
+        } else {
+            0
+        };
+        if increment > u32::MAX as u64 {
             return Err(Error::new("id space is exhausted"));
         }
-        self.id_counter += 1;
-        Ok(doc::string(builtin::object_id(self.id_counter)))
+        let random = builtin::id_random(&mut self.rng);
+        let text = builtin::id_text(timestamp, increment as u32, random);
+        self.id_timestamp = timestamp;
+        self.id_counter = increment + 1;
+        Ok(doc::string(text))
     }
 
     fn one_number(
@@ -2201,8 +2216,8 @@ fn is_value_callable(name: &str) -> bool {
     )
 }
 
-fn id_counter_from(snapshot: &Doc) -> u64 {
-    let value = doc::get(snapshot, "idCounter").unwrap_or_else(doc::null);
+fn decimal_field(snapshot: &Doc, key: &str) -> u64 {
+    let value = doc::get(snapshot, key).unwrap_or_else(doc::null);
     if let Some(text) = doc::as_str(&value) {
         return text.parse().unwrap_or(0);
     }

@@ -61,25 +61,38 @@ fn snapshot_json(world: &World) -> Json {
     decode(&world.snapshot().unwrap()).unwrap()
 }
 
-fn counter(world: &World) -> String {
-    snapshot_json(world)["idCounter"]
+fn stamp(world: &World, key: &str) -> String {
+    snapshot_json(world)[key]
         .as_str()
-        .expect("idCounter text")
+        .unwrap_or_else(|| panic!("{key} text"))
         .to_string()
 }
 
-fn restore_counter(source: &str, counter: Option<&str>) -> World {
+fn restore_id(
+    source: &str,
+    now: Option<u64>,
+    timestamp: Option<&str>,
+    counter: Option<&str>,
+) -> World {
     let program = load(source).expect("resolve");
     let mut world = World::start(program.clone()).unwrap();
     world.run_until_idle().unwrap();
     let mut snap = snapshot_json(&world);
-    match counter {
-        Some(value) => snap["idCounter"] = json!(value),
+    if let Some(value) = now {
+        snap["now"] = json!(value);
+    }
+    set_text(&mut snap, "idTimestamp", timestamp);
+    set_text(&mut snap, "idCounter", counter);
+    World::restore(program, &encode(&snap).unwrap()).unwrap()
+}
+
+fn set_text(snap: &mut Json, key: &str, value: Option<&str>) {
+    match value {
+        Some(value) => snap[key] = json!(value),
         None => {
-            snap.as_object_mut().unwrap().remove("idCounter");
+            snap.as_object_mut().unwrap().remove(key);
         }
     }
-    World::restore(program, &encode(&snap).unwrap()).unwrap()
 }
 
 const ID: &str = r#"
@@ -99,31 +112,42 @@ export scene Main { Probe() {} }
 
 #[test]
 // req:runtime-007
-fn id_is_an_explicit_sortable_object_id() {
+fn id_is_an_explicit_16_byte_value() {
+    let first = "0000000000000000000000003c88596c";
+    let second = "0000000000000000000000015e8885db";
+    let at_one_ms = "0000000000000001000000003c88596c";
+
     let mut fresh = start(ID);
     fresh.run_until_idle().unwrap();
-    assert_eq!(counter(&fresh), "0", "construction must not mint an id");
+    assert_eq!(
+        stamp(&fresh, "idCounter"),
+        "0",
+        "construction must not mint"
+    );
+    assert_eq!(stamp(&fresh, "idTimestamp"), "0");
+    let crypto = snapshot_json(&fresh)["cryptoRng"].clone();
+    let clock = snapshot_json(&fresh)["clock"].clone();
     send(&mut fresh, "Id");
-    assert_eq!(text(&fresh), "000000000000000000000001");
-    assert_eq!(counter(&fresh), "1");
+    assert_eq!(text(&fresh), first);
+    assert_eq!(text(&fresh).len(), 32);
+    assert_eq!(stamp(&fresh, "idCounter"), "1");
+    assert_eq!(stamp(&fresh, "idTimestamp"), "0");
+    assert_eq!(fresh.virtual_now(), 0);
+    assert_eq!(snapshot_json(&fresh)["clock"], clock);
+    assert_eq!(snapshot_json(&fresh)["cryptoRng"], crypto);
     send(&mut fresh, "Id");
-    let second = text(&fresh);
-    assert_eq!(second, "000000000000000000000002");
-    assert!("000000000000000000000001" < second.as_str());
+    let later = text(&fresh);
+    assert_eq!(later, second);
+    assert!(first < later.as_str());
 
-    let mut boundary = restore_counter(ID, Some("16777214"));
-    send(&mut boundary, "Id");
-    let low = text(&boundary);
-    assert_eq!(low, "000000000000000000ffffff");
-    let mut carried = restore_counter(ID, Some("16777215"));
-    send(&mut carried, "Id");
-    let high = text(&carried);
-    assert_eq!(high, "000000010000000000000000");
-    assert!(low < high);
+    let mut timed = restore_id(ID, Some(1), None, None);
+    send(&mut timed, "Id");
+    assert_eq!(text(&timed), at_one_ms);
+    assert!(later.as_str() < at_one_ms);
 
-    let mut omitted = restore_counter(ID, None);
+    let mut omitted = restore_id(ID, None, None, None);
     send(&mut omitted, "Id");
-    assert_eq!(text(&omitted), "000000000000000000000001");
+    assert_eq!(text(&omitted), first);
 
     let program = load(ID).unwrap();
     let mut world = World::start(program.clone()).unwrap();
@@ -131,23 +155,37 @@ fn id_is_an_explicit_sortable_object_id() {
     let snap = world.snapshot().unwrap();
     let mut restored = World::restore(program, &snap).unwrap();
     send(&mut restored, "Id");
-    assert_eq!(text(&restored), "000000000000000000000002");
+    assert_eq!(text(&restored), second);
 
-    let mut exhausted = restore_counter(ID, Some("72057594037927935"));
-    let error = fail(&mut exhausted, "Id");
+    let mut boundary = restore_id(ID, None, Some("0"), Some("4294967295"));
+    send(&mut boundary, "Id");
+    assert_eq!(text(&boundary), "0000000000000000ffffffff3c88596c");
+    let rng = snapshot_json(&boundary)["rng"].clone();
+    let error = fail(&mut boundary, "Id");
     assert!(error.contains("exhausted"), "{error}");
-    assert_eq!(counter(&exhausted), "72057594037927935");
+    assert_eq!(stamp(&boundary, "idCounter"), "4294967296");
+    assert_eq!(stamp(&boundary, "idTimestamp"), "0");
+    assert_eq!(snapshot_json(&boundary)["rng"], rng);
+
+    let mut rolled = restore_id(ID, Some(1), Some("0"), Some("4294967296"));
+    send(&mut rolled, "Id");
+    assert_eq!(text(&rolled), at_one_ms);
 
     let mut bad = start(ID);
     let error = fail(&mut bad, "Bad");
     assert!(error.contains("argument"), "{error}");
+    assert_eq!(stamp(&bad, "idCounter"), "0");
 
     let mut plain = start(ID);
     send(&mut plain, "Rand");
     let mut after_id = start(ID);
     send(&mut after_id, "Id");
     send(&mut after_id, "Rand");
-    assert_eq!(number(&plain), number(&after_id));
+    let mut second_rand = start(ID);
+    send(&mut second_rand, "Rand");
+    send(&mut second_rand, "Rand");
+    assert_eq!(number(&after_id), number(&second_rand));
+    assert_ne!(number(&plain), number(&after_id));
 }
 
 const DRAWS: &str = r#"

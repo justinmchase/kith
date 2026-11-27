@@ -26,7 +26,7 @@ pub use edge::{
     begin_listen, spawn_job, step, stop_listen, Edge, Host, Incoming, IoDone, IoShared, Job,
     ListenOn, Outcome,
 };
-pub use identity::{text as object_id, LAST as ID_LAST};
+pub use identity::{random_bytes as id_random, text as id_text};
 pub use random::{bernoulli, normal, random_seed, range, uniform, unit, Generator};
 pub use rules::{match_with_rules, uses_rule};
 pub use stream::Pipe;

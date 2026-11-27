@@ -109,9 +109,10 @@ capitals.
   that range from World RNG. Inclusive integers when both bounds are
   integers. It is not a Uffda global. `(random)`, `(uniform Lo Hi)`,
   `(bernoulli p)`, and `(normal mean deviation)` draw on that same stream.
-- **Id**: the host callable `(id)`. Each call returns a new ObjectId-shaped
-  string. The call is the mint. A handler that does not evaluate it does
-  not receive an id.
+- **Id**: the host callable `(id)`. Each call returns a new 16-byte value,
+  the same width as a UUID: 8 bytes of dispatcher time, 4 of increment, and
+  4 of random. The call is the mint. A handler that does not evaluate it
+  does not receive an id.
 - **Consume**: a matched transition that handles a message so the message does
   not continue on its route.
 

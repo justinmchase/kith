@@ -178,28 +178,43 @@ import. Each evaluation MUST return a new id. Constructing a component,
 offering init, or running a handler that does not evaluate `(id)` MUST NOT
 mint one.
 
-The result is 24 lowercase hexadecimal digits, the text of a 12-byte
-ObjectId layout:
+The result is 32 lowercase hexadecimal digits, the text of 16 bytes, the
+same width as a UUID. The layout is big-endian:
 
-- Bytes 0–3 are the high 32 bits of the call count, big-endian.
-- Bytes 4–8 are zero. The call MUST NOT draw those bytes from World RNG
-  or from `Crypto`.
-- Bytes 9–11 are the low 24 bits of the call count, big-endian.
+- Bytes 0–7 are the dispatcher clock in milliseconds.
+- Bytes 8–11 are the increment for that timestamp.
+- Bytes 12–15 are four random bytes.
 
-The count starts at zero. A successful call adds one, then encodes that
-count. The first id is `000000000000000000000001`. The second is
-`000000000000000000000002`. Count `16777215` is
-`000000000000000000ffffff`. Count `16777216` is
-`000000010000000000000000`. The hexadecimal text MUST sort in call order.
+The call MUST NOT read the wall clock. The timestamp is the dispatcher
+clock already stored as `now`. At dispatcher time 0 the timestamp text is
+`0000000000000000`.
 
-`(id)` takes no arguments. An argument MUST fail the expression. The call
-MUST NOT read the wall clock or the dispatcher clock. The count
-`72057594037927935` (`2^56 - 1`) is the last id. The next call MUST fail
-with a message containing `exhausted` and MUST NOT change the count.
+The increment is the count of ids already returned at that same timestamp.
+It starts at 0. A later timestamp MUST start again at 0. The first id at
+time 0 is `0000000000000000000000003c88596c`. The second is
+`0000000000000000000000015e8885db`. The hexadecimal text MUST sort by
+timestamp, then by increment. An id at dispatcher time 1 ms MUST sort
+after both of those: `0000000000000001000000003c88596c` on a new run.
 
-Snapshot MUST include the count as decimal text under `idCounter`: the
-number of ids already returned. A snapshot that omits `idCounter` restores
-as zero. Restore MUST continue from that count.
+The random bytes are the low 32 bits of one World RNG step, the same step
+`(rand Lo Hi)` takes. The call advances that generator by one step. It
+MUST NOT advance the `Crypto` byte stream. A failed call MUST NOT mint and
+MUST NOT advance World RNG.
+
+`(id)` takes no arguments. An argument MUST fail the expression.
+
+The increment `4294967295` is the last id at one timestamp
+(`0000000000000000ffffffff3c88596c` at time 0 on a new run). The next call
+at that same timestamp MUST fail with a message containing `exhausted` and
+MUST NOT change the increment or the generator. A later timestamp MUST
+still return an id, with increment 0.
+
+Snapshot MUST include `idTimestamp` and `idCounter` as decimal text.
+`idTimestamp` is the dispatcher time the increment belongs to.
+`idCounter` is the next increment at that time. A snapshot that omits
+either restores it as zero. When the restored dispatcher time equals
+`idTimestamp`, the next id continues from `idCounter`. When it differs,
+the next increment is 0.
 
 **Later-turn.** `(http_get url)` has no value this turn. It is legal only
 as a send argument: `send self (http_get url)` starts the request and

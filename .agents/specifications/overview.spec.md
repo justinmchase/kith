@@ -111,12 +111,12 @@ everything outside a machine's control. The language MUST stay checkable.
   same transition and send the same messages.
 - A feature that would hide a source of variation inside a machine MUST NOT
   be added. The wall is a message to the `Clock` component in
-  [built-ins](./builtins.spec.md#time): the checker replaces the driver, and
-  the dispatcher clock stays unread. A new identity is an explicit `(id)`
-  call, as [runtime](./runtime.spec.md#identity) defines it. A handler that
-  does not evaluate `(id)` MUST NOT mint one. A numeric draw is `(rand Lo Hi)`
-  or another draw on that same stream, or a message to a seeded `Random`
-  child, as [random](./random.spec.md) defines them.
+  [built-ins](./builtins.spec.md#time): the checker replaces the driver.
+  `(id)` does not read that clock. Its 16-byte value uses the dispatcher
+  clock as the timestamp, as [runtime](./runtime.spec.md#identity) defines
+  it. A handler that does not evaluate `(id)` MUST NOT mint one. A numeric
+  draw is `(rand Lo Hi)` or another draw on that same stream, or a message
+  to a seeded `Random` child, as [random](./random.spec.md) defines them.
 
 ## Open questions
 

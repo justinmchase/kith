@@ -1,16 +1,15 @@
-//! ObjectId-shaped ids. The counter occupies the timestamp and counter
-//! fields. The five middle bytes stay zero so a call does not draw entropy.
+//! 16-byte ids, the same width as a UUID. Eight bytes of dispatcher time,
+//! four of increment, and four random bytes from one World RNG step.
 
-/// The last call count that still fits in the 4-byte and 3-byte fields.
-pub const LAST: u64 = (1 << 56) - 1;
+/// Low 32 bits of one World RNG step. Those bits are the id's random field.
+pub fn random_bytes(state: &mut u64) -> u32 {
+    (super::random::step(state) & 0xffff_ffff) as u32
+}
 
-pub fn text(counter: u64) -> String {
-    let high = (counter >> 24) as u32;
-    let low = (counter & 0x00ff_ffff) as u32;
-    let mut bytes = [0u8; 12];
-    bytes[0..4].copy_from_slice(&high.to_be_bytes());
-    bytes[9] = (low >> 16) as u8;
-    bytes[10] = (low >> 8) as u8;
-    bytes[11] = low as u8;
+pub fn text(timestamp: u64, increment: u32, random: u32) -> String {
+    let mut bytes = [0u8; 16];
+    bytes[0..8].copy_from_slice(&timestamp.to_be_bytes());
+    bytes[8..12].copy_from_slice(&increment.to_be_bytes());
+    bytes[12..16].copy_from_slice(&random.to_be_bytes());
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

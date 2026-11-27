@@ -23,7 +23,9 @@ Each call draws on the World RNG that `(rand Lo Hi)` uses. Snapshot of that
 RNG MUST cover these calls. Restore MUST continue the same stream. A call
 that fails MUST NOT advance the stream. These calls MUST NOT advance the
 `Crypto` byte stream, and a `Crypto` `"Random"` draw MUST NOT advance this
-stream.
+stream. `(id)` takes one step of this same stream for its four random
+bytes, as [runtime](./runtime.spec.md#identity) defines. A failed `(id)`
+MUST NOT take that step.
 
 | Call | Result |
 | --- | --- |
