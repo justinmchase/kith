@@ -1,0 +1,214 @@
+name: Draft Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: draft-release
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    name: Draft Release
+    # Skip the version-bump bot commit to avoid a second draft/dispatch cycle.
+    if: ${{ !contains(github.event.head_commit.message, '[no ci]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ vars.AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.AUTOMATION_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: optum/semver-cli/setup@2.0.8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Resolve Version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY}"
+          release_sha="$(git rev-parse HEAD)"
+          releases="$(gh api --paginate --slurp "repos/${repository}/releases?per_page=100")"
+
+          stable_tags="$(jq -r \
+            '.[][] | select(.draft == false and .prerelease == false) | .tag_name' \
+            <<< "$releases")"
+          previous_tag=""
+          previous_version="0.0.0"
+          if [ -n "${stable_tags}" ]; then
+            previous_version="$(sed 's/^v//' <<< "$stable_tags" | semver sort -- | sed -n '1p')"
+            previous_tag="$(jq -r --arg version "${previous_version}" \
+              '[.[][] | select(.draft == false and .prerelease == false) | select((.tag_name | sub("^v"; "")) == $version) | .tag_name] | first // empty' \
+              <<< "$releases")"
+          fi
+
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "$work_dir"' EXIT
+
+          if [ -n "${previous_tag}" ]; then
+            if ! git merge-base --is-ancestor "${previous_tag}" "${release_sha}"; then
+              echo "Latest stable release ${previous_tag} is not an ancestor of ${release_sha}." >&2
+              exit 1
+            fi
+            git rev-list "${previous_tag}..${release_sha}" > "${work_dir}/range_commits"
+          else
+            git rev-list "${release_sha}" > "${work_dir}/range_commits"
+          fi
+
+          # One paginated PR list; bump from labels on PRs whose merge commit is
+          # in the range after the latest stable tag (or all history if none).
+          pulls="$(gh api --paginate --slurp \
+            "repos/${repository}/pulls?state=closed&base=main&per_page=100")"
+          bump="$(jq -r --rawfile commits "${work_dir}/range_commits" '
+            ($commits | split("\n") | map(select(length > 0))
+              | map({key: ., value: true}) | from_entries) as $in_range
+            | [
+                .[][]
+                | select(
+                    .merged_at != null
+                    and .base.ref == "main"
+                    and .merge_commit_sha != null
+                    and ($in_range[.merge_commit_sha] == true)
+                  )
+                | .labels[]?.name
+              ]
+            | if any(. == "major") then "major"
+              elif any(. == "minor") then "minor"
+              else "patch"
+              end
+          ' <<< "$pulls")"
+
+          printf '%s\n' "${previous_version}" > "${work_dir}/VERSION"
+          release_version="$(cd "${work_dir}" && semver inc "${bump}")"
+
+          # Skip versions that already have a published release or a git tag
+          # (burnt / protected tags must not be reused; publishing creates the tag).
+          while true; do
+            if jq -e --arg version "${release_version}" \
+              '[.[][] | select(.draft == false) | .tag_name | sub("^v"; "")] | any(. == $version)' \
+              <<< "$releases" >/dev/null; then
+              echo "Skipping ${release_version}: published release already exists." >&2
+            elif gh api "repos/${repository}/git/ref/tags/${release_version}" \
+              >/dev/null 2>&1; then
+              echo "Skipping ${release_version}: git tag already exists." >&2
+            else
+              break
+            fi
+            printf '%s\n' "${release_version}" > "${work_dir}/VERSION"
+            release_version="$(cd "${work_dir}" && semver inc patch)"
+          done
+
+          draft_id="$(jq -r '[.[][] | select(.draft == true)] | sort_by(.created_at) | last | .id // empty' \
+            <<< "$releases")"
+          {
+            echo "version=${release_version}"
+            echo "previous_tag=${previous_tag}"
+            echo "draft_id=${draft_id}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set Version
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Updates VERSION plus post hooks in .github/version.yml (including
+          # Cargo.toml package versions and the kith-runtime path-dep pin).
+          semver set "$RELEASE_VERSION"
+          # Lockfile package entries are not covered by version.yml hooks.
+          cargo update -p kith -p kith-runtime
+          if [ -z "$(git status --porcelain)" ];
+          then
+            echo "no changes to commit."
+            exit 0
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          # Version
+          \`\`\`
+          ${RELEASE_VERSION}
+          \`\`\`
+          EOF
+
+          git config user.name  bustin-base[bot]
+          git config user.email 177288331+bustin-base[bot]@users.noreply.github.com
+          gh auth setup-git
+
+          git add .
+          git commit -m "${RELEASE_VERSION}[no ci]"
+          git push origin main
+
+      - name: Update Draft with GitHub Release Notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          PREVIOUS_TAG: ${{ steps.release.outputs.previous_tag }}
+          DRAFT_ID: ${{ steps.release.outputs.draft_id }}
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY}"
+          release_sha="$(git rev-parse HEAD)"
+          notes_input="$(jq -n \
+            --arg sha "${release_sha}" \
+            --arg previous "${PREVIOUS_TAG}" \
+            '{tag_name: $sha, target_commitish: $sha} +
+              (if $previous == "" then {} else {previous_tag_name: $previous} end)')"
+          notes="$(gh api --method POST "repos/${repository}/releases/generate-notes" \
+            --input - <<< "$notes_input")"
+          notes_body="$(jq -er '.body | strings' <<< "$notes")"
+          release_input="$(jq -n \
+            --arg version "${RELEASE_VERSION}" \
+            --arg sha "${release_sha}" \
+            --arg body "${notes_body}" \
+            '{tag_name: $version, name: $version, target_commitish: $sha, body: $body, draft: true, prerelease: false}')"
+
+          if [ -n "${DRAFT_ID}" ]; then
+            draft="repos/${repository}/releases/${DRAFT_ID}"
+            existing_release="$(gh api "${draft}")"
+            if ! jq -e '.draft == true' <<< "$existing_release" >/dev/null; then
+              echo "Release ${DRAFT_ID} is no longer a draft." >&2
+              exit 1
+            fi
+            gh api --method PATCH "${draft}" --input - <<< "$release_input" >/dev/null
+          else
+            gh api --method POST "repos/${repository}/releases" \
+              --input - <<< "$release_input" >/dev/null
+          fi
+
+      - name: Dispatch attach draft CLI binaries
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type='release-binaries' \
+            -f "client_payload[version]=${RELEASE_VERSION}" \
+            -f "client_payload[reason]=draft-release"
+          {
+            echo "## Release binaries"
+            echo
+            echo "Dispatched \`repository_dispatch\` event \`release-binaries\` for draft \`${RELEASE_VERSION}\`."
+            echo
+            echo "That run attaches CLI assets and leaves the release as a draft."
+            echo "Publish it from the [Releases page](https://github.com/${GITHUB_REPOSITORY}/releases) after the assets are attached."
+            echo
+            echo "You can also re-run [Release Binaries](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/release-binaries.yml) manually. That run attaches assets and does not publish."
+          } >> "$GITHUB_STEP_SUMMARY"

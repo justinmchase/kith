@@ -3,6 +3,9 @@ name: Release Binaries
 # Compile the kith CLI and attach it to a GitHub Release. The grammar is
 # compiled by a released uffda CLI during the build. kith-runtime publishes
 # separately via Publish; see runtime.spec.md Packages.
+#
+# Draft Release dispatches this workflow to attach assets. Publishing the
+# draft is manual and creates the version tag.
 on:
   workflow_dispatch:
     inputs:
@@ -193,15 +196,6 @@ jobs:
           set -euo pipefail
           tag="${{ needs.prepare.outputs.tag }}"
           gh release upload "${tag}" dist/cli/* --clobber
-
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${{ needs.prepare.outputs.tag }}"
-          gh release edit "${tag}" --draft=false --latest
 
       - name: Smoke install
         uses: ./.github/actions/kith-setup

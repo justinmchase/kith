@@ -1,0 +1,18 @@
+on:
+  post:
+    - kind: regexp
+      file: VERSION
+      pattern: ".+"
+    # Package versions: `^` needs the `m` flag (JS has no inline (?m)).
+    - kind: regexp
+      file: Cargo.toml
+      pattern: '(?<=^version = ").*(?=")'
+      flags: m
+    - kind: regexp
+      file: crates/kith-runtime/Cargo.toml
+      pattern: '(?<=^version = ").*(?=")'
+      flags: m
+    # Path-dependency version pin for the published library crate.
+    - kind: regexp
+      file: Cargo.toml
+      pattern: '(?<=path = "crates/kith-runtime", version = ").*(?=")'
