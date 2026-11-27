@@ -15,10 +15,12 @@ capitals.
 
 ## Definitions
 
-- **Clock**: the dispatcher's current time, in seconds. It is virtual. A
-  checker MAY replace it. It is not the `Clock` component in
-  [built-ins](./builtins.spec.md#time). A program MUST NOT read this clock.
-  The only wall read is a message to that component.
+- **Clock**: the dispatcher's current time. A normal runtime starts it at
+  the current wall time in milliseconds. A test MAY start it at 0. After
+  that start it does not track the wall. A checker MAY replace it. It is
+  not the `Clock` component in [built-ins](./builtins.spec.md#time). A
+  program MUST NOT read this clock. The only wall read is a message to
+  that component.
 - **Timer**: a send that is due at a clock time and has not yet been delivered.
 - **After**: a delay on a send (`send after Expression`). Expression evaluates
   to seconds.
@@ -27,10 +29,12 @@ capitals.
 
 - A turn MUST NOT sleep, wait on a thread, or otherwise block the dispatcher
   to implement a delay.
-- Time is an input to the dispatcher, like the ready queue. The dispatcher
-  clock is not a wall clock, and a program MUST NOT read it. The only wall
-  read is a `"Now"` or `"Zone"` message to a `Clock` child. `send after`
-  stays a number of seconds on the dispatcher clock.
+- Time is an input to the dispatcher, like the ready queue. A program MUST
+  NOT read the dispatcher clock. The only wall read is a `"Now"` or
+  `"Zone"` message to a `Clock` child. A normal runtime starts the
+  dispatcher clock at the current wall time. A test MAY start it at 0.
+  After that start the clock moves when a timer is due, not with the wall.
+  `send after` stays a number of seconds on the dispatcher clock.
 - When a timer is due, it becomes an ordinary send: the message is appended to
   a mailbox and taken on a later turn.
 
@@ -44,7 +48,8 @@ capitals.
 - `Delay` is a Uffda expression that produces a number of **seconds**.
   `(rand Lo Hi)` is a Kith host callable: inclusive if both bounds are
   integers, otherwise a number in `[Lo, Hi]`. It is not a Uffda global.
-  A checker MAY replace the RNG.
+  A checker MAY replace the RNG. The other numeric draws on this stream
+  are defined in [random](./random.spec.md#numeric-draws).
 - A negative delay MUST fail that send.
 - `World::run_until_idle` MUST drain mailboxes only. Pending timers MUST stay
   pending so a test can observe a wait.
@@ -70,8 +75,9 @@ the next Tick from Validating after Check, not from the Tick handler, so
 Tick is not taken in Waiting. The later self-send matches a handler whose
 route list includes `self`, not `on down` alone.
 
-The first slice uses a virtual clock starting at 0. Advancing to a timer does
-not wait on real time.
+A normal runtime starts the dispatcher clock at the current wall time in
+milliseconds. A test MAY start it at 0. A production run does not start at
+time 0. Advancing to a timer does not wait on real time.
 
 ## Timer component
 

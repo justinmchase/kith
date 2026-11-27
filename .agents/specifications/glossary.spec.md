@@ -107,7 +107,13 @@ capitals.
   not a blocking wait.
 - **Rand**: a Kith host callable `(rand Lo Hi)` that produces a number in
   that range from World RNG. Inclusive integers when both bounds are
-  integers. It is not a Uffda global.
+  integers. It is not a Uffda global. `(random)`, `(uniform Lo Hi)`,
+  `(bernoulli p)`, and `(normal mean deviation)` draw on that same stream.
+- **Id**: the host callable `(id)`. Each call returns a new 16-byte value,
+  the same width as a UUID and globally unique in that same way: 8 bytes of
+  dispatcher time, 4 of increment, and 4 of random. A normal runtime starts
+  the dispatcher clock at the current wall time. The call is the mint. A
+  handler that does not evaluate it does not receive an id.
 - **Consume**: a matched transition that handles a message so the message does
   not continue on its route.
 
@@ -156,3 +162,7 @@ capitals.
 - **Timer component**: the `kith:time` child `Timer(interval: Milliseconds)`.
   It arms a dispatcher timer and sends `@Tick` up. It is not the dispatcher
   timer, and it is not the `Clock` component.
+- **Random component**: the `kith:random` child `Random(seed: n)`. Draws come
+  from that seed. It is not `Crypto` and not `(rand Lo Hi)`.
+- **Store**: the `kith:store` child. One instance keeps its own current
+  documents. Snapshot stores those documents, not a log of saves.

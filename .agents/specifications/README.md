@@ -32,6 +32,10 @@ primitives rather than redefining them.
 - [Built-ins](./builtins.spec.md): the `kith:` prefix and the data, stream,
   and time modules. `Clock` there is the wall read. `Timer` is the interval
   child. The dispatcher clock stays in Timers.
+- [Random](./random.spec.md): numeric draws beside `(rand Lo Hi)`, and the
+  seeded `Random` component. `Crypto` stays random bytes.
+- [Persistence](./persistence.spec.md): the `Store` child. Current documents
+  by key, saved only when the loaded version is still current.
 - [Edges](./edges.spec.md): net, http, stdio, fs, encoding, crypto, path,
   and process.
 
@@ -42,6 +46,6 @@ shape.
 
 - `supervision`: what happens when an actor fails, and how a parent restarts or
   stops its children.
-- `persistence`: what of a durable component is stored, and how a
-  relocated actor resumes.
 - `machines`: whether component state-machine rules should be their own chapter.
+  How a relocated actor resumes stays open. [Persistence](./persistence.spec.md)
+  is the document store, not that resume rule.

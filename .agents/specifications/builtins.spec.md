@@ -8,7 +8,10 @@ Delayed sends stay in [timers](./timers.spec.md). Terms are defined in the
 
 `kith:net`, `kith:http`, `kith:stdio`, `kith:fs`, `kith:encoding`,
 `kith:crypto`, `kith:path`, and `kith:process` are defined in
-[edges](./edges.spec.md).
+[edges](./edges.spec.md). `kith:random` is defined in
+[random](./random.spec.md). `kith:store` is defined in
+[persistence](./persistence.spec.md). The host MUST register those two
+modules with the same rule as the modules this chapter defines.
 
 ## Conventions
 
@@ -66,9 +69,10 @@ are Kith host drivers for that module name; they are not Uffda exports.
   imported rule. The declaration records the export; it is not a second
   definition of the rule.
 
-No new globals. `rand`, `print`, `send after`, and the Uffda globals stay as
-their chapters define them. Byte length is `(byte_length bytes)`, not
-`length`.
+No new globals. `rand`, `id`, `random`, `uniform`, `bernoulli`, `normal`,
+`print`, `send after`, and the Uffda globals stay as their chapters define
+them. They are host callables, not imports. Byte length is
+`(byte_length bytes)`, not `length`.
 
 ## Data
 
@@ -229,8 +233,10 @@ clock. `"Now"` and `"Zone"` stay on `Clock`.
 - **The driver is a child.** `Pipe` and `Clock` use the same `send to` /
   later `up` shape as the `Http` mock in `examples/health.kith`. That mock
   stays a user component. This chapter does not bind it to a socket.
-- **The dispatcher clock stays virtual.** `send after` is still seconds from
-  zero. The wall is a message a checker can script. Connecting them is
-  `(diff_seconds later earlier)`, and the program writes that number itself.
-  `Timer` arms that same clock from a millisecond `interval`. It does not
-  read the wall.
+- **The dispatcher clock stays virtual after it starts.** A normal runtime
+  starts it at the current wall time. A test MAY start it at 0. After that
+  start, `send after` is still a number of seconds on that clock, and the
+  clock does not track the wall. The wall read is a message a checker can
+  script. Connecting them is `(diff_seconds later earlier)`, and the program
+  writes that number itself. `Timer` arms that same clock from a millisecond
+  `interval`. It does not read the wall.
