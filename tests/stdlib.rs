@@ -188,6 +188,58 @@ fn id_is_an_explicit_16_byte_value() {
     assert_ne!(number(&plain), number(&after_id));
 }
 
+fn wall_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn rng_bits(world: &World) -> u64 {
+    let value = snapshot_json(world)["rng"].as_f64().expect("rng");
+    assert_eq!(value, value as u64 as f64, "rng must survive the snapshot");
+    value as u64
+}
+
+#[test]
+// req:runtime-007
+fn live_runtime_ids_follow_wall_time() {
+    let program = load(ID).expect("resolve");
+    let mut left = World::live(program.clone()).expect("live");
+    let mut right = World::live(program).expect("live");
+    let wall = wall_millis();
+    for world in [&left, &right] {
+        let now = world.virtual_now();
+        assert_ne!(now, 0, "a normal runtime does not start at time 0");
+        assert!(now.abs_diff(wall) < 60_000, "now {now} wall {wall}");
+        assert_eq!(stamp(world, "idCounter"), "0");
+        assert_eq!(stamp(world, "idTimestamp"), now.to_string());
+    }
+    assert_ne!(
+        rng_bits(&left),
+        rng_bits(&right),
+        "entropy seeds must differ"
+    );
+
+    send(&mut left, "Id");
+    send(&mut right, "Id");
+    let left_id = text(&left);
+    let right_id = text(&right);
+    assert_eq!(left_id.len(), 32);
+    assert_eq!(&left_id[0..16], &format!("{:016x}", left.virtual_now()));
+    assert_eq!(&left_id[16..24], "00000000");
+    assert_eq!(&right_id[0..16], &format!("{:016x}", right.virtual_now()));
+    assert_eq!(&right_id[16..24], "00000000");
+    assert_ne!(left_id, right_id);
+    if left.virtual_now() == right.virtual_now() {
+        assert_ne!(&left_id[24..], &right_id[24..]);
+    } else if left.virtual_now() < right.virtual_now() {
+        assert!(left_id < right_id);
+    } else {
+        assert!(right_id < left_id);
+    }
+}
+
 const DRAWS: &str = r#"
 import "kith:crypto" Crypto;
 import "kith:encoding" hex_encode;

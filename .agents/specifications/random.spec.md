@@ -25,7 +25,9 @@ that fails MUST NOT advance the stream. These calls MUST NOT advance the
 `Crypto` byte stream, and a `Crypto` `"Random"` draw MUST NOT advance this
 stream. `(id)` takes one step of this same stream for its four random
 bytes, as [runtime](./runtime.spec.md#identity) defines. A failed `(id)`
-MUST NOT take that step.
+MUST NOT take that step. A normal runtime seeds this generator from
+entropy. A test start MAY leave it at its initial state, and two such
+runs MUST agree.
 
 | Call | Result |
 | --- | --- |

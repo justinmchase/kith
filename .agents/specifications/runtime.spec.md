@@ -185,26 +185,37 @@ same width as a UUID. The layout is big-endian:
 - Bytes 8–11 are the increment for that timestamp.
 - Bytes 12–15 are four random bytes.
 
-The call MUST NOT read the wall clock. The timestamp is the dispatcher
-clock already stored as `now`. At dispatcher time 0 the timestamp text is
-`0000000000000000`.
+The timestamp is the dispatcher clock in milliseconds, already stored as
+`now`. `(id)` MUST NOT read the wall clock. A normal runtime
+(`kith run`, `World::live`) starts that clock at the current wall time, so
+an id sorts with real time and does not reuse a timestamp from a process
+that started earlier or later. A test MAY start the dispatcher at 0
+(`World::start`). A production run does not start at time 0.
 
 The increment is the count of ids already returned at that same timestamp.
-It starts at 0. A later timestamp MUST start again at 0. The first id at
-time 0 is `0000000000000000000000003c88596c`. The second is
-`0000000000000000000000015e8885db`. The hexadecimal text MUST sort by
-timestamp, then by increment. An id at dispatcher time 1 ms MUST sort
-after both of those: `0000000000000001000000003c88596c` on a new run.
+It starts at 0. A later timestamp MUST start again at 0. The hexadecimal
+text MUST sort by timestamp, then by increment. On a test that starts the
+dispatcher at 0 and leaves World RNG at its initial state, the first id is
+`0000000000000000000000003c88596c` and the second is
+`0000000000000000000000015e8885db`. An id at dispatcher time 1 ms on that
+same test start is `0000000000000001000000003c88596c` and MUST sort after
+both.
 
 The random bytes are the low 32 bits of one World RNG step, the same step
 `(rand Lo Hi)` takes. The call advances that generator by one step. It
 MUST NOT advance the `Crypto` byte stream. A failed call MUST NOT mint and
-MUST NOT advance World RNG.
+MUST NOT advance World RNG. A normal runtime MUST seed World RNG from
+entropy, so two processes that share a millisecond do not share those
+bytes. A test MAY leave the generator at its initial state. Together the
+timestamp, the increment, and those random bytes MUST make the id globally
+unique in the way an ObjectId or a UUID is: time places it, the increment
+separates calls in one millisecond of one runtime, and the random bytes
+separate runtimes.
 
 `(id)` takes no arguments. An argument MUST fail the expression.
 
-The increment `4294967295` is the last id at one timestamp
-(`0000000000000000ffffffff3c88596c` at time 0 on a new run). The next call
+The increment `4294967295` is the last id at one timestamp. On the test
+start above, that id is `0000000000000000ffffffff3c88596c`. The next call
 at that same timestamp MUST fail with a message containing `exhausted` and
 MUST NOT change the increment or the generator. A later timestamp MUST
 still return an id, with increment 0.

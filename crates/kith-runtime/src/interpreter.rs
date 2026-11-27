@@ -165,7 +165,20 @@ impl World {
         Ok(())
     }
 
+    /// Test start. The dispatcher clock is 0 and World RNG is the initial state.
     pub fn start(program: Program) -> Result<Self, Error> {
+        Self::open(program, 0, 1)
+    }
+
+    /// A normal runtime. The dispatcher clock starts at the current wall time
+    /// and World RNG is seeded from entropy, so `(id)` does not collide with
+    /// an id from another process.
+    pub fn live(program: Program) -> Result<Self, Error> {
+        let now = u64::try_from(builtin::wall_millis()).unwrap_or(0);
+        Self::open(program, now, builtin::entropy_seed())
+    }
+
+    fn open(program: Program, now: u64, rng: u64) -> Result<Self, Error> {
         Self::check(&program)?;
         let scene = program.unique_exported_scene().map_err(Error::new)?.clone();
         let mut world = Self {
@@ -176,10 +189,10 @@ impl World {
             routes: HashMap::new(),
             route_seq: 0,
             prints: Vec::new(),
-            now: 0,
-            rng: 1,
+            now,
+            rng,
             id_counter: 0,
-            id_timestamp: 0,
+            id_timestamp: now,
             timers: Vec::new(),
             joins: HashMap::new(),
             next_join: 1,

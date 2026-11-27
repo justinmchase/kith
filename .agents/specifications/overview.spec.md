@@ -114,7 +114,9 @@ everything outside a machine's control. The language MUST stay checkable.
   [built-ins](./builtins.spec.md#time): the checker replaces the driver.
   `(id)` does not read that clock. Its 16-byte value uses the dispatcher
   clock as the timestamp, as [runtime](./runtime.spec.md#identity) defines
-  it. A handler that does not evaluate `(id)` MUST NOT mint one. A numeric
+  it. A normal runtime starts that clock at the current wall time, so ids
+  sort with real time. A test MAY start it at 0. A handler that does not
+  evaluate `(id)` MUST NOT mint one. A numeric
   draw is `(rand Lo Hi)` or another draw on that same stream, or a message
   to a seeded `Random` child, as [random](./random.spec.md) defines them.
 

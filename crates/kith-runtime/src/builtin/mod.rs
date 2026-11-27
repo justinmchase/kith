@@ -27,7 +27,7 @@ pub use edge::{
     ListenOn, Outcome,
 };
 pub use identity::{random_bytes as id_random, text as id_text};
-pub use random::{bernoulli, normal, random_seed, range, uniform, unit, Generator};
+pub use random::{bernoulli, entropy_seed, normal, random_seed, range, uniform, unit, Generator};
 pub use rules::{match_with_rules, uses_rule};
 pub use stream::Pipe;
 pub use time::{instant_doc, instant_text, parse_instant, process_zone, wall_millis, zone_value};

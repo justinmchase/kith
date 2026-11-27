@@ -132,7 +132,7 @@ pub fn run_program(
     message: Option<Doc>,
     argv: Vec<String>,
 ) -> Result<RunResult, Error> {
-    let mut world = World::start(program)?;
+    let mut world = World::live(program)?;
     world.set_argv(argv);
     if let Some(message) = message {
         world.inject_document(message)?;

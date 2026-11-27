@@ -4,6 +4,35 @@
 use crate::doc::{self, Doc};
 use crate::error::Error;
 
+/// A normal runtime seeds World RNG from entropy. The value fits in an f64
+/// integer so the snapshot can restore it.
+pub fn entropy_seed() -> u64 {
+    const MANTISSA: u64 = (1 << 53) - 1;
+    let mut bytes = [0u8; 8];
+    let drawn = std::fs::File::open("/dev/urandom")
+        .ok()
+        .and_then(|mut file| {
+            use std::io::Read;
+            file.read_exact(&mut bytes).ok()?;
+            Some(u64::from_le_bytes(bytes) & MANTISSA)
+        })
+        .unwrap_or(0);
+    if drawn != 0 {
+        return drawn;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(1);
+    let mixed = nanos ^ u64::from(std::process::id()).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mixed = mixed & MANTISSA;
+    if mixed == 0 {
+        1
+    } else {
+        mixed
+    }
+}
+
 /// Numerical Recipes LCG. One step of World RNG and of a seeded `Random`.
 pub fn step(state: &mut u64) -> u64 {
     *state = state.wrapping_mul(1664525).wrapping_add(1013904223);
