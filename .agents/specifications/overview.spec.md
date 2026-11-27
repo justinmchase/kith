@@ -42,12 +42,13 @@ primitives rather than defining their own.
   subtype another component's machine.
 - **Messages are the only communication.** Components MUST NOT
   call one another as functions to cause behavior. They send messages. A
-  message is routed to a named port or to each instance in an array field
+  message is routed to a named port or to a field
   (`send to`), down to every direct child
   (`send down`), up toward the root (`send up`), or to this instance
   (`send self`), then matched as a Uffda pattern. A child that does not
-  handle a `send down` ignores it. An element of that array that does not
-  handle the offer ignores it, including when the array is empty.
+  handle a `send down` ignores it. An element of an array field that does not
+  handle the offer ignores it, including when the array is empty. A field
+  value that is not an array is sent to that one instance.
 - **Machines.** Component behavior is a state machine: a matched
   message may send, assign, and `complete`. Actor `send` / `goto` /
   `complete` are statements. Host I/O is Uffda invocation syntax, not a

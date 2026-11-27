@@ -31,7 +31,7 @@ verify it cite it with `req:{id}`.
 - [A field post must match before the turn leaves](./components/024-post-conditions.requirement.md)
 - [A field pre is matched on entry before post](./components/025-entry-patterns.requirement.md)
 - [A field exists only in the states its in clauses name](./components/026-state-scoped-fields.requirement.md)
-- [send to an array field offers each element](./components/027-send-to-array-field.requirement.md)
+- [send to a field sends to one value or offers each array element](./components/027-send-to-array-field.requirement.md)
 
 ## Scenes
 
