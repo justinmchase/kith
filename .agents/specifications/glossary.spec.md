@@ -81,7 +81,11 @@ capitals.
   Messages are the only communication that causes behavior.
 - **Send**: the act of placing a message on a route. Sending does not wait for
   a handler. The keyword is `send`.
-- **To**: a route to a named port (`send to`).
+- **To**: a route to a named port (`send to name`), or an offer to each
+  instance in an array field of that name. The array is the field's value.
+  An element with no matching handler ignores the offer. Zero elements is
+  success. A port names one child, and that child with no matching handler
+  fails the send.
 - **Up**: a route toward the parent, and then toward the root if not consumed
   (`send up`). `on up` matches only that route at the receiver.
 - **Down**: a route toward every direct child (`send down V`). The parent

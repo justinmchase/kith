@@ -154,6 +154,7 @@ impl World {
             check_effects(component)?;
             check_constructs(program, component)?;
             check_fields(component)?;
+            check_field_port_names(component)?;
             check_handler_scope(component)?;
         }
         check_instance(program, &scene.root)?;
@@ -1235,19 +1236,34 @@ impl World {
                     message,
                     after,
                 } => {
-                    let child = self.instances[&id]
+                    let child_id = self.instances[&id]
                         .children
                         .iter()
                         .find(|child| child.key.as_deref() == Some(port.as_str()))
-                        .ok_or_else(|| Error::new(format!("unknown port {port}")))?;
-                    self.enqueue_send(
-                        child.id,
-                        message,
-                        after.as_ref(),
-                        Route::Down,
-                        &bindings,
-                        &mut sends,
-                    )?;
+                        .map(|child| child.id);
+                    if let Some(child_id) = child_id {
+                        self.enqueue_send(
+                            child_id,
+                            message,
+                            after.as_ref(),
+                            Route::Down,
+                            &bindings,
+                            &mut sends,
+                        )?;
+                    } else if self.instances[&id].fields.contains_key(port) {
+                        for target in self.array_field_targets(id, port)? {
+                            self.enqueue_send(
+                                target,
+                                message,
+                                after.as_ref(),
+                                Route::Offer,
+                                &bindings,
+                                &mut sends,
+                            )?;
+                        }
+                    } else {
+                        return Err(Error::new(format!("unknown port {port}")));
+                    }
                 }
                 Statement::SendDown {
                     component,
@@ -1386,9 +1402,14 @@ impl World {
                 continue;
             }
             if let Some(instance) = self.instances.get(&id) {
+                let mut extra = Vec::new();
                 for child in &instance.children {
-                    stack.push(child.id);
+                    extra.push(child.id);
                 }
+                for value in instance.fields.values() {
+                    collect_instance_refs(value, &mut extra);
+                }
+                stack.extend(extra);
             }
         }
         let dead: Vec<ActorId> = self
@@ -1632,10 +1653,79 @@ impl World {
     }
 
     fn field_matches(&self, pattern: &Json, value: &Doc) -> Result<bool, Error> {
+        if let Some(kind) = component_array_kind(pattern) {
+            if self.program.component(kind).is_some() {
+                return Ok(self.instance_array_matches(kind, value));
+            }
+        }
         if builtin::uses_rule(pattern, &self.program.rules) {
             return Ok(builtin::match_with_rules(pattern, value, &self.program.rules)?.is_some());
         }
         match_field_document(pattern, value)
+    }
+
+    fn instance_array_matches(&self, kind: &str, value: &Doc) -> bool {
+        let Some(items) = doc::items(value) else {
+            return false;
+        };
+        items.iter().all(|item| {
+            instance_id(item).is_some_and(|id| {
+                self.instances
+                    .get(&id)
+                    .is_some_and(|instance| instance.kind == kind)
+            })
+        })
+    }
+
+    /// Store `kinds` in `field` as instances. They are field values: not
+    /// children, and not a port fill. Each is parented to `id`.
+    #[doc(hidden)]
+    pub fn hold_field_instances(
+        &mut self,
+        id: ActorId,
+        field: &str,
+        kinds: &[&str],
+    ) -> Result<Vec<ActorId>, Error> {
+        if !self
+            .instances
+            .get(&id)
+            .is_some_and(|instance| instance.fields.contains_key(field))
+        {
+            return Err(Error::new(format!("unknown field {field}")));
+        }
+        let mut created = Vec::with_capacity(kinds.len());
+        for kind in kinds {
+            created.push(self.spawn_kind(kind, Some(id), &[])?);
+        }
+        let refs = doc::array(created.iter().copied().map(instance_ref));
+        let projected = project(&refs)?;
+        let instance = self.instances.get_mut(&id).expect("holder");
+        instance.fields.insert(field.to_string(), refs);
+        instance.field_json.insert(field.to_string(), projected);
+        for child in &created {
+            self.deliver(*child, doc::null(), Route::Init)?;
+        }
+        Ok(created)
+    }
+
+    fn array_field_targets(&self, id: ActorId, name: &str) -> Result<Vec<ActorId>, Error> {
+        let value = self.instances[&id]
+            .fields
+            .get(name)
+            .ok_or_else(|| Error::new(format!("unknown field {name}")))?;
+        let Some(items) = doc::items(value) else {
+            return Err(Error::new(format!("send to {name} is not an array")));
+        };
+        let mut targets = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(target) = instance_id(&item) else {
+                return Err(Error::new(format!(
+                    "send to {name} element is not an instance"
+                )));
+            };
+            targets.push(target);
+        }
+        Ok(targets)
     }
 
     fn drive(
@@ -2456,6 +2546,23 @@ fn field_in_state(field: &Field, state: &str) -> bool {
     field_clause(field, state).is_some()
 }
 
+fn check_field_port_names(component: &Component) -> Result<(), Error> {
+    let fields: HashSet<&str> = component
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    for port in &component.ports {
+        if fields.contains(port.name.as_str()) {
+            return Err(Error::new(format!(
+                "{} is both a field and a port on {}",
+                port.name, component.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn check_fields(component: &Component) -> Result<(), Error> {
     let state_names: HashSet<&str> = component
         .states
@@ -2899,6 +3006,103 @@ fn symbolize_reply(message: Doc) -> Doc {
         }
     }
     message
+}
+
+fn instance_ref(id: ActorId) -> Doc {
+    doc::object([
+        ("kind", doc::symbol("kith.instance")),
+        ("id", doc::number(id.0 as f64)),
+    ])
+}
+
+fn instance_id(value: &Doc) -> Option<ActorId> {
+    let kind = doc::as_symbol(&doc::get(value, "kind")?)?;
+    if kind != "kith.instance" {
+        return None;
+    }
+    Some(ActorId(doc::as_u64(&doc::get(value, "id")?)?))
+}
+
+fn collect_instance_refs(value: &Doc, into: &mut Vec<ActorId>) {
+    if let Some(id) = instance_id(value) {
+        into.push(id);
+        return;
+    }
+    if let Some(items) = doc::items(value) {
+        for item in items {
+            collect_instance_refs(&item, into);
+        }
+        return;
+    }
+    if let Some(entries) = doc::entries(value) {
+        for (_, child) in entries {
+            collect_instance_refs(&child, into);
+        }
+    }
+}
+
+/// `[Tree*]` is an `into` of a zero-or-more quantifier of a resolve named
+/// `Tree`. Single or/and/then/pipeline wrappers are peeled. `Some` only when
+/// the quantifier allows zero.
+fn component_array_kind(pattern: &Json) -> Option<&str> {
+    let pattern = peel_pattern(pattern);
+    if pattern.get("kind").and_then(Json::as_str) != Some("into") {
+        return None;
+    }
+    let quantifier = peel_pattern(pattern.get("pattern")?);
+    if quantifier.get("kind").and_then(Json::as_str) != Some("quantifier") {
+        return None;
+    }
+    if quantifier_min(quantifier) != 0 {
+        return None;
+    }
+    let element = peel_pattern(quantifier.get("pattern")?);
+    if element.get("kind").and_then(Json::as_str) != Some("resolve") {
+        return None;
+    }
+    element.get("name").and_then(Json::as_str)
+}
+
+fn peel_pattern(pattern: &Json) -> &Json {
+    let mut current = pattern;
+    loop {
+        let kind = current.get("kind").and_then(Json::as_str);
+        let next = match kind {
+            Some("or" | "and" | "then") => current
+                .get("patterns")
+                .and_then(Json::as_array)
+                .filter(|items| items.len() == 1)
+                .map(|items| &items[0]),
+            Some("pipeline") => current
+                .get("steps")
+                .and_then(Json::as_array)
+                .filter(|items| items.len() == 1)
+                .map(|items| &items[0]),
+            Some("group") => current.get("pattern"),
+            _ => None,
+        };
+        match next {
+            Some(next) => current = next,
+            None => return current,
+        }
+    }
+}
+
+fn quantifier_min(pattern: &Json) -> i64 {
+    match pattern.get("min") {
+        None | Some(Json::Null) => 0,
+        Some(Json::Number(value)) => value.as_i64().unwrap_or(1),
+        Some(Json::Object(map)) => map
+            .get("value")
+            .and_then(Json::as_i64)
+            .or_else(|| {
+                map.get("value")
+                    .and_then(Json::as_f64)
+                    .map(|value| value as i64)
+            })
+            .unwrap_or(0),
+        Some(_) => 1,
+    }
 }
 
 fn project(doc: &Doc) -> Result<Json, Error> {
