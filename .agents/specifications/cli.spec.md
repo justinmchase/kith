@@ -67,6 +67,11 @@ That library is `kith-runtime`, defined in [runtime](./runtime.spec.md#packages)
 
 - A release tag is the SemVer in the CLI package version, with no leading
   `v`.
+- A push to the default branch drafts the next release. The draft tag is the
+  next SemVer after the latest published stable release. `major` or `minor`
+  labels on pull requests merged since that release select the bump;
+  otherwise the bump is `patch`. Publishing the draft creates the git tag.
+  Attaching the CLI assets leaves that draft unpublished.
 - Each release MUST attach `kith-{version}-{target}` for the host targets
   below, `SHA256SUMS`, and `install.sh`. Windows assets use a `.exe` suffix.
 - Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
