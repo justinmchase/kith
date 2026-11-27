@@ -39,7 +39,10 @@ capitals.
 - Reuse MUST be by composition in a [scene](./scenes.spec.md), wrapping an
   instance, or sending it messages.
 - Nothing outside an instance MAY hold a child of that instance. Children are
-  reached only through their parent: `send to` a port, or `send down`.
+  reached only through their parent: `send to` a port, or `send down`. An
+  instance stored in a field is not a child. `send to` that field reaches
+  the stored value: that one instance, or each element when the value is
+  an array.
 
 ### Behavior
 
@@ -60,7 +63,7 @@ capitals.
 
 ### Routing
 
-- A send MUST name a direction: `send to` a port or an array field,
+- A send MUST name a direction: `send to` a port or a field,
   `send down`, `send up`, or `send self`. Routing is explicit only: there is
   no capture phase, and an unhandled message MUST NOT travel up unless the
   send was `send up`. A send with no route is invalid; self is not implied.
@@ -71,14 +74,16 @@ capitals.
   that is neither a port nor a field MUST fail that send with a diagnostic.
   A name MUST NOT be both a port and a field; check MUST fail that
   declaration.
-- When `name` is a field whose value is an array, `send to name V` offers
-  `V` to each element, in order. Each element is an instance the field
-  already holds. The array is that field value. The send MUST NOT construct
-  an instance and MUST NOT fill a port. An element whose current state has
-  no matching `on down` ignores that offer. That is not a failed send, and
-  it MUST NOT be forwarded to that element's children. Zero elements, and
-  zero handlers, is success. A field value that is not an array, or an
-  element that is not an instance, MUST fail that send with a diagnostic.
+- When `name` is a field, `send to name V` addresses the value that field
+  already holds. The send MUST NOT construct an instance and MUST NOT fill
+  a port. When that value is an array, the send offers `V` to each element,
+  in order. An element whose current state has no matching `on down`
+  ignores that offer. That is not a failed send, and it MUST NOT be
+  forwarded to that element's children. Zero elements, and zero handlers,
+  is success. When that value is not an array, the send sends `V` to that
+  one instance. The send MUST NOT fail because the value is not an array.
+  A value that is not an instance, and an array element that is not an
+  instance, MUST fail that send with a diagnostic.
 - `send down V` offers `V` to every direct child, a port child and an unnamed
   child together. `send down P V` is not a form. The parent does not filter
   children, does not compare component names, and does not select or care
@@ -88,8 +93,11 @@ capitals.
   and it MUST NOT be forwarded to that child's children. If no child handles
   `V`, including when the parent has no direct children, that is not an error.
 - `send to name V` that addresses one port child the child does not handle
-  MUST fail that send with a diagnostic. The failure MUST NOT be forwarded
-  to that child's children. An array field does not use this failure.
+  MUST fail that send with a diagnostic. The same failure applies when
+  `name` is a field whose value is one instance and that instance does not
+  handle `V`. The failure MUST NOT be forwarded to that instance's
+  children. An array value does not use this failure: a miss on an element
+  stays quiet.
 - Several children that handle one `send down` MUST each receive one send,
   independently.
 - A component MUST NOT send a message by calling another instance as a
@@ -193,14 +201,16 @@ export scene Main {
 
 ### Sending
 
-- `send to name V…` sends the message to the named port, or offers it to
-  each instance in the array field `name`. `field trees: [Tree*] = []` then
+- `send to name V…` sends the message to the named port, or to the field
+  `name`. A field whose value is an array offers the message to each
+  instance in that array. `field trees: [Tree*] = []` then
   `send to trees @Season @Summer` offers that message to each element.
   `[Tree*]` is an array of zero or more `Tree` instances. An element with
-  no matching handler ignores the offer. An empty array succeeds. The array
-  is the field's value: the send does not construct a child and does not
-  fill a port. `send to` one named port still fails when that child has no
-  handler.
+  no matching handler ignores the offer. An empty array succeeds. A field
+  whose value is not an array sends the message to that one value. The
+  field is a value: the send does not construct a child and does not fill
+  a port. `send to` one named port, and `send to` one non-array field,
+  still fail when that instance has no handler.
 - `send down V…` offers the message to every direct child. A child with no
   matching `on down` ignores it. A component name before the message is not
   a selector. `send down` does not take a filter.
@@ -855,16 +865,18 @@ MUST `send up` the symbol `Pong` and `7`, and `Ping.heard` MUST be `7`.
   `{}` stays the body. Kith allows
   comma-optional Over entries that still project Uffda Over.
 - **`send to` / `send down` / `send up` / `send self`.** A named port is not
-  a kind. `to` names the port, or an array field whose elements are
-  instances the field already holds. The array is not a filter and not a
-  port fill: the send does not construct those instances. An element that
-  does not match `on down` ignores the offer, including when the array is
-  empty, because the sender did not name one child. A port still names one
-  child, and that child missing a handler still fails the send. `down`
-  offers the message to every direct child, and a child that does not match
-  `on down` ignores the offer. `up` is the ancestor chain and does not take
-  a filter. `self` is this instance on a later turn. A missing route would
-  look like a parent sending down.
+  a kind. `to` names the port, or a field the instance already holds. An
+  array value offers the message to each element. An element that does not
+  match `on down` ignores the offer, including when the array is empty,
+  because the sender did not name one recipient. A value that is not an
+  array sends to that one instance, and that instance missing a handler
+  fails the send. The send does not fail because the field is not an array,
+  and it does not construct those instances or fill a port. A port still
+  names one child, and that child missing a handler still fails the send.
+  `down` offers the message to every direct child, and a child that does
+  not match `on down` ignores the offer. `up` is the ancestor chain and
+  does not take a filter. `self` is this instance on a later turn. A
+  missing route would look like a parent sending down.
 - **Unreachability, not a destructor.** A handler on destroy would send and
   change state while the instance is already going away. Dropping the
   instance between turns cancels work and leaves mail that was already

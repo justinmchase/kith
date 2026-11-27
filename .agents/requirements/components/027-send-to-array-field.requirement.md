@@ -1,22 +1,23 @@
 ---
 id: components-027
-title: send to an array field offers the message to each element
+title: send to a field sends to one value or offers each array element
 spec_ref:
   - .agents/specifications/components.spec.md#routing
   - .agents/specifications/components.spec.md#sending
   - .agents/specifications/components.spec.md#identity-and-lifetime
 ---
 
-# send to an array field offers the message to each element
+# send to a field sends to one value or offers each array element
 
 ## Requirement
 
 Preconditions:
 
-- A component declares `field trees: [Tree*] = []` and may declare a port
-  `child: Quiet` filled by the scene, plus an unnamed `Quiet` sibling.
-- `trees` is a field value. It is not a port. Storing an instance in the
-  array does not add a child and does not fill a port.
+- A component declares `field trees: [Tree*] = []` and `field one: any = null`,
+  and may declare a port `child: Quiet` filled by the scene, plus an unnamed
+  `Quiet` sibling.
+- `trees` and `one` are field values. They are not ports. Storing an
+  instance in either field does not add a child and does not fill a port.
 - A name is not both a field and a port.
 - `send down` does not take a component name. `send up` does not take a
   filter.
@@ -31,13 +32,19 @@ Expected behavior:
 - `send to child V` MUST still fail with a diagnostic naming that child
   when `child` has no matching handler. The diagnostic contains
   `unmatched down` and the child's kind.
-- A field value that is not an array MUST fail the send with a diagnostic
-  containing `is not an array`. An element that is not an instance MUST
-  fail the send with a diagnostic containing `is not an instance`. The
-  turn MUST NOT commit.
+- `send to one V`, when `one` holds a single instance, MUST send `V` to
+  that instance. The send MUST NOT fail because the value is not an array.
+- That instance with no matching `on down` MUST fail the send with a
+  diagnostic containing `unmatched down` and the instance's kind. The
+  failure MUST NOT be forwarded to that instance's children.
+- A field value that is neither an array nor an instance MUST fail the
+  send with a diagnostic containing `is not an instance`. The diagnostic
+  MUST NOT contain `is not an array`. An element that is not an instance
+  MUST fail the send with a diagnostic containing `is not an instance`.
+  The turn MUST NOT commit.
 - The send MUST NOT construct a child and MUST NOT fill a port. After
-  `send to trees`, a `Tree` stored in the field is still not a child.
-  The instance MUST stay reachable because the field holds it.
+  `send to trees` or `send to one`, a `Tree` stored in the field is still
+  not a child. The instance MUST stay reachable because the field holds it.
 - `send down V` MUST still offer `V` to every direct child and MUST NOT
   fail when a child ignores it. It MUST NOT offer `V` only to the array.
   A direct child that is not an element does not receive `send to trees`.
@@ -52,7 +59,11 @@ Expected behavior:
 Postconditions:
 
 - Tests: `tests/interpreter.rs` (`req:components-027`). The test source
-  is Kith. An empty array succeeds. One awake `Tree` counts the offer and
-  one asleep `Tree` ignores it. `send to` the quiet port fails unmatched.
-  `send down` still reaches both direct children and not the field
-  instances. A non-array field and a non-instance element fail the send.
+  is Kith. An empty array succeeds. One awake `Tree` in the array counts
+  the offer and one asleep `Tree` ignores it. `send to` one non-array
+  field delivers to that awake `Tree`, and fails unmatched when that
+  `Tree` has no handler. `send to` the
+  quiet port fails unmatched. `send down` still reaches both direct
+  children and not the field instances. A non-instance element and a
+  non-instance field value fail the send, and neither diagnostic says the
+  field is not an array.

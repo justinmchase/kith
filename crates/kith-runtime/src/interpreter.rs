@@ -1251,12 +1251,13 @@ impl World {
                             &mut sends,
                         )?;
                     } else if self.instances[&id].fields.contains_key(port) {
-                        for target in self.array_field_targets(id, port)? {
+                        let (targets, route) = self.field_targets(id, port)?;
+                        for target in targets {
                             self.enqueue_send(
                                 target,
                                 message,
                                 after.as_ref(),
-                                Route::Offer,
+                                route,
                                 &bindings,
                                 &mut sends,
                             )?;
@@ -1708,24 +1709,56 @@ impl World {
         Ok(created)
     }
 
-    fn array_field_targets(&self, id: ActorId, name: &str) -> Result<Vec<ActorId>, Error> {
+    /// Store one instance in `field`. It is a field value: not a child,
+    /// and not a port fill. It is parented to `id`.
+    #[doc(hidden)]
+    pub fn hold_field_instance(
+        &mut self,
+        id: ActorId,
+        field: &str,
+        kind: &str,
+    ) -> Result<ActorId, Error> {
+        if !self
+            .instances
+            .get(&id)
+            .is_some_and(|instance| instance.fields.contains_key(field))
+        {
+            return Err(Error::new(format!("unknown field {field}")));
+        }
+        let created = self.spawn_kind(kind, Some(id), &[])?;
+        let value = instance_ref(created);
+        let projected = project(&value)?;
+        let instance = self.instances.get_mut(&id).expect("holder");
+        instance.fields.insert(field.to_string(), value);
+        instance.field_json.insert(field.to_string(), projected);
+        self.deliver(created, doc::null(), Route::Init)?;
+        Ok(created)
+    }
+
+    /// An array value is an offer to each element. Any other value is one
+    /// send to that instance. A non-instance fails either way.
+    fn field_targets(&self, id: ActorId, name: &str) -> Result<(Vec<ActorId>, Route), Error> {
         let value = self.instances[&id]
             .fields
             .get(name)
             .ok_or_else(|| Error::new(format!("unknown field {name}")))?;
-        let Some(items) = doc::items(value) else {
-            return Err(Error::new(format!("send to {name} is not an array")));
-        };
-        let mut targets = Vec::with_capacity(items.len());
-        for item in items {
-            let Some(target) = instance_id(&item) else {
-                return Err(Error::new(format!(
-                    "send to {name} element is not an instance"
-                )));
+        if let Some(items) = doc::items(value) {
+            let mut targets = Vec::with_capacity(items.len());
+            for item in items {
+                let Some(target) = instance_id(&item) else {
+                    return Err(Error::new(format!(
+                        "send to {name} element is not an instance"
+                    )));
+                };
+                targets.push(target);
+            }
+            Ok((targets, Route::Offer))
+        } else {
+            let Some(target) = instance_id(value) else {
+                return Err(Error::new(format!("send to {name} is not an instance")));
             };
-            targets.push(target);
+            Ok((vec![target], Route::Down))
         }
-        Ok(targets)
     }
 
     fn drive(

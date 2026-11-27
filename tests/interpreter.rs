@@ -3072,6 +3072,7 @@ component Forest {
   field heard: number = 0;
   field bag: any = [];
   field note: number = 0;
+  field one: any = null;
   child: Quiet;
   leaf: Leaf;
 
@@ -3093,7 +3094,14 @@ component Forest {
       send to bag @No;
     }
     on down @Num {
+      heard -> 1;
       send to note @No;
+    }
+    on down @One {
+      send to one @Season @Summer;
+    }
+    on down @OneMiss {
+      send to one @Season @Summer;
     }
     on down @Filter {
       send to leaf @Up;
@@ -3210,8 +3218,50 @@ export scene Main {
 
     let mut note = start(&program);
     note.inject_document(kith::doc::symbol("Num")).unwrap();
-    let err = note.run_until_idle().expect_err("a non-array field fails");
-    assert!(err.message.contains("is not an array"), "{}", err.message);
+    let err = note
+        .run_until_idle()
+        .expect_err("a non-instance field value fails");
+    assert!(
+        err.message.contains("is not an instance"),
+        "{}",
+        err.message
+    );
+    assert!(!err.message.contains("is not an array"), "{}", err.message);
+    assert_eq!(note.field(note.root_id(), "heard"), Some(&json!(0.0)));
+
+    let mut one = start(&program);
+    let root = one.root_id();
+    let tree = one
+        .hold_field_instance(root, "one", "Tree")
+        .expect("hold one");
+    one.run_until_idle().expect("one init");
+    assert!(one.children_of_kind(root, "Tree").is_empty());
+    assert!(one.child(root, "one").is_none());
+    one.inject_document(kith::doc::symbol("One")).unwrap();
+    one.run_until_idle()
+        .expect("send to a non-array field sends to that value");
+    assert_eq!(one.field(tree, "kept"), Some(&json!(1.0)));
+    assert!(one.children_of_kind(root, "Tree").is_empty());
+
+    let mut one_miss = start(&program);
+    let root = one_miss.root_id();
+    let tree = one_miss
+        .hold_field_instance(root, "one", "Tree")
+        .expect("hold one");
+    one_miss.run_until_idle().expect("one init");
+    one_miss
+        .send_document(tree, kith::doc::symbol("Sleep"))
+        .unwrap();
+    one_miss.run_until_idle().expect("sleep one");
+    one_miss
+        .inject_document(kith::doc::symbol("OneMiss"))
+        .unwrap();
+    let err = one_miss
+        .run_until_idle()
+        .expect_err("one value with no handler fails");
+    assert!(err.message.contains("unmatched down"), "{}", err.message);
+    assert!(err.message.contains("Tree"), "{}", err.message);
+    assert_eq!(one_miss.field(tree, "kept"), Some(&json!(0.0)));
 
     let mut filtered = start(&program);
     filtered
